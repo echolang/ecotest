@@ -21,7 +21,9 @@ public struct GitDiff
             if ($line->starts('+++ ')) {
                 $file = '';
                 if ($line->starts('+++ b/')) {
-                    $file = $line->sub(6, $line->size() - 6);
+                    // clone: a string made from a str::lines part does not keep $text alive, and
+                    // the path outlives it once git's output is dropped
+                    $file = $line->sub(6, $line->size() - 6)->clone();
                     $this->files[] = ChangedFile($file);
                 }
                 continue;

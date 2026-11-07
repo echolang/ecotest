@@ -66,18 +66,24 @@ public struct FileCoverage
     }
 
     /**
-     * Up to `$n` of `$files` with lines that never ran, least covered first.
+     * Where in `$files` the up to `$n` files with lines that never ran are, least covered first.
      */
-    public static function worst(const array<FileCoverage>& $files, usize $n) : array<FileCoverage>
+    public static function worst(const array<FileCoverage>& $files, usize $n) : array<usize>
     {
-        array<FileCoverage> $byLines = $files;
-        $byLines->sort(key: (const FileCoverage& $f) : float64 => $f->lineTotals()->percent());
+        // each file's lines are totalled once, not on every comparison, and no file is copied
+        array<Ranked> $missing = [];
+        for (usize $i = 0; $i < $files->count(); $i++) {
+            $r = $files[$i]->lineTotals();
+            if ($r->hit < $r->total) {
+                $missing[] = Ranked($r->percent(), $i);
+            }
+        }
+        $missing->sort(key: (const Ranked& $f) : float64 => $f->percent);
 
-        array<FileCoverage> $out = [];
-        foreach ($byLines as const &$file) {
-            $r = $file->lineTotals();
-            if ($r->hit < $r->total && $out->count() < $n) {
-                $out[] = $file;
+        array<usize> $out = [];
+        foreach ($missing as const &$f) {
+            if ($out->count() < $n) {
+                $out[] = $f->index;
             }
         }
         return $out;
@@ -138,4 +144,13 @@ public struct FileCoverage
 
         return $out;
     }
+}
+
+/**
+ * A file's place in the list it came from, and its line percentage.
+ */
+private struct Ranked
+{
+    public float64 $percent;
+    public usize $index;
 }

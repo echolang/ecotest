@@ -56,15 +56,27 @@ public function plural(usize $n, const string& $one, const string& $many) : stri
 }
 
 /**
+ * Where the last `$byte` in `$text` is, or its size when there is none.
+ */
+public function last(const string& $text, uint8 $byte) : usize
+{
+    usize $at = $text->size();
+    for (usize $i = 0; $i < $text->size(); $i++) {
+        if ($text->byte($i) == $byte) {
+            $at = $i;
+        }
+    }
+    return $at;
+}
+
+/**
  * The last segment of `$path`.
  */
 public function base(const string& $path) : string
 {
-    usize $from = 0;
-    for (usize $i = 0; $i < $path->size(); $i++) {
-        if ($path->byte($i) == 47) {
-            $from = $i + 1;
-        }
+    usize $slash = last($path, 47);
+    if ($slash == $path->size()) {
+        return $path;
     }
-    return $path->sub($from, $path->size() - $from);
+    return $path->sub($slash + 1, $path->size() - $slash - 1);
 }

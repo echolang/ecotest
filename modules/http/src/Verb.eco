@@ -30,13 +30,6 @@ public enum Verb
      */
     public const function word() : string
     {
-        return match ($this) {
-            .get => 'GET',
-            .head => 'HEAD',
-            .post => 'POST',
-            .put => 'PUT',
-            .patch => 'PATCH',
-            .delete => 'DELETE',
-        };
+        return $this->curl()->value();
     }
 }

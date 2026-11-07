@@ -18,9 +18,9 @@ public class Coverage
 
     public array<string> $exclude = [];
 
-    public constructor(const CoverageMap& $map)
+    public constructor(CoverageMap $map)
     {
-        $this->map = $map;
+        $this->map = mv $map;
     }
 
     /**
@@ -41,13 +41,16 @@ public class Coverage
             $covDir = std::env::join($passDir, 'coverage');
             $pass++;
 
-            $map = guard CoverageMap::load(std::env::join($covDir, 'map.json')) else {
-                continue;
-            };
+            // every pass compiled the same build, so the first map found is the map
+            if ($found == null) {
+                $map = guard CoverageMap::load(std::env::join($covDir, 'map.json')) else {
+                    continue;
+                };
+                $found = Coverage(mv $map);
+            }
 
-            $into = $found ?? Coverage($map);
+            $into = guard $found;
             $into->absorb(std::env::join($covDir, 'tests'));
-            $found = $into;
         }
 
         return $found;

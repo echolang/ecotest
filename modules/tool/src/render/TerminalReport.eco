@@ -23,7 +23,8 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
     $c = $run->counts();
     $secs = $run->seconds();
 
-    $out->append("ecotest   {$c->total} tests: {$c->pass} passed, {$c->fail} failed, {$c->skip} skipped, {$c->flaky} flaky in {$secs:.2f} s");
+    usize $failed = $c->failed();
+    $out->append("ecotest   {$c->total} tests: {$c->pass} passed, {$failed} failed, {$c->skip} skipped, {$c->flaky} flaky in {$secs:.2f} s");
     if ($run->passes > 1) {
         $out->append(" over {$run->passes} passes");
     }
@@ -174,9 +175,10 @@ private function coverage(string& $out, const array<FileCoverage>& $files, Total
         return;
     };
 
-    $out->append("coverage  {$t->lines} lines, {$t->branches} branches, {$t->functions} functions\n");
+    $out->append("coverage  {$t}\n");
 
-    foreach (FileCoverage::worst($files, TOP) as const &$file) {
+    foreach (FileCoverage::worst($files, TOP) as $i) {
+        const FileCoverage& $file = $files[$i];
         $r = $file->lineTotals();
         $missed = text::cut($file->missedRanges());
         $out->append("          {$r:>6}  {$file->file}  missing {$missed}\n");

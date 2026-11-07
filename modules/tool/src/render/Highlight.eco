@@ -10,15 +10,24 @@ use ecotest::cli::escape;
 
 /**
  * The class of every keyword and built-in type. A constant map is built wherever it is named, so
- * a line binds it once.
+ * a caller highlighting many lines binds it once and passes it to each.
  */
-private const map<string, string> WORDS = ['namespace' => 'k', 'use' => 'k', 'public' => 'k', 'private' => 'k', 'internal' => 'k', 'static' => 'k', 'const' => 'k', 'function' => 'k', 'class' => 'k', 'struct' => 'k', 'enum' => 'k', 'interface' => 'k', 'test' => 'k', 'return' => 'k', 'if' => 'k', 'else' => 'k', 'foreach' => 'k', 'for' => 'k', 'while' => 'k', 'match' => 'k', 'guard' => 'k', 'as' => 'k', 'throw' => 'k', 'true' => 'k', 'false' => 'k', 'null' => 'k', 'string' => 't', 'bool' => 't', 'void' => 't', 'usize' => 't', 'int8' => 't', 'int16' => 't', 'int32' => 't', 'int64' => 't', 'uint8' => 't', 'uint16' => 't', 'uint32' => 't', 'uint64' => 't', 'float32' => 't', 'float64' => 't', 'array' => 't', 'map' => 't', 'result' => 't'];
+public const map<string, string> WORDS = ['namespace' => 'k', 'use' => 'k', 'public' => 'k', 'private' => 'k', 'internal' => 'k', 'static' => 'k', 'const' => 'k', 'function' => 'k', 'class' => 'k', 'struct' => 'k', 'enum' => 'k', 'interface' => 'k', 'test' => 'k', 'return' => 'k', 'if' => 'k', 'else' => 'k', 'foreach' => 'k', 'for' => 'k', 'while' => 'k', 'match' => 'k', 'guard' => 'k', 'as' => 'k', 'throw' => 'k', 'true' => 'k', 'false' => 'k', 'null' => 'k', 'string' => 't', 'bool' => 't', 'void' => 't', 'usize' => 't', 'int8' => 't', 'int16' => 't', 'int32' => 't', 'int64' => 't', 'uint8' => 't', 'uint16' => 't', 'uint32' => 't', 'uint64' => 't', 'float32' => 't', 'float64' => 't', 'array' => 't', 'map' => 't', 'result' => 't'];
 
 /**
- * `$line` onto `$out`, escaped and split into spans. A line that opens or continues a block
- * comment is one comment span.
+ * `$line` onto `$out`, escaped and split into spans.
  */
 public function line(string& $out, const string& $line) : void
+{
+    $words = WORDS;
+    line($out, $line, $words);
+}
+
+/**
+ * `$line` onto `$out`, escaped and split into spans, with keywords and types from `$words`
+ * (`WORDS`). A line that opens or continues a block comment is one comment span.
+ */
+public function line(string& $out, const string& $line, const map<string, string>& $words) : void
 {
     usize $n = $line->size();
     usize $lead = 0;
@@ -33,7 +42,6 @@ public function line(string& $out, const string& $line) : void
         return;
     }
 
-    $words = WORDS;
     usize $i = 0;
 
     while ($i < $n) {

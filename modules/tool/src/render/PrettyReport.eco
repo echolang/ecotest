@@ -260,7 +260,8 @@ private function coverage(string& $out, const Look& $look, const array<FileCover
     meter($out, $look, under(), 'branches', $t->branches);
     meter($out, $look, under(), 'functions', $t->functions);
 
-    foreach (FileCoverage::worst($files, terminal::TOP) as const &$file) {
+    foreach (FileCoverage::worst($files, terminal::TOP) as $i) {
+        const FileCoverage& $file = $files[$i];
         $r = $file->lineTotals();
         $ranges = text::cut($file->missedRanges());
         $missed = $look->mute("missing {$ranges}");
@@ -299,8 +300,9 @@ private function verdict(const Look& $look, const Run& $run, bool $ok) : string
     }
 
     array<string> $parts = [$look->paint("{$c->pass} passed", command::SGR_SUCCESS)];
-    if ($c->fail > 0) {
-        $parts[] = $look->paint("{$c->fail} failed", command::SGR_ERROR);
+    usize $failed = $c->failed();
+    if ($failed > 0) {
+        $parts[] = $look->paint("{$failed} failed", command::SGR_ERROR);
     }
     if ($c->skip > 0) {
         $parts[] = $look->paint("{$c->skip} skipped", command::SGR_WARNING);

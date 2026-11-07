@@ -18,11 +18,6 @@ public class TestRecord
     public string $name = '';
     public string $group = '';
 
-    /**
-     * The pass this record was last folded in, counting from 1. Its events describe that pass.
-     */
-    public usize $pass = 0;
-
     public Outcome $outcome = .pass;
 
     /**

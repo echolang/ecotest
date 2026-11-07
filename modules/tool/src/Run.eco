@@ -104,7 +104,6 @@ public class Run
         $test->file = Run::relative(doc::text($row, 'file'), Run::projectOf($this->dir));
         $test->name = doc::text($row, 'name');
         $test->group = doc::text($row, 'group');
-        $test->pass = $this->passes;
         $test->attempts[] = Attempt(.of(doc::text($row, 'status')), doc::number($row, 'ms'));
         $test->output = doc::text($row, 'output');
 
@@ -184,35 +183,32 @@ public class Run
     }
 
     /**
-     * How many tests ended with `$outcome`.
-     */
-    public const function count(Outcome $outcome) : usize
-    {
-        usize $n = 0;
-        foreach ($this->tests as const &$test) {
-            if ($test->outcome == $outcome) {
-                $n++;
-            }
-        }
-        return $n;
-    }
-
-    /**
-     * How many tests passed, broke, skipped and flaked, and how many there are.
+     * How many tests ended with each outcome, and how many there are.
      */
     public const function counts() : Counts
     {
         $c = Counts();
         foreach ($this->tests as const &$test) {
-            if ($test->outcome->broken()) {
-                $c->fail++;
-            } else if ($test->outcome == Outcome::pass) {
-                $c->pass++;
-            } else if ($test->outcome == Outcome::skip) {
-                $c->skip++;
-            } else {
-                $c->flaky++;
-            }
+            match ($test->outcome) {
+                .pass => {
+                    $c->pass++;
+                },
+                .fail => {
+                    $c->fail++;
+                },
+                .skip => {
+                    $c->skip++;
+                },
+                .flaky => {
+                    $c->flaky++;
+                },
+                .timeout => {
+                    $c->timeout++;
+                },
+                .signal => {
+                    $c->signal++;
+                },
+            };
         }
         $c->total = $this->tests->count();
         return $c;
@@ -267,20 +263,6 @@ public class Run
     }
 
     /**
-     * How many assertions the tests last run in pass `$pass` made through ecotest.
-     */
-    public const function assertions(inPass: usize $pass) : int64
-    {
-        int64 $n = 0;
-        foreach ($this->tests as const &$test) {
-            if ($test->pass == $pass) {
-                $n = $n + $test->events->checks;
-            }
-        }
-        return $n;
-    }
-
-    /**
      * How many tests used ecotest, so their assertions were counted.
      */
     public const function asserting() : usize
@@ -288,20 +270,6 @@ public class Run
         usize $n = 0;
         foreach ($this->tests as const &$test) {
             if ($test->events->usedEcotest) {
-                $n++;
-            }
-        }
-        return $n;
-    }
-
-    /**
-     * How many of the tests last run in pass `$pass` used ecotest.
-     */
-    public const function asserting(inPass: usize $pass) : usize
-    {
-        usize $n = 0;
-        foreach ($this->tests as const &$test) {
-            if ($test->events->usedEcotest && $test->pass == $pass) {
                 $n++;
             }
         }

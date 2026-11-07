@@ -38,12 +38,6 @@ test a_service_url_variable_is_upper_case
     expect($spec->variable())->is('ECOTEST_MY_API_URL');
 }
 
-test a_service_waits_at_most_its_delay_or_its_probe_timeout
-{
-    expect(Readiness::delay(20)->limit())->is(20);
-    expect(Readiness::http('http://h:1', 500)->limit())->is(500);
-}
-
 test ratios_print_one_decimal
 {
     $third = Ratio(1, 3);
@@ -102,16 +96,13 @@ test a_later_pass_starts_from_a_clean_record
     $run->begin();
     $row = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"pass"}');
     $run->fold($row, $dir->file('one'));
-    expect($run->asserting(inPass: 1))->is(1);
-    expect($run->assertions(inPass: 1))->is(5);
+    expect($run->asserting())->is(1);
+    expect($run->assertions())->is(5);
 
     $run->begin();
     $timeout = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"timeout"}');
     $t = guard $run->fold($timeout, $dir->file('two'));
-    expect($t->pass)->is(2);
-    expect($run->asserting(inPass: 1))->is(0);
-    expect($run->asserting(inPass: 2))->is(0);
-    expect($run->assertions(inPass: 1))->is(0);
+    expect($run->asserting())->is(0);
     expect($run->assertions())->is(0);
 
     // nothing the first pass wrote describes the second

@@ -213,7 +213,7 @@ public class Reply
      * Every value at `$path` passes `$test`. `says:` names what they should be.
      */
     #[caller]
-    public const function matches(const string& $path, function<bool(const json::Value&)> $test, says: const string? $what = null) : Reply
+    public const function matches(const string& $path, function<bool(const json::Value&)> $test, says: const string& $what = '') : Reply
     {
         $d = guard $this->document(std::src::caller()) else {
             return $this;
@@ -229,9 +229,8 @@ public class Reply
             if (!$test($value)) {
                 $shown = "{$value}";
                 $summary = "{$path} = {$shown} failed the test";
-                if ($what != null) {
-                    $w = guard $what;
-                    $summary = "expected {$path} to be {$w}, got {$shown}";
+                if (!$what->empty()) {
+                    $summary = "expected {$path} to be {$what}, got {$shown}";
                 }
                 $this->fail($summary, std::src::caller());
                 return $this;
@@ -250,13 +249,11 @@ public class Reply
         $at = std::src::caller();
 
         $d = guard $this->document($at) else {
-            $failure = ecotest::Failure("cannot capture {$path}: the body is not JSON", $at, $detail: $this->exchange());
-            die(ecotest::Session::report(mv $failure), $at);
+            die($this->stopped("cannot capture {$path}: the body is not JSON", $at), $at);
         };
 
         $v = guard jsonpath::one($d, $path) else {
-            $failure = ecotest::Failure("cannot capture {$path}: nothing there", $at, $detail: $this->exchange());
-            die(ecotest::Session::report(mv $failure), $at);
+            die($this->stopped("cannot capture {$path}: nothing there", $at), $at);
         };
 
         return $v->asStr() ?? "{$v}";
@@ -382,6 +379,14 @@ public class Reply
     private const function fail(const string& $summary, std::src::location $at) : void
     {
         ecotest::Failure($summary, $at, $detail: $this->exchange())->raise();
+    }
+
+    /**
+     * Reports a failure with the exchange as the detail, for a check that stops the test.
+     */
+    private const function stopped(const string& $summary, std::src::location $at) : string
+    {
+        return ecotest::Session::report(ecotest::Failure($summary, $at, $detail: $this->exchange()));
     }
 
     /**

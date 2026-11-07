@@ -12,8 +12,8 @@ use ecotest::cli::escape;
 public function render(const Run& $run) : string
 {
     $c = $run->counts();
-    usize $failures = $run->count(.fail) + $run->count(.flaky);
-    usize $errors = $run->count(.timeout) + $run->count(.signal);
+    usize $failures = $c->fail + $c->flaky;
+    usize $errors = $c->timeout + $c->signal;
     $secs = $run->seconds();
 
     $out = '<?xml version="1.0" encoding="UTF-8"?>\n';

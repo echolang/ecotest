@@ -115,7 +115,7 @@ private function filters(const Run& $run, const string& $cls) : string
     $c = $run->counts();
     array<Filter> $filters = [
         Filter('all', 'All', $c->total, ''),
-        Filter('failed', 'Failed', $c->fail, 'bad'),
+        Filter('failed', 'Failed', $c->failed(), 'bad'),
         Filter('flaky', 'Flaky', $c->flaky, 'warn'),
         Filter('skip', 'Skipped', $c->skip, ''),
         Filter('pass', 'Passed', $c->pass, ''),
@@ -165,7 +165,7 @@ private function hero(string& $out, const Run& $run, Totals? $totals, const Verd
     $c = $run->counts();
     usize $total = $c->total;
     usize $passed = $c->pass;
-    usize $failed = $c->fail;
+    usize $failed = $c->failed();
     usize $skipped = $c->skip;
     usize $flaky = $c->flaky;
     usize $stopped = $run->stopped();
@@ -485,6 +485,7 @@ private function source(string& $out, const FileCoverage& $file, const string& $
 
     // a source gone since the run shows empty
     $text = doc::read($file->path) ?? '';
+    $words = highlight::WORDS;
     int64 $number = 0;
 
     foreach (str::split($text, '\n') as const &$line) {
@@ -503,7 +504,7 @@ private function source(string& $out, const FileCoverage& $file, const string& $
         }
 
         $out->append("<div class=\"row {$cls}\"><span class=\"ln\">{$number}</span><span class=\"hits\">{$count}</span><code>");
-        highlight::line($out, string($line));
+        highlight::line($out, string($line), $words);
         $out->append('</code></div>');
     }
 

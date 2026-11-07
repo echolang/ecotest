@@ -39,16 +39,11 @@ public struct Body
      */
     public constructor(form: const map<string, string>& $fields)
     {
-        string $out = '';
+        $query = curl::Query();
         foreach ($fields as $key => const &$value) {
-            if (!$out->empty()) {
-                $out->append('&');
-            }
-            $out->append(curl::escape($key));
-            $out->append('=');
-            $out->append(curl::escape($value));
+            $query->add($key, $value);
         }
-        $this->text = mv $out;
+        $this->text = $query->encode();
         $this->type = 'application/x-www-form-urlencoded';
     }
 

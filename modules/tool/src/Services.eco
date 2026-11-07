@@ -98,9 +98,19 @@ public class Services
             };
             $this->running[] = mv $child;
 
-            if (!Services::ready($spec->ready)) {
-                return .error(.notReady($spec->name, $spec->ready->limit(), $logPath));
-            }
+            // ready after its fixed delay, or once its URL answers in time
+            match ($spec->ready) {
+                .delay($ms) => {
+                    if ($ms > 0) {
+                        std::time::sleep(std::time::duration::millis($ms));
+                    }
+                },
+                .http($url, $timeoutMs) => {
+                    if (!Services::poll($url, $timeoutMs)) {
+                        return .error(.notReady($spec->name, $timeoutMs, $logPath));
+                    }
+                },
+            };
 
             if (!$spec->url->empty()) {
                 $this->env->set($spec->variable(), $spec->url);
@@ -158,29 +168,6 @@ public class Services
         }
 
         return $out;
-    }
-
-    /**
-     * Waits until a service is `$ready`: its fixed delay, or a 2xx or 3xx from its ready URL in
-     * time. False when the URL never answered.
-     */
-    private static function ready(const Readiness& $ready) : bool
-    {
-        return match ($ready) {
-            .delay($ms) => Services::pause($ms),
-            .http($url, $timeoutMs) => Services::poll($url, $timeoutMs),
-        };
-    }
-
-    /**
-     * Sleeps `$ms` milliseconds, none for 0. Always true: a delay cannot fail.
-     */
-    private static function pause(int64 $ms) : bool
-    {
-        if ($ms > 0) {
-            std::time::sleep(std::time::duration::millis($ms));
-        }
-        return true;
     }
 
     /**

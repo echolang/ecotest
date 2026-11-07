@@ -14,15 +14,4 @@ public enum Readiness
      * Ready after a fixed `$ms` milliseconds; 0 is ready at once.
      */
     case delay(int64 $ms);
-
-    /**
-     * The longest the run waits for the service, in milliseconds.
-     */
-    public const function limit() : int64
-    {
-        return match ($this) {
-            .http($url, $timeoutMs) => $timeoutMs,
-            .delay($ms) => $ms,
-        };
-    }
 }

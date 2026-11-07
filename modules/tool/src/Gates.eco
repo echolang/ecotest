@@ -23,7 +23,7 @@ public struct Gates
         // no diff to measure has nothing to fall short of: a ratio over no lines reads as whole
         Gates::hold($failed, 'diff', $diff ?? Ratio(), $this->minDiff);
 
-        Gates::allow($failed, $run->count(.flaky) as int64, $this->maxFlaky);
+        Gates::allow($failed, $run->counts()->flaky as int64, $this->maxFlaky);
 
         return Verdict(on: $run, gates: $this, failed: $failed);
     }

@@ -20,7 +20,8 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
 
     $out = "## Tests {$word}\n\n";
     $out->append('| passed | failed | skipped | flaky | time |\n|---:|---:|---:|---:|---:|\n');
-    $out->append("| {$c->pass} | {$c->fail} | {$c->skip} | {$c->flaky} | {$run->wallMs} ms |\n\n");
+    usize $failed = $c->failed();
+    $out->append("| {$c->pass} | {$failed} | {$c->skip} | {$c->flaky} | {$run->wallMs} ms |\n\n");
 
     coverage($out, $totals);
 
@@ -86,5 +87,5 @@ private function coverage(string& $out, Totals? $totals) : void
         return;
     };
 
-    $out->append("**Coverage:** {$t->lines} lines, {$t->branches} branches, {$t->functions} functions\n\n");
+    $out->append("**Coverage:** {$t}\n\n");
 }

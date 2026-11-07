@@ -16,13 +16,14 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
     $doc['passes'] = json::int($run->passes as int64);
     $doc['green'] = json::bool($verdict->green);
 
+    $c = $run->counts();
     $counts = json::object();
-    $counts['pass'] = json::int($run->count(.pass) as int64);
-    $counts['fail'] = json::int($run->count(.fail) as int64);
-    $counts['skip'] = json::int($run->count(.skip) as int64);
-    $counts['flaky'] = json::int($run->count(.flaky) as int64);
-    $counts['timeout'] = json::int($run->count(.timeout) as int64);
-    $counts['signal'] = json::int($run->count(.signal) as int64);
+    $counts['pass'] = json::int($c->pass as int64);
+    $counts['fail'] = json::int($c->fail as int64);
+    $counts['skip'] = json::int($c->skip as int64);
+    $counts['flaky'] = json::int($c->flaky as int64);
+    $counts['timeout'] = json::int($c->timeout as int64);
+    $counts['signal'] = json::int($c->signal as int64);
     $doc['counts'] = mv $counts;
 
     $tests = json::arr();

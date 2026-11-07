@@ -1,6 +1,6 @@
 namespace ecotest::cli;
 
-use ecotest::cli::{doc, files, history, html, junit, lcov, markdown, pretty, runjson, terminal};
+use ecotest::cli::{doc, files, history, html, junit, lcov, markdown, pretty, runjson, terminal, text};
 
 /**
  * The commands of the ecotest tool, behind the argument parsing in `main`. Runs live under
@@ -283,12 +283,7 @@ public class Tool
      */
     public function who(const string& $spec) : int32
     {
-        usize $colon = $spec->size();
-        for (usize $i = 0; $i < $spec->size(); $i++) {
-            if ($spec->byte($i) == 58) {
-                $colon = $i;
-            }
-        }
+        usize $colon = text::last($spec, 58);
 
         if ($colon == $spec->size()) {
             std::io::println('ecotest: expected <file:line>, for example src/date.eco:42');
@@ -383,29 +378,20 @@ public class Tool
         $diff = $this->changed($files);
         $verdict = $this->gates->check($run, $totals, $diff);
 
-        // each report's text by the path it is written to, in the order they are written
-        ordered_map<string, string> $reports = [];
-        $reports->set(std::env::join($dir, 'run.json'), runjson::render($run, $files, $totals, $verdict));
-        $reports->set(std::env::join($dir, 'summary.md'), markdown::render($run, $files, $totals, $verdict));
-        $reports->set(std::env::join($dir, 'junit.xml'), junit::render($run));
+        // every report is attempted, each rendered as it is written; one that could not be written
+        // fails the run once it is shown
+        usize $unwritten = 0;
+        Tool::store(std::env::join($dir, 'run.json'), runjson::render($run, $files, $totals, $verdict), $unwritten);
+        Tool::store(std::env::join($dir, 'summary.md'), markdown::render($run, $files, $totals, $verdict), $unwritten);
+        Tool::store(std::env::join($dir, 'junit.xml'), junit::render($run), $unwritten);
         if (!$files->empty()) {
-            $reports->set(std::env::join($dir, 'lcov.info'), lcov::render($files));
+            Tool::store(std::env::join($dir, 'lcov.info'), lcov::render($files), $unwritten);
         }
 
         $report = '';
         if ($this->html) {
             $report = std::env::join($dir, 'report.html');
-            $reports->set($report, html::render($run, $files, $totals, $verdict));
-        }
-
-        // every report is attempted; one that could not be written fails the run once it is shown
-        usize $unwritten = 0;
-        foreach ($reports as $path => const &$text) {
-            guard files::write($path, $text) else ($e) {
-                std::io::println("ecotest: cannot write {$path}: {$e}");
-                $unwritten++;
-                continue;
-            };
+            Tool::store($report, html::render($run, $files, $totals, $verdict), $unwritten);
         }
 
         // a run the history misses is still a run: said, but not failed
@@ -425,6 +411,18 @@ public class Tool
             return 1;
         }
         return 0;
+    }
+
+    /**
+     * Writes the report `$text` to `$path`, or says why not and counts it in `$unwritten`.
+     */
+    private static function store(const string& $path, const string& $text, usize& $unwritten) : void
+    {
+        guard files::write($path, $text) else ($e) {
+            std::io::println("ecotest: cannot write {$path}: {$e}");
+            $unwritten++;
+            return;
+        };
     }
 
     /**

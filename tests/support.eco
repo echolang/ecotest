@@ -3,10 +3,17 @@
  * one test process.
  */
 
+#[if: os == windows]
+// the CRT has no setenv; _putenv_s with an empty value removes the variable
+internal extern {
+    function _putenv_s as c_putenv_s(ptr<const uint8> $name, ptr<const uint8> $value) : int32;
+}
+#[else]
 internal extern {
     function setenv as c_setenv(ptr<const uint8> $name, ptr<const uint8> $value, int32 $overwrite) : int32;
     function unsetenv as c_unsetenv(ptr<const uint8> $name) : int32;
 }
+#[end]
 
 /**
  * The summaries of what `$body` failed, in order.
@@ -25,7 +32,11 @@ internal function summaries(function<void()> $body) : array<string>
  */
 internal function setVar(const string& $name, const string& $value) : void
 {
+#[if: os == windows]
+    int32 $done = c_putenv_s($name->cstr(), $value->cstr());
+#[else]
     int32 $done = c_setenv($name->cstr(), $value->cstr(), 1);
+#[end]
 }
 
 /**
@@ -33,5 +44,9 @@ internal function setVar(const string& $name, const string& $value) : void
  */
 internal function unsetVar(const string& $name) : void
 {
+#[if: os == windows]
+    int32 $done = c_putenv_s($name->cstr(), ''->cstr());
+#[else]
     int32 $done = c_unsetenv($name->cstr());
+#[end]
 }

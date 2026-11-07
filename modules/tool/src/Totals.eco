@@ -9,3 +9,13 @@ public struct Totals
     public Ratio $branches = Ratio();
     public Ratio $functions = Ratio();
 }
+
+namespace str;
+
+/**
+ * `$t` as a sentence: `81.4% lines, 70.0% branches, 92.3% functions`.
+ */
+public function from(const ecotest::cli::Totals& $t) : string
+{
+    return "{$t->lines} lines, {$t->branches} branches, {$t->functions} functions";
+}

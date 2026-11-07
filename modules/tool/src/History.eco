@@ -17,7 +17,7 @@ public function append(const string& $path, const string& $runDir, const Run& $r
     $counts = $run->counts();
     $line['ms'] = json::int($run->wallMs);
     $line['pass'] = json::int($counts->pass as int64);
-    $line['fail'] = json::int($counts->fail as int64);
+    $line['fail'] = json::int($counts->failed() as int64);
     $line['skip'] = json::int($counts->skip as int64);
     $line['flaky'] = json::int($counts->flaky as int64);
     coverage($line, $totals);
@@ -105,10 +105,11 @@ public function render(const string& $path, usize $last) : string
         $passed = false;
         $broke = false;
         foreach ($trend->outcomes as const &$o) {
-            if ($o == 'pass') {
+            $outcome = Outcome::of($o);
+            if ($outcome == Outcome::pass) {
                 $passed = true;
             }
-            if ($o == 'fail' || $o == 'flaky' || $o == 'timeout' || $o == 'signal') {
+            if ($outcome->broken()) {
                 $broke = true;
             }
         }

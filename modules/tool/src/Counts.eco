@@ -6,13 +6,18 @@ namespace ecotest::cli;
 public struct Counts
 {
     public usize $pass = 0;
-
-    /**
-     * The tests that failed, timed out or were killed.
-     */
     public usize $fail = 0;
-
     public usize $skip = 0;
     public usize $flaky = 0;
+    public usize $timeout = 0;
+    public usize $signal = 0;
     public usize $total = 0;
+
+    /**
+     * The tests that failed, timed out or were killed: the ones that fail a run.
+     */
+    public const function failed() : usize
+    {
+        return $this->fail + $this->timeout + $this->signal;
+    }
 }

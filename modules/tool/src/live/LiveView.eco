@@ -20,6 +20,14 @@ public class LiveView
     private element::Progress? $bar = null;
     private usize $passed = 0;
     private usize $failed = 0;
+
+    /**
+     * How many of this pass's tests used ecotest, and the assertions they made: every row folded
+     * in, before the bar was drawn or not.
+     */
+    private usize $asserting = 0;
+    private int64 $assertions = 0;
+
     private std::time::instant $since = std::time::instant::now();
 
     /**
@@ -59,6 +67,8 @@ public class LiveView
         $this->passDir = $passDir;
         $this->passed = 0;
         $this->failed = 0;
+        $this->asserting = 0;
+        $this->assertions = 0;
         $this->since = std::time::instant::now();
 
         $this->pass = '';
@@ -140,6 +150,10 @@ public class LiveView
         $test = guard $folded else {
             return;
         };
+        if ($test->events->usedEcotest) {
+            $this->asserting++;
+            $this->assertions = $this->assertions + $test->events->checks;
+        }
         $this->finished($test);
     }
 
@@ -273,10 +287,8 @@ public class LiveView
         if ($this->failed > 0) {
             $summary->append(" {$this->look->dot} {$this->failed} failed");
         }
-        // the run counts this pass's assertions, every row folded in, before the bar or not
-        usize $pass = $this->run->passes;
-        if ($this->run->asserting(inPass: $pass) > 0) {
-            $asserted = $this->look->many($this->run->assertions(inPass: $pass), 'assertion');
+        if ($this->asserting > 0) {
+            $asserted = $this->look->many($this->assertions, 'assertion');
             $summary->append(" {$this->look->dot} {$asserted}");
         }
         $summary->append(" in {$secs:.1f} s{$this->pass}");

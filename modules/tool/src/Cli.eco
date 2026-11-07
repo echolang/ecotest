@@ -57,6 +57,7 @@ public function main(const array<string>& $argv) : int32
     ];
     $app->values($style, $styles);
     $app->fallback($style, 'auto');
+    $app->fallback($buildDir, 'ecobuild');
 
     foreach ([$coverage, $html] as $f) {
         $app->accept($f, $run);
@@ -108,9 +109,6 @@ public function main(const array<string>& $argv) : int32
         $invocation->program = string(std::env::var('ECHOC', 'echoc'));
     }
     $invocation->buildDir = $parsed->value($buildDir);
-    if ($invocation->buildDir->empty()) {
-        $invocation->buildDir = 'ecobuild';
-    }
     $invocation->coverage = $parsed->stated($coverage);
     $invocation->repeat = (str::uint($parsed->value($repeat)) ?? 1) as usize;
     $tool->html = $parsed->stated($html);
