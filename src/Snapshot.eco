@@ -140,7 +140,8 @@ internal class Snapshot
     }
 
     /**
-     * The index of the last `/` in `$path`, or null when there is none.
+     * The index of the last `/` in `$path`, or null when there is none. On Windows a `\` counts
+     * the same.
      */
     private static function lastSlash(const string& $path) : usize?
     {
@@ -149,6 +150,11 @@ internal class Snapshot
             if ($path->byte($i) == 47) {
                 $cut = $i;
             }
+#[if: os == windows]
+            if ($path->byte($i) == 92) {
+                $cut = $i;
+            }
+#[end]
         }
 
         return $cut;

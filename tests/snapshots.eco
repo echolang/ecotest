@@ -77,8 +77,9 @@ test a_snapshot_that_cannot_be_written_fails
         expect('v')->snapshot();
     });
 
+    string $s = std::env::DS;
     expect($got->count())->is(1);
-    expect($got[0])->starts('cannot write snapshot /dev/null/__snapshots__/case/x.1.snap');
+    expect($got[0])->starts("cannot write snapshot /dev/null{$s}__snapshots__{$s}case{$s}x.1.snap");
 }
 
 test a_bare_file_name_sits_in_the_current_directory
@@ -91,9 +92,12 @@ test a_bare_file_name_sits_in_the_current_directory
         expect('v')->snapshot();
     });
 
-    expect($got[0])->starts('snapshot ./__snapshots__/bare/x.1.snap does not exist');
+    string $s = std::env::DS;
+    expect($got[0])->starts("snapshot .{$s}__snapshots__{$s}bare{$s}x.1.snap does not exist");
 }
 
+#[if: os != windows]
+// chmod has no read-only mode a Windows write respects
 test an_update_that_cannot_be_written_fails
 {
     $dir = TempDir();
@@ -112,6 +116,7 @@ test an_update_that_cannot_be_written_fails
     expect($got->count())->is(1);
     expect($got[0])->starts('cannot write snapshot ');
 }
+#[end]
 
 test a_bench_stops_growing_its_batch_at_the_ceiling
 {

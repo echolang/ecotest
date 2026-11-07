@@ -28,7 +28,12 @@ test a_temp_dir_already_gone_is_fine
 #[tests: expects death]
 test a_temp_dir_that_cannot_be_made_stops
 {
-    setVar('TMPDIR', '/dev/null/nope');
+    // no directory can be made under a file; Windows reads TEMP and TMP, not TMPDIR
+    $holder = TempDir();
+    $file = $holder->write('file', 'x');
+    setVar('TMPDIR', $file);
+    setVar('TEMP', $file);
+    setVar('TMP', $file);
     $dir = TempDir();
 }
 
@@ -45,12 +50,15 @@ test a_program_that_cannot_start_stops
     $ran = ecotest::run('/nonexistent/ecotest-program');
 }
 
+#[if: os != windows]
+// windows has no signals: a killed process still ends with a code
 test a_signalled_program_has_no_exit_code
 {
     $ran = ecotest::run('sh', ['-c', 'kill -9 $$']);
 
     expect($ran->code)->none();
 }
+#[end]
 
 test eventually_on_its_defaults
 {
