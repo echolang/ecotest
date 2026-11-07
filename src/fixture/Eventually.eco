@@ -1,0 +1,34 @@
+namespace ecotest;
+
+/**
+ * Calls `$ready` until it returns true, pausing `every` between tries. Fails the check when
+ * `within` has passed first. For anything that settles on its own time: a server binding its
+ * port, a worker draining a queue.
+ */
+#[caller]
+public function eventually(
+    function<bool()> $ready,
+    within: std::time::duration $limit = std::time::duration::secs(2),
+    every: std::time::duration $pause = std::time::duration::millis(10)
+) : void {
+    std::src::location $at = std::src::caller();
+    Session::checked();
+
+    std::time::instant $started = std::time::instant::now();
+    usize $tries = 0;
+
+    while (true) {
+        $tries++;
+        if ($ready()) {
+            return;
+        }
+
+        if ($started->elapsed()->as_millis() >= $limit->as_millis()) {
+            int64 $ms = $limit->as_millis();
+            Failure("not ready after {$ms} ms ({$tries} tries)", $at)->raise();
+            return;
+        }
+
+        std::time::sleep($pause);
+    }
+}

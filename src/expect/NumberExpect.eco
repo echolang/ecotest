@@ -1,0 +1,94 @@
+namespace ecotest;
+
+/**
+ * Checks on a signed integer. Every signed width widens to `int64` on the way in.
+ */
+public class NumberExpect
+{
+    public int64 $value;
+
+    public constructor(int64 $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The number equals `$want`.
+     */
+    #[caller]
+    public function is(int64 $want) : NumberExpect
+    {
+        Session::checked();
+
+        if ($this->value == $want) {
+            return $this;
+        }
+
+        Failure("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}")->raise();
+        return $this;
+    }
+
+    /**
+     * The number differs from `$other`.
+     */
+    #[caller]
+    public function isNot(int64 $other) : NumberExpect
+    {
+        Session::checked();
+
+        if ($this->value != $other) {
+            return $this;
+        }
+
+        Failure("expected anything but {$other}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The number is greater than `$bound`.
+     */
+    #[caller]
+    public function above(int64 $bound) : NumberExpect
+    {
+        Session::checked();
+
+        if ($this->value > $bound) {
+            return $this;
+        }
+
+        Failure("expected more than {$bound}, got {$this->value}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The number is less than `$bound`.
+     */
+    #[caller]
+    public function below(int64 $bound) : NumberExpect
+    {
+        Session::checked();
+
+        if ($this->value < $bound) {
+            return $this;
+        }
+
+        Failure("expected less than {$bound}, got {$this->value}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The number lies in `[$low, $high]`, both ends included.
+     */
+    #[caller]
+    public function between(int64 $low, int64 $high) : NumberExpect
+    {
+        Session::checked();
+
+        if ($this->value >= $low && $this->value <= $high) {
+            return $this;
+        }
+
+        Failure("expected {$low} to {$high}, got {$this->value}", std::src::caller())->raise();
+        return $this;
+    }
+}

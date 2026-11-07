@@ -1,0 +1,100 @@
+namespace ecotest::cli;
+
+/**
+ * Reading fields out of parsed JSON without a guard per field: a missing or mistyped field reads
+ * as empty or zero, which is what every report reader here wants.
+ */
+public class Doc
+{
+    /**
+     * The string at `$key`, or empty.
+     */
+    public static function text(const json::Value& $doc, const string& $key) : string
+    {
+        json::Value $v = guard $doc->get($key) else {
+            return '';
+        };
+        return $v->asStr() ?? '';
+    }
+
+    /**
+     * The integer at `$key`, or 0.
+     */
+    public static function number(const json::Value& $doc, const string& $key) : int64
+    {
+        json::Value $v = guard $doc->get($key) else {
+            return 0;
+        };
+        return $v->asInt() ?? 0;
+    }
+
+    /**
+     * The number at `$key`, integer or not, or `$otherwise`.
+     */
+    public static function decimal(const json::Value& $doc, const string& $key, float64 $otherwise) : float64
+    {
+        json::Value $v = guard $doc->get($key) else {
+            return $otherwise;
+        };
+        return $v->asFloat() ?? $otherwise;
+    }
+
+    /**
+     * The array at `$key`, or an empty one.
+     */
+    public static function list(const json::Value& $doc, const string& $key) : array<json::Value>
+    {
+        array<json::Value> $none = [];
+        json::Value $v = guard $doc->get($key) else {
+            return $none;
+        };
+        return $v->asArray() ?? $none;
+    }
+
+    /**
+     * The object at `$key`, or JSON null.
+     */
+    public static function object(const json::Value& $doc, const string& $key) : json::Value
+    {
+        json::Value $v = guard $doc->get($key) else {
+            return json::nil();
+        };
+        return $v;
+    }
+
+    /**
+     * Every line of `$text` that parses as JSON. A broken line is skipped: a test killed mid-write
+     * must not lose the run.
+     */
+    public static function lines(const string& $text) : array<json::Value>
+    {
+        array<json::Value> $out = [];
+
+        foreach (str::lines($text) as const &$line) {
+            string $owned = string($line);
+            if (str::trim($owned)->empty()) {
+                continue;
+            }
+
+            result<json::Value, json::Error> $parsed = json::parse($owned);
+            if (!$parsed->failed()) {
+                $out[] = $parsed->unwrap();
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The file at `$path`, or empty when it cannot be read.
+     */
+    public static function read(const string& $path) : string
+    {
+        result<string, std::io::ioerror> $text = std::io::readfile($path);
+        if ($text->failed()) {
+            return '';
+        }
+
+        return $text->unwrap();
+    }
+}

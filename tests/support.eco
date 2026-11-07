@@ -1,0 +1,37 @@
+/**
+ * Test helpers: the summaries of caught failures, and environment variables set for the rest of
+ * one test process.
+ */
+
+internal extern {
+    function setenv as c_setenv(ptr<const uint8> $name, ptr<const uint8> $value, int32 $overwrite) : int32;
+    function unsetenv as c_unsetenv(ptr<const uint8> $name) : int32;
+}
+
+/**
+ * The summaries of what `$body` failed, in order.
+ */
+internal function summaries(function<void()> $body) : array<string>
+{
+    array<string> $out = [];
+    foreach (ecotest::caught($body) as const &$failure) {
+        $out[] = $failure->summary;
+    }
+    return $out;
+}
+
+/**
+ * Sets `$name` for the rest of this test's process.
+ */
+internal function setVar(const string& $name, const string& $value) : void
+{
+    int32 $done = c_setenv($name->cstr(), $value->cstr(), 1);
+}
+
+/**
+ * Removes `$name` for the rest of this test's process.
+ */
+internal function unsetVar(const string& $name) : void
+{
+    int32 $done = c_unsetenv($name->cstr());
+}

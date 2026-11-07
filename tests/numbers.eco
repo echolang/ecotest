@@ -1,0 +1,51 @@
+use ecotest::expect;
+
+test numbers_of_every_width_pass
+{
+    int8 $small = 3;
+    uint8 $byte = 3;
+    usize $size = 3;
+    float32 $half = 0.5;
+
+    expect(42)->is(42)->isNot(41)->above(41)->below(43)->between(42, 42);
+    expect($small)->is(3);
+    expect($byte)->is(3)->between(0, 255);
+    expect($size)->is(3);
+    expect($half)->is(0.5);
+    expect(0.1 + 0.2)->near(0.3)->near(0.31, $within: 0.02)->above(0.0);
+    expect(true)->yes();
+    expect(false)->no(says: 'the flag');
+    expect(1.5)->isNot(2.5)->between(1.0, 2.0);
+    expect($size)->isNot(4);
+}
+
+#[tests: expects death]
+test number_is_fails
+{
+    expect(1)->is(2);
+}
+
+#[tests: expects death]
+test number_between_fails
+{
+    expect(5)->between(1, 4);
+}
+
+#[tests: expects death]
+test unsigned_below_fails
+{
+    usize $n = 4;
+    expect($n)->below(4);
+}
+
+#[tests: expects death]
+test float_near_fails
+{
+    expect(0.1 + 0.2)->near(0.4);
+}
+
+#[tests: expects death]
+test bool_yes_fails
+{
+    expect(false)->yes(says: 'ready');
+}

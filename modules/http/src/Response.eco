@@ -1,0 +1,31 @@
+namespace ecotest::http;
+
+/**
+ * What came back: status, headers in arrival order, body, and how long the exchange took.
+ */
+public struct Response
+{
+    public int64 $status;
+    public array<string> $headerNames = [];
+    public array<string> $headerValues = [];
+    public string $body = '';
+    public int64 $ms = 0;
+
+    public constructor(int64 $status)
+    {
+        $this->status = $status;
+    }
+
+    /**
+     * The first header called `$name`, compared without case, or null.
+     */
+    public const function header(const string& $name) : string?
+    {
+        for (usize $i = 0; $i < $this->headerNames->count(); $i++) {
+            if (str::iequals($this->headerNames[$i]->view(), $name->view())) {
+                return $this->headerValues[$i];
+            }
+        }
+        return null;
+    }
+}

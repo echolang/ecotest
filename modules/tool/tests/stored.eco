@@ -1,0 +1,139 @@
+/**
+ * Run directories written by hand: rows and events a live run rarely produces, a compiler that
+ * answers `-p decls` from a file, and a runner whose compiler leaves no coverage behind.
+ */
+
+use ecotest::{expect, TempDir};
+use ecotest::cli::{Run, Runner, Tool, Files, Doc, Services};
+
+test a_pass_folds_every_kind_of_row_and_event
+{
+    $dir = TempDir();
+    string $pass = $dir->file('.ecotest/run-1/pass-1');
+    Files::mkdirs(std::env::join($pass, 'events'));
+
+    Files::write(std::env::join($pass, 'report.jsonl'), '{"type":"run","version":"9.9.9"}
+{"type":"note","text":"not a row the tool reads"}
+{"type":"test","id":"m/t.eco::crashed","module":"m","file":"t.eco","name":"crashed","status":"fail","ms":3,"failure":{"headline":"fatal error","message":"boom","file":"t.eco","line":7}}
+{"type":"test","id":"m/t.eco::checked","module":"m","file":"t.eco","name":"checked","status":"fail","ms":4}
+{"type":"test","id":"m/t.eco::plain","module":"m","file":"t.eco","name":"plain","status":"fail","ms":4}
+{"type":"end","ms":9}
+');
+
+    Files::write(std::env::join($pass, 'events/m_t.eco__checked.jsonl'), '{"type":"fail","summary":"values differ","expected":"1","actual":"2","detail":"more","file":"t.eco","line":5,"context":["row 1"]}
+{"type":"fail","summary":"second","expected":"","actual":"","detail":"","file":"t.eco","line":6}
+{"type":"crash","headline":"fatal error","message":"after the check","file":"t.eco","line":8}
+{"type":"snapshot-new","path":"a.snap"}
+{"type":"snapshot-updated","path":"b.snap"}
+{"type":"something-later","value":1}
+');
+
+    Files::write(std::env::join($pass, 'events/m_t.eco__plain.jsonl'), '{"type":"fail","summary":"plain","expected":"x","actual":"y","detail":"","file":"t.eco","line":2,"context":[4]}
+');
+
+    Run $run = Run::load($dir->file('.ecotest/run-1'));
+
+    expect($run->version)->is('9.9.9');
+    expect($run->wallMs)->is(9);
+    expect($run->tests->count())->is(3);
+    expect($run->tests[2]->failureDetail)->is("expected: x\n     got: y");
+    expect($run->tests[2]->context)->is(['']);
+    expect($run->tests[0]->failure)->is('fatal error: boom');
+    expect($run->tests[0]->failureLine)->is(7);
+    expect($run->tests[1]->failure)->is('values differ');
+    expect($run->tests[1]->failureDetail)->is("expected: 1\n     got: 2\nmore\nalso t.eco:6: second");
+    expect($run->tests[1]->context)->is(['row 1']);
+    expect($run->tests[1]->notes)->is(['wrote new snapshot a.snap', 'updated snapshot b.snap']);
+}
+
+test a_compiler_without_coverage_leaves_the_pass_without_it
+{
+    $dir = TempDir();
+    Runner $runner = Runner();
+    $runner->project = $dir->path;
+    $runner->echoc = 'true';
+    $runner->coverage = true;
+
+    expect($runner->run($dir->file('run')))->yes();
+    expect(std::io::exists($dir->file('run/pass-1/coverage/map.json'))->or(false))->no();
+}
+
+test a_service_without_a_log_has_no_tail
+{
+    Services $services = Services();
+    $doc = json::parse('[{"name": "quiet", "run": ["true", 4], "env": "not an object"}, {"name": "odd", "env": {"N": 5}}]')->unwrap();
+    array<json::Value> $none = [];
+    $services->configure($doc->asArray() ?? $none);
+
+    $dir = TempDir();
+    expect($services->tails($dir->path, 5))->empty();
+    expect($services->specs[0]->command)->is(['true', '']);
+    expect($services->specs[1]->envValues)->is(['']);
+
+    Files::mkdirs($dir->file('services'));
+    Files::write($dir->file('services/quiet.log'), "one\ntwo\n");
+    expect($services->tails($dir->path, 5))->has('one')->has('two');
+}
+
+test api_reports_what_the_compiler_cannot_tell_it
+{
+    $sample = Sample();
+    Tool $first = $sample->tool();
+    $first->coverage = true;
+    expect($first->run())->is(0);
+
+    Tool $missing = $sample->tool();
+    $missing->echoc = '/nonexistent/echoc';
+    expect($missing->api())->is(1);
+
+    Tool $chatty = $sample->tool();
+    $chatty->echoc = 'echo';
+    expect($chatty->api())->is(1);
+}
+
+test api_skips_what_it_cannot_judge
+{
+    $sample = Sample();
+    Tool $first = $sample->tool();
+    $first->coverage = true;
+    expect($first->run())->is(0);
+
+    $fake = TempDir();
+    $fake->write('decls.json', '{"modules": [
+        {"name": "elsewhere", "declarations": [{"kind": "function", "visibility": "public", "file": "src/x.eco", "line": 1, "qualified": "x"}]},
+        {"name": "sample", "declarations": [
+            {"kind": "function", "visibility": "private", "file": "src/math.eco", "line": 1, "qualified": "hidden"},
+            {"kind": "function", "visibility": "public", "file": "src/never/x.eco", "line": 1, "qualified": "excluded"},
+            {"kind": "function", "visibility": "public", "file": "src/math.eco", "line": 2, "qualified": "no counter"},
+            {"kind": "function", "visibility": "public", "file": "src/math.eco", "line": 1, "qualified": "add"},
+            {"kind": "class", "methods": [{"visibility": "public", "file": "src/math.eco", "line": 15, "qualified": "unused"}], "constructors": [{"visibility": "public", "file": "src/math.eco", "line": 6, "qualified": "halve"}]}
+        ]}
+    ]}');
+    string $echoc = $fake->write('echoc', "#!/bin/sh\ncat {$fake->path}/decls.json\n");
+    expect(ecotest::run('chmod', ['+x', $echoc]))->succeeds();
+
+    Tool $tool = $sample->tool();
+    $tool->echoc = $echoc;
+    $tool->exclude = ['src/never/**'];
+    $tool->buildDir = 'elsewhere';
+    expect($tool->api())->is(0);
+}
+
+test affected_names_a_test_once_however_many_of_its_lines_changed
+{
+    $sample = Sample();
+    Tool $first = $sample->tool();
+    $first->coverage = true;
+    expect($first->run())->is(0);
+
+    $fake = TempDir();
+    $sample->dir->write('changes.diff', "+++ b/src/math.eco\n@@ -6,7 +6,7 @@\n");
+    string $git = $fake->write('git', "#!/bin/sh\ncat changes.diff\n");
+    expect(ecotest::run('chmod', ['+x', $git]))->succeeds();
+
+    Tool $tool = $sample->tool();
+    $tool->git = $git;
+    $tool->since = 'main';
+    expect($tool->affected())->is(0);
+    expect($tool->forwarded)->is(['--filter', 'halves']);
+}

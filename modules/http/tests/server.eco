@@ -1,0 +1,58 @@
+/**
+ * A real HTTP server on an ephemeral loopback port, on its own thread, for the checks to talk to.
+ */
+
+use std::thread;
+
+internal class TestServer
+{
+    public http::Server $app;
+    public thread::handle? $thread = null;
+    public int32 $port = 0;
+
+    public constructor()
+    {
+        $this->app = http::Server();
+
+        $this->app->get('/users/1', (http::Request $r) : http::Response => http::Response(
+            json: '{"id":1,"name":"Ada","admin":false,"score":2.5,"note":null,"items":[{"id":1,"at":"x"},{"id":2,"at":"y"}]}'
+        ));
+        $this->app->post('/users', function(http::Request $r) : http::Response {
+            http::Response $res = http::Response(json: $r->body);
+            $res->status = 201;
+            return $res;
+        });
+        $this->app->get('/plain', (http::Request $r) : http::Response => http::Response(text: 'hello there'));
+        $this->app->get('/whoami', function(http::Request $r) : http::Response {
+            string $auth = $r->header('Authorization') ?? 'nobody';
+            return http::Response(text: $auth);
+        });
+    }
+
+    /**
+     * Starts listening and returns the base URL once the port is bound.
+     */
+    public function start() : string
+    {
+        http::Server $app = $this->app;
+        thread::handle $spawned = guard thread::spawn(function() : void {
+            result<int32, http::Error> $r = $app->listen('127.0.0.1', 0);
+        }) else ($e) {
+            die($e->message());
+        };
+        $this->thread = $spawned;
+
+        ecotest::eventually(() : bool => $app->port() > 0);
+        $this->port = $app->port();
+        return "http://127.0.0.1:{$this->port}";
+    }
+
+    destructor()
+    {
+        $this->app->stop();
+        if ($this->thread != null) {
+            thread::handle $t = guard $this->thread;
+            $t->join();
+        }
+    }
+}

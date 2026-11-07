@@ -1,0 +1,111 @@
+namespace ecotest::cli;
+
+/**
+ * Everything known about one test after a run: echoc's report rows, one per pass, and the events
+ * the test wrote through ecotest.
+ */
+public class TestRecord
+{
+    public string $id;
+    public string $key;
+    public string $module = '';
+    public string $file = '';
+    public string $name = '';
+    public string $group = '';
+
+    public Outcome $outcome = Outcome::pass;
+    public array<Outcome> $attempts = [];
+    public array<int64> $durations = [];
+    public string $output = '';
+
+    public string $failure = '';
+    public string $failureFile = '';
+    public int64 $failureLine = 0;
+    public string $failureDetail = '';
+    public array<string> $context = [];
+
+    public string $skipReason = '';
+    public bool $usedEcotest = false;
+    public int64 $checks = 0;
+    public array<string> $notes = [];
+    public array<string> $metricNames = [];
+    public array<int64> $metricValues = [];
+    public array<BenchResult> $benches = [];
+
+    public constructor(const string& $id, const string& $key)
+    {
+        $this->id = $id;
+        $this->key = $key;
+    }
+
+    /**
+     * The file-name form of a test id: every byte outside `[A-Za-z0-9_.-]` becomes `_`. echoc names
+     * a test's coverage file this way and ecotest its event file, so all three join on it.
+     */
+    public static function key(const string& $id) : string
+    {
+        string $out = '';
+
+        for (usize $i = 0; $i < $id->size(); $i++) {
+            uint8 $b = $id->byte($i);
+            bool $plain = ($b >= 97 && $b <= 122)
+                || ($b >= 65 && $b <= 90)
+                || ($b >= 48 && $b <= 57)
+                || $b == 95 || $b == 45 || $b == 46;
+
+            if ($plain) {
+                $out->push($b);
+            } else {
+                $out->push(95);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The duration of the last pass, in milliseconds.
+     */
+    public const function ms() : int64
+    {
+        if ($this->durations->empty()) {
+            return 0;
+        }
+
+        return $this->durations[$this->durations->count() - 1];
+    }
+
+    /**
+     * Settles `$outcome` from the passes: a skip stays a skip, passes that disagree are flaky,
+     * otherwise the last pass decides.
+     */
+    public function settle() : void
+    {
+        if (!$this->skipReason->empty()) {
+            $this->outcome = Outcome::skip;
+            return;
+        }
+
+        if ($this->attempts->empty()) {
+            return;
+        }
+
+        bool $passed = false;
+        bool $broke = false;
+        foreach ($this->attempts as const &$attempt) {
+            if ($attempt == Outcome::pass) {
+                $passed = true;
+            }
+            if ($attempt->broken()) {
+                $broke = true;
+            }
+        }
+
+        if ($passed && $broke) {
+            $this->outcome = Outcome::flaky;
+            return;
+        }
+
+        $this->outcome = $this->attempts[$this->attempts->count() - 1];
+    }
+}

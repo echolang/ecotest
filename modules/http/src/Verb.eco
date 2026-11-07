@@ -1,0 +1,41 @@
+namespace ecotest::http;
+
+/**
+ * The request methods a test sends.
+ */
+public enum Verb
+{
+    case get;
+    case head;
+    case post;
+    case put;
+    case patch;
+    case delete;
+
+    /**
+     * The method as it goes on the wire.
+     */
+    public const function word() : string
+    {
+        match ($this) {
+            Verb::get => {
+                return 'GET';
+            },
+            Verb::head => {
+                return 'HEAD';
+            },
+            Verb::post => {
+                return 'POST';
+            },
+            Verb::put => {
+                return 'PUT';
+            },
+            Verb::patch => {
+                return 'PATCH';
+            },
+            Verb::delete => {
+                return 'DELETE';
+            },
+        };
+    }
+}

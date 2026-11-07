@@ -1,0 +1,40 @@
+namespace ecotest;
+
+/**
+ * What a program run by `ecotest::run` did: how it exited and what it printed.
+ */
+public struct Ran
+{
+    public string $command;
+    public int32 $code;
+    public bool $signalled;
+    public string $stdout;
+    public string $stderr;
+}
+
+/**
+ * Runs `$program` with `$arguments` to completion and captures both streams. A program that
+ * cannot be started stops the test.
+ */
+#[caller]
+public function run(const string& $program, array<string> $arguments = []) : Ran
+{
+    std::src::location $at = std::src::caller();
+    string $command = $program;
+    foreach ($arguments as const &$argument) {
+        $command->append(' ');
+        $command->append($argument);
+    }
+
+    result<std::process::output, std::io::ioerror> $done = std::process::command($program, $arguments)->output();
+    if ($done->failed()) {
+        $e = $done->failure();
+        Failure("cannot run {$command}: {$e}", $at)->stop();
+    }
+
+    std::process::output $o = $done->unwrap();
+    int32 $code = $o->status->code() ?? -1;
+    bool $signalled = $o->status->signal() != null;
+
+    return Ran($command, $code, $signalled, $o->stdout, $o->stderr);
+}

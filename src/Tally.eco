@@ -1,0 +1,31 @@
+namespace ecotest;
+
+/**
+ * The count of checks a test made, written as one `checks` event when the process tears down. It
+ * keeps its own copy of the event path because static teardown has no order to rely on.
+ */
+internal class Tally
+{
+    internal int64 $checks = 0;
+    internal string $path = '';
+    internal bool $flushed = false;
+
+    /**
+     * Writes the count once. Called on teardown, and earlier by a stop or a skip, after which
+     * teardown does not run.
+     */
+    internal function flush() : void
+    {
+        if ($this->flushed || $this->path->empty()) {
+            return;
+        }
+
+        $this->flushed = true;
+        Session::append($this->path, Event('checks')->number('count', $this->checks)->render());
+    }
+
+    destructor()
+    {
+        $this->flush();
+    }
+}

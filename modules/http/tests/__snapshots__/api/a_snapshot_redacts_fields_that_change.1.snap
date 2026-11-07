@@ -1,0 +1,17 @@
+{
+  "id": 1,
+  "name": "Ada",
+  "admin": false,
+  "score": 2.5,
+  "note": null,
+  "items": [
+    {
+      "id": 1,
+      "at": "[redacted]"
+    },
+    {
+      "id": 2,
+      "at": "[redacted]"
+    }
+  ]
+}

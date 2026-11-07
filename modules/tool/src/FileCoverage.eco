@@ -1,0 +1,127 @@
+namespace ecotest::cli;
+
+/**
+ * Coverage of one source file: hits per line, per branch edge and per function, merged over every
+ * test of the run.
+ */
+public class FileCoverage
+{
+    public string $module;
+    public string $file;
+    public string $path;
+    public map<int64, uint64> $lines = [];
+    public array<int64> $branchLines = [];
+    public array<string> $branchEdges = [];
+    public array<uint64> $branchHits = [];
+    public array<string> $functionNames = [];
+    public array<int64> $functionLines = [];
+    public array<uint64> $functionHits = [];
+
+    public constructor(const string& $module, const string& $file, const string& $path)
+    {
+        $this->module = $module;
+        $this->file = $file;
+        $this->path = $path;
+    }
+
+    /**
+     * Lines that have code, and lines of those that ran.
+     */
+    public const function lineTotals() : Ratio
+    {
+        Ratio $r = Ratio(0, 0);
+        foreach ($this->lines as $line => const &$hits) {
+            $r->total++;
+            if ($hits > 0) {
+                $r->hit++;
+            }
+        }
+        return $r;
+    }
+
+    /**
+     * Branch edges, and edges of those taken.
+     */
+    public const function branchTotals() : Ratio
+    {
+        Ratio $r = Ratio(0, 0);
+        foreach ($this->branchHits as const &$hits) {
+            $r->total++;
+            if ($hits > 0) {
+                $r->hit++;
+            }
+        }
+        return $r;
+    }
+
+    /**
+     * Functions, and functions of those called.
+     */
+    public const function functionTotals() : Ratio
+    {
+        Ratio $r = Ratio(0, 0);
+        foreach ($this->functionHits as const &$hits) {
+            $r->total++;
+            if ($hits > 0) {
+                $r->hit++;
+            }
+        }
+        return $r;
+    }
+
+    /**
+     * The line numbers with code that never ran, ascending.
+     */
+    public const function missedLines() : array<int64>
+    {
+        array<int64> $out = [];
+        foreach ($this->lines as $line => const &$hits) {
+            if ($hits == 0) {
+                $out[] = $line;
+            }
+        }
+        $out->sort();
+        return $out;
+    }
+
+    /**
+     * Every line with code, ascending.
+     */
+    public const function codeLines() : array<int64>
+    {
+        array<int64> $out = $this->lines->keys();
+        $out->sort();
+        return $out;
+    }
+
+    /**
+     * `missedLines()` folded into ranges: `12-15, 20`.
+     */
+    public const function missedRanges() : string
+    {
+        array<int64> $missed = $this->missedLines();
+        string $out = '';
+        usize $i = 0;
+
+        while ($i < $missed->count()) {
+            int64 $from = $missed[$i];
+            int64 $to = $from;
+            while ($i + 1 < $missed->count() && $missed[$i + 1] == $to + 1) {
+                $i++;
+                $to = $missed[$i];
+            }
+
+            if (!$out->empty()) {
+                $out->append(', ');
+            }
+            if ($from == $to) {
+                $out->append("{$from}");
+            } else {
+                $out->append("{$from}-{$to}");
+            }
+            $i++;
+        }
+
+        return $out;
+    }
+}

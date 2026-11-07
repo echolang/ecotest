@@ -1,0 +1,70 @@
+namespace ecotest::cli;
+
+/**
+ * How a test ended, after ecotest's events are read: a skip that exited 0 is a skip, and a test
+ * whose passes disagree is flaky.
+ */
+public enum Outcome
+{
+    case pass;
+    case fail;
+    case skip;
+    case timeout;
+    case signal;
+    case flaky;
+
+    /**
+     * The word reports use.
+     */
+    public const function word() : string
+    {
+        match ($this) {
+            Outcome::pass => {
+                return 'pass';
+            },
+            Outcome::fail => {
+                return 'fail';
+            },
+            Outcome::skip => {
+                return 'skip';
+            },
+            Outcome::timeout => {
+                return 'timeout';
+            },
+            Outcome::signal => {
+                return 'signal';
+            },
+            Outcome::flaky => {
+                return 'flaky';
+            },
+        };
+    }
+
+    /**
+     * The outcome a report row's `status` names. Anything unknown reads as a failure.
+     */
+    public static function of(const string& $status) : Outcome
+    {
+        if ($status == 'pass') {
+            return Outcome::pass;
+        }
+        if ($status == 'timeout') {
+            return Outcome::timeout;
+        }
+        if ($status == 'signal') {
+            return Outcome::signal;
+        }
+        if ($status == 'skip') {
+            return Outcome::skip;
+        }
+        return Outcome::fail;
+    }
+
+    /**
+     * True for the outcomes that fail a run.
+     */
+    public const function broken() : bool
+    {
+        return $this == Outcome::fail || $this == Outcome::timeout || $this == Outcome::signal;
+    }
+}

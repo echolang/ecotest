@@ -1,0 +1,37 @@
+namespace ecotest::http;
+
+/**
+ * One request as a transport sees it: method, full URL, headers in order, body.
+ */
+public struct Request
+{
+    public Verb $verb;
+    public string $url;
+    public array<string> $headerNames = [];
+    public array<string> $headerValues = [];
+    public string $body = '';
+
+    public constructor(Verb $verb, const string& $url)
+    {
+        $this->verb = $verb;
+        $this->url = $url;
+    }
+
+    /**
+     * Adds a header.
+     */
+    public function header(const string& $name, const string& $value) : void
+    {
+        $this->headerNames[] = $name;
+        $this->headerValues[] = $value;
+    }
+
+    /**
+     * `GET https://...`, the line a failure report starts with.
+     */
+    public const function line() : string
+    {
+        string $verb = $this->verb->word();
+        return "{$verb} {$this->url}";
+    }
+}

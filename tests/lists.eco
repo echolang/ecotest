@@ -1,0 +1,56 @@
+use ecotest::expect;
+
+test list_checks_pass
+{
+    array<string> $names = ['ada', 'bob'];
+
+    expect($names)->is(['ada', 'bob'])->size(2)->has('bob')->lacks('cy');
+    expect($names)->same(['bob', 'ada'])->sorted();
+    expect($names)->all((const string& $n) => !$n->empty(), says: 'named');
+    expect($names)->any((const string& $n) => $n == 'ada');
+
+    array<int32> $none = [];
+    expect($none)->empty();
+}
+
+#[tests: expects death]
+test list_is_fails_on_an_item
+{
+    array<int32> $got = [1, 2, 3];
+    expect($got)->is([1, 9, 3]);
+}
+
+#[tests: expects death]
+test list_is_fails_on_length
+{
+    array<int32> $got = [1, 2];
+    expect($got)->is([1, 2, 3]);
+}
+
+#[tests: expects death]
+test list_has_fails
+{
+    array<int32> $got = [1, 2];
+    expect($got)->has(3);
+}
+
+#[tests: expects death]
+test list_same_fails
+{
+    array<int32> $got = [1, 2, 2];
+    expect($got)->same([2, 1, 1]);
+}
+
+#[tests: expects death]
+test list_sorted_fails
+{
+    array<int32> $got = [2, 1];
+    expect($got)->sorted();
+}
+
+#[tests: expects death]
+test list_all_fails
+{
+    array<int32> $got = [2, 3];
+    expect($got)->all((const int32& $n) => $n % 2 == 0, says: 'even');
+}

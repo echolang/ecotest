@@ -1,0 +1,24 @@
+namespace ecotest::http;
+
+/**
+ * Why a request got no response at all.
+ */
+public enum TransportError
+{
+    /**
+     * Nothing answered: refused, unreachable, timed out, or the transport broke.
+     */
+    case failed(string $why);
+
+    /**
+     * The reason, for a failure report.
+     */
+    public const function message() : string
+    {
+        match ($this) {
+            TransportError::failed($why) => {
+                return $why;
+            },
+        };
+    }
+}

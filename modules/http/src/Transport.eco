@@ -1,0 +1,12 @@
+namespace ecotest::http;
+
+/**
+ * Whatever delivers a request: a socket client, or an app's own dispatcher called in process.
+ */
+public interface Transport
+{
+    /**
+     * Sends `$request` and returns the response, or why there is none.
+     */
+    function send(const Request& $request) : result<Response, TransportError>;
+}

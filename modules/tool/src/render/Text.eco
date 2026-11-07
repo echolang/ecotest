@@ -1,0 +1,47 @@
+namespace ecotest::cli;
+
+/**
+ * Layout helpers the text reports share.
+ */
+public class Text
+{
+    /**
+     * How many bytes of a line a report shows before cutting.
+     */
+    public static usize $width = 120;
+
+    /**
+     * `$text` with every line indented by `$by` spaces.
+     */
+    public static function indent(const string& $text, usize $by) : string
+    {
+        $pad = str::repeat(' ', $by);
+        string $out = '';
+        bool $first = true;
+
+        foreach (str::split($text, "\n") as const &$line) {
+            if (!$first) {
+                $out->append("\n");
+            }
+            $first = false;
+            $out->append($pad);
+            $out->append(string($line));
+        }
+
+        return $out;
+    }
+
+    /**
+     * `$text` cut to `Text::$width` bytes, with `...` where it was cut.
+     */
+    public static function cut(const string& $text) : string
+    {
+        if ($text->size() <= Text::$width) {
+            return $text;
+        }
+
+        string $out = $text->sub(0, Text::$width);
+        $out->append('...');
+        return $out;
+    }
+}

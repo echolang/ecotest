@@ -1,0 +1,41 @@
+use ecotest::expect;
+use ecotest::Session;
+
+test a_passing_soft_scope_does_not_fail
+{
+    $all = ecotest::soft();
+    expect(1)->is(1);
+    expect('a')->is('a');
+}
+
+#[tests: expects death]
+test a_soft_scope_fails_at_its_end
+{
+    $all = ecotest::soft();
+    expect(1)->is(2);
+    expect('a')->is('b');
+}
+
+test context_leaves_with_its_value
+{
+    {
+        $at = ecotest::context('row 1');
+        expect(Session::$context->count())->is(1);
+    }
+
+    expect(Session::$context->empty())->yes();
+}
+
+test contexts_stack
+{
+    $outer = ecotest::context('file a');
+    $inner = ecotest::context('row 2');
+
+    expect(Session::$context)->is(['file a', 'row 2']);
+}
+
+test a_missing_variable_skips
+{
+    $url = ecotest::needs(env: 'ECOTEST_NEVER_SET_ANYWHERE');
+    expect($url)->is('unreachable');
+}

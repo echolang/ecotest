@@ -1,0 +1,87 @@
+namespace ecotest::http;
+
+/**
+ * Delivers requests to a nexus kernel in process: `Api(transport: KernelTransport($app->kernel))`.
+ * The URL's path and query become the request target; scheme and host are ignored.
+ */
+public class KernelTransport : Transport
+{
+    public nexus::Kernel $kernel;
+
+    public constructor(nexus::Kernel $kernel)
+    {
+        $this->kernel = $kernel;
+    }
+
+    /**
+     * Hands `$request` to the kernel and converts what it answers.
+     */
+    function send(const Request& $request) : result<Response, TransportError>
+    {
+        nexus::Request $in = nexus::Request(KernelTransport::method($request->verb), KernelTransport::target($request->url));
+        $in->body = $request->body;
+
+        for (usize $i = 0; $i < $request->headerNames->count(); $i++) {
+            $in->headers->add($request->headerNames[$i], $request->headerValues[$i]);
+        }
+
+        std::time::instant $started = std::time::instant::now();
+        nexus::Response $got = $this->kernel->handle($in);
+
+        Response $out = Response($got->status as int64);
+        $out->body = $got->body;
+        $out->ms = $started->elapsed()->as_millis();
+
+        foreach ($got->headers->items as const &$h) {
+            $out->headerNames[] = $h->name;
+            $out->headerValues[] = $h->value;
+        }
+
+        return .ok($out);
+    }
+
+    /**
+     * The path and query of `$url`: everything from the first `/` after the host.
+     */
+    private static function target(const string& $url) : string
+    {
+        usize $scheme = $url->find('://');
+        if ($scheme >= $url->size()) {
+            return $url;
+        }
+
+        usize $path = $url->find('/', $scheme + 3);
+        if ($path >= $url->size()) {
+            return '/';
+        }
+
+        return $url->sub($path, $url->size() - $path);
+    }
+
+    /**
+     * nexus's spelling of `$verb`.
+     */
+    private static function method(Verb $verb) : nexus::Method
+    {
+        match ($verb) {
+            Verb::get => {
+                return nexus::Method::get;
+            },
+            Verb::head => {
+                return nexus::Method::head;
+            },
+            Verb::post => {
+                return nexus::Method::post;
+            },
+            Verb::put => {
+                return nexus::Method::put;
+            },
+            Verb::patch => {
+                return nexus::Method::patch;
+            },
+            Verb::delete => {
+                return nexus::Method::delete;
+            },
+        };
+    }
+}

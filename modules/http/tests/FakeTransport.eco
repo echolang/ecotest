@@ -1,0 +1,36 @@
+/**
+ * A transport that answers from memory and remembers what it was sent.
+ */
+
+use ecotest::http::{Transport, Request, Response, TransportError};
+
+internal class FakeTransport : Transport
+{
+    public array<string> $lines = [];
+    public array<string> $bodies = [];
+    public array<string> $types = [];
+    public array<usize> $headerCounts = [];
+    public Response $answer = Response(200);
+    public bool $broken = false;
+
+    public function send(const Request& $request) : result<Response, TransportError>
+    {
+        $this->lines[] = $request->line();
+        $this->bodies[] = $request->body;
+        $this->headerCounts[] = $request->headerNames->count();
+
+        string $type = '';
+        for (usize $i = 0; $i < $request->headerNames->count(); $i++) {
+            if ($request->headerNames[$i] == 'Content-Type') {
+                $type = $request->headerValues[$i];
+            }
+        }
+        $this->types[] = $type;
+
+        if ($this->broken) {
+            return .error(.failed('wire cut'));
+        }
+
+        return .ok($this->answer);
+    }
+}

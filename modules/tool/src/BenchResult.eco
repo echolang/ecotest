@@ -1,0 +1,12 @@
+namespace ecotest::cli;
+
+/**
+ * One `ecotest::bench` measurement, from a test's `bench` event.
+ */
+public struct BenchResult
+{
+    public string $label;
+    public int64 $p50;
+    public int64 $p95;
+    public int64 $calls;
+}

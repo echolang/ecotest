@@ -1,0 +1,89 @@
+namespace ecotest;
+
+/**
+ * A fresh directory under the system temp directory, removed with everything in it when the value
+ * goes. `$dir = TempDir();` at the top of a test is the whole setup.
+ */
+public class TempDir
+{
+    /**
+     * How many directories this process has made, so two in one test never collide.
+     */
+    internal static usize $made = 0;
+
+    public string $path;
+
+    public constructor()
+    {
+        TempDir::$made = TempDir::$made + 1;
+
+        int32 $pid = std::env::pid();
+        usize $n = TempDir::$made;
+        int64 $stamp = std::time::timestamp::now()->unix_nanos();
+
+        $this->path = std::env::join(std::env::tmp(), "ecotest-{$pid}-{$n}-{$stamp}");
+        bool $made = guard std::io::mkdir($this->path) else ($e) {
+            die("ecotest: cannot create {$this->path}: {$e}");
+        };
+    }
+
+    /**
+     * The path of `$name` inside the directory. Nothing is created.
+     */
+    public const function file(const string& $name) : string
+    {
+        return std::env::join($this->path, $name);
+    }
+
+    /**
+     * Writes `$text` to `$name` inside the directory and returns its path.
+     */
+    public function write(const string& $name, const string& $text) : string
+    {
+        string $to = $this->file($name);
+        usize $wrote = guard std::io::writefile($to, $text) else ($e) {
+            die("ecotest: cannot write {$to}: {$e}");
+        };
+        return $to;
+    }
+
+    /**
+     * The contents of `$name` inside the directory, or null when it cannot be read.
+     */
+    public const function read(const string& $name) : string?
+    {
+        result<string, std::io::ioerror> $text = std::io::readfile($this->file($name));
+        if ($text->failed()) {
+            return null;
+        }
+
+        return $text->unwrap();
+    }
+
+    destructor()
+    {
+        TempDir::remove($this->path);
+    }
+
+    /**
+     * Removes `$path` and everything below it. Best effort: a temp directory left behind is not a
+     * test failure.
+     */
+    private static function remove(const string& $path) : void
+    {
+        std::io::dir $listing = guard std::io::opendir($path) else {
+            return;
+        };
+
+        foreach ($listing as const &$entry) {
+            if ($entry->is_directory()) {
+                TempDir::remove($entry->path());
+            } else {
+                result<bool, std::io::ioerror> $gone = std::io::remove($entry->path());
+            }
+        }
+
+        $listing->close();
+        result<bool, std::io::ioerror> $removed = std::io::rmdir($path);
+    }
+}

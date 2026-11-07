@@ -1,0 +1,48 @@
+use ecotest::expect;
+use ecotest::{gen, Random, Gen};
+
+test random_is_reproducible_from_its_seed
+{
+    $a = Random(42);
+    $b = Random(42);
+    expect($a->next())->is($b->next());
+    expect($a->range(-5, 5))->between(-5, 5);
+    expect($a->unit())->above(-0.0000001)->below(1.0);
+}
+
+test probe_local_gen
+{
+    $g = gen::ints(-100, 100);
+    ecotest::forAll($g, (const int64& $n) => $n + 0 == $n);
+}
+
+test a_true_property_passes
+{
+    ecotest::forAll(gen::ints(-100, 100), (const int64& $n) => $n + 0 == $n);
+    ecotest::forAll(gen::lists(gen::ints(0, 9)), (const array<int64>& $xs) => $xs->count() <= 16);
+    ecotest::forAll(gen::text(max: 8), (const string& $s) => $s->size() <= 8);
+    ecotest::forAll(gen::pairs(gen::bools(), gen::floats(0.0, 1.0)), (const ecotest::Pair<bool, float64>& $p) => $p->second < 1.0);
+    array<string> $letters = ['a', 'b'];
+    ecotest::forAll(gen::pick($letters), (const string& $s) => $s == 'a' || $s == 'b');
+}
+
+test int_shrinking_reaches_the_boundary
+{
+    $g = gen::ints(0, 1000);
+    expect($g->shrink(37))->has(0)->has(18)->has(36);
+}
+
+test list_shrinking_offers_smaller_lists
+{
+    $g = gen::lists(gen::ints(0, 9));
+    array<int64> $v = [5, 6, 7];
+    array<array<int64>> $smaller = $g->shrink($v);
+    expect($smaller->count())->above(3);
+    expect($smaller[0]->count())->is(0);
+}
+
+#[tests: expects death]
+test a_false_property_fails
+{
+    ecotest::forAll(gen::ints(0, 1000), (const int64& $n) => $n < 10);
+}

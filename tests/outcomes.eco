@@ -1,0 +1,50 @@
+use ecotest::expect;
+
+test result_status_and_nullable_checks_pass
+{
+    int32 $n = expect(parse('7'))->ok();
+    expect($n)->is(7);
+    expect(parse('8'))->ok(8);
+
+    Fault $e = expect(parse(''))->fails();
+    expect($e == Fault::empty)->yes();
+    expect(parse('x'))->fails(Fault::bad);
+
+    expect(check(true))->fine();
+    expect(check(false))->fails(Fault::bad);
+
+    int32 $three = expect(find(true))->some();
+    expect($three)->is(3);
+    expect(find(true))->some(3);
+    expect(find(false))->none();
+}
+
+#[tests: expects death]
+test result_ok_fails_on_an_error
+{
+    int32 $n = expect(parse(''))->ok();
+}
+
+#[tests: expects death]
+test result_fails_fails_on_ok
+{
+    expect(parse('1'))->fails(Fault::bad);
+}
+
+#[tests: expects death]
+test status_fine_fails
+{
+    expect(check(false))->fine();
+}
+
+#[tests: expects death]
+test nullable_some_fails
+{
+    int32 $n = expect(find(false))->some();
+}
+
+#[tests: expects death]
+test nullable_none_fails
+{
+    expect(find(true))->none();
+}

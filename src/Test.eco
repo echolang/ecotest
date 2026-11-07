@@ -1,0 +1,83 @@
+namespace ecotest;
+
+/**
+ * Holds failed checks until the returned value goes out of scope, then reports them all at once.
+ * Bind it to a local: `$all = ecotest::soft();`.
+ */
+public function soft() : Soft
+{
+    return Soft();
+}
+
+/**
+ * Attaches `$text` to every failure while the returned value lives. Bind it to a local inside a
+ * loop: `$at = ecotest::context("row {$i}");`.
+ */
+public function context(const string& $text) : Context
+{
+    return Context($text);
+}
+
+/**
+ * Runs `$body` and returns the checks it failed instead of failing the test, which is how a library
+ * built on ecotest tests its own checks: `$failed = ecotest::caught(() => expect(1)->is(2));`. A
+ * check that stops the test still stops it.
+ */
+public function caught(function<void()> $body) : array<Failure>
+{
+    Session::enterSoft();
+    $body();
+    array<Failure> $out = Session::$held;
+    Session::$held = [];
+    Session::leaveSoft();
+    return $out;
+}
+
+/**
+ * Records a note for this test. The ecotest tool shows it under the test in every report.
+ */
+public function note(const string& $text) : void
+{
+    Event('note')->text('text', $text)->emit();
+}
+
+/**
+ * Records a named number for this test, such as rows read or bytes written.
+ */
+public function metric(const string& $name, int64 $value) : void
+{
+    Event('metric')->text('name', $name)->number('value', $value)->emit();
+}
+
+/**
+ * Ends the test as skipped. The process exits 0, so a plain `echoc test` counts it as passed; the
+ * ecotest tool reads the `skip` event and reports it as skipped, with `$reason`.
+ */
+#[caller]
+public function skip(const string& $reason) : void
+{
+    std::src::location $at = std::src::caller();
+
+    Session::start();
+    Session::$reported = true;
+    Event('skip')->text('reason', $reason)->at($at)->emit();
+    Session::$tally->flush();
+    echo "skipped: {$reason}";
+    std::env::exit(0);
+}
+
+/**
+ * The value of the environment variable `$name`, or a skip when it is unset or empty. For tests
+ * that need a live service: `$url = ecotest::needs(env: 'MYSQL_TEST_URL');`.
+ */
+#[caller]
+public function needs(env: const string& $name) : string
+{
+    string $value = string(std::env::var($name, ''));
+
+    if ($value->empty()) {
+        skip("{$name} is not set");
+    }
+
+    return $value;
+}

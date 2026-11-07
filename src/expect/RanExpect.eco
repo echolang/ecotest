@@ -1,0 +1,95 @@
+namespace ecotest;
+
+/**
+ * Checks on a finished program. `stdout()` and `stderr()` hand over to text checks, so
+ * `expect($ran)->exits(0)->stdout()->has('done')` reads as one sentence.
+ */
+public class RanExpect
+{
+    public Ran $ran;
+
+    public constructor(Ran $ran)
+    {
+        $this->ran = $ran;
+    }
+
+    /**
+     * The program exited with `$code`.
+     */
+    #[caller]
+    public function exits(int32 $code) : RanExpect
+    {
+        Session::checked();
+
+        if ($this->ran->signalled || $this->ran->code != $code) {
+            string $how = $this->describe();
+            Failure(
+                "expected {$this->ran->command} to exit {$code}, got {$how}",
+                std::src::caller(),
+                $detail: $this->streams()
+            )->raise();
+        }
+
+        return $this;
+    }
+
+    /**
+     * The program exited 0.
+     */
+    #[caller]
+    public function succeeds() : RanExpect
+    {
+        return $this->exits(0);
+    }
+
+    /**
+     * Text checks on what the program wrote to stdout.
+     */
+    public function stdout() : TextExpect
+    {
+        return TextExpect($this->ran->stdout);
+    }
+
+    /**
+     * Text checks on what the program wrote to stderr.
+     */
+    public function stderr() : TextExpect
+    {
+        return TextExpect($this->ran->stderr);
+    }
+
+    /**
+     * "exit 2", or "a signal" when it did not exit on its own.
+     */
+    private const function describe() : string
+    {
+        if ($this->ran->signalled) {
+            return 'a signal';
+        }
+
+        return "exit {$this->ran->code}";
+    }
+
+    /**
+     * Both streams, labelled, for the failure detail.
+     */
+    private const function streams() : string
+    {
+        string $out = '';
+
+        if (!$this->ran->stdout->empty()) {
+            $out->append("stdout:\n");
+            $out->append(Show::indent(Show::cut($this->ran->stdout), 2));
+        }
+
+        if (!$this->ran->stderr->empty()) {
+            if (!$out->empty()) {
+                $out->append("\n");
+            }
+            $out->append("stderr:\n");
+            $out->append(Show::indent(Show::cut($this->ran->stderr), 2));
+        }
+
+        return $out;
+    }
+}

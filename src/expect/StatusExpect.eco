@@ -1,0 +1,66 @@
+namespace ecotest;
+
+/**
+ * Checks on a `status<E>`: something that succeeds with no value, or fails with an `E`.
+ */
+public class StatusExpect<E>
+{
+    public status<E> $value;
+
+    public constructor(status<E> $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * It succeeded.
+     */
+    #[caller]
+    public function fine() : StatusExpect<E>
+    {
+        Session::checked();
+
+        if (!$this->value->has_value()) {
+            $e = $this->value->failure();
+            Failure("expected success, got error {$e}", std::src::caller(), $actual: "{$e}")->raise();
+        }
+
+        return $this;
+    }
+
+    /**
+     * The error, or the test stops because it succeeded.
+     */
+    #[caller]
+    public function fails() : E
+    {
+        Session::checked();
+
+        if ($this->value->has_value()) {
+            Failure('expected an error, got success', std::src::caller())->stop();
+        }
+
+        return $this->value->failure();
+    }
+
+    /**
+     * It failed with an error equal to `$want`. Needs `==` on `E`.
+     */
+    #[caller]
+    public function fails(const E& $want) : StatusExpect<E>
+    {
+        Session::checked();
+
+        if ($this->value->has_value()) {
+            Failure("expected error {$want}, got success", std::src::caller(), $expected: "{$want}")->raise();
+            return $this;
+        }
+
+        $e = $this->value->failure();
+        if (!($e == $want)) {
+            Failure("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}")->raise();
+        }
+
+        return $this;
+    }
+}

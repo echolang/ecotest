@@ -1,0 +1,278 @@
+namespace ecotest::cli;
+
+/**
+ * One ecotest run, rebuilt from what its passes left in the run directory: `pass-N/report.jsonl`
+ * from echoc and `pass-N/events/*.jsonl` from the tests. Everything a report shows is derived
+ * here, so a stored run renders the same way later as it did live.
+ */
+public class Run
+{
+    public string $dir;
+    public string $version = '';
+    public int64 $wallMs = 0;
+    public usize $passes = 0;
+    public array<TestRecord> $tests = [];
+    public map<string, usize> $index = [];
+
+    public constructor(const string& $dir)
+    {
+        $this->dir = $dir;
+    }
+
+    /**
+     * The run stored in `$dir`, with every pass found there read in order.
+     */
+    public static function load(const string& $dir) : Run
+    {
+        Run $run = Run($dir);
+
+        usize $pass = 1;
+        while (true) {
+            string $passDir = std::env::join($dir, "pass-{$pass}");
+            bool $there = std::io::exists($passDir)->or(false);
+            if (!$there) {
+                break;
+            }
+
+            $run->absorb($passDir);
+            $pass++;
+        }
+
+        $run->settle();
+        return $run;
+    }
+
+    /**
+     * Reads one pass: echoc's report rows, then each test's events.
+     */
+    public function absorb(const string& $passDir) : void
+    {
+        $this->passes++;
+
+        array<json::Value> $rows = Doc::lines(Doc::read(std::env::join($passDir, 'report.jsonl')));
+
+        foreach ($rows as const &$row) {
+            string $type = Doc::text($row, 'type');
+
+            if ($type == 'run') {
+                $this->version = Doc::text($row, 'version');
+                continue;
+            }
+
+            if ($type == 'end') {
+                $this->wallMs = $this->wallMs + Doc::number($row, 'ms');
+                continue;
+            }
+
+            if ($type != 'test') {
+                continue;
+            }
+
+            TestRecord $test = $this->find(Doc::text($row, 'id'));
+            $test->module = Doc::text($row, 'module');
+            $test->file = Run::relative(Doc::text($row, 'file'), Run::projectOf($this->dir));
+            $test->name = Doc::text($row, 'name');
+            $test->group = Doc::text($row, 'group');
+            $test->attempts[] = Outcome::of(Doc::text($row, 'status'));
+            $test->durations[] = Doc::number($row, 'ms');
+            $test->output = Doc::text($row, 'output');
+
+            // reset per pass: the last pass's events describe the last pass's failure, and a note
+            // or a bench every pass wrote is reported once
+            $test->failure = '';
+            $test->failureDetail = '';
+            $test->context = [];
+            $test->notes = [];
+            $test->metricNames = [];
+            $test->metricValues = [];
+            $test->benches = [];
+
+            string $events = std::env::join(std::env::join($passDir, 'events'), "{$test->key}.jsonl");
+            foreach (Doc::lines(Doc::read($events)) as const &$event) {
+                $this->apply($test, $event);
+            }
+
+            json::Value $crash = Doc::object($row, 'failure');
+            if ($test->failure->empty() && $crash->isObject()) {
+                string $headline = Doc::text($crash, 'headline');
+                string $message = Doc::text($crash, 'message');
+                $test->failure = "{$headline}: {$message}";
+                $test->failureFile = Doc::text($crash, 'file');
+                $test->failureLine = Doc::number($crash, 'line');
+            }
+        }
+    }
+
+    /**
+     * The record for `$id`, made on first sight so tests keep the order echoc ran them in.
+     */
+    public function find(const string& $id) : TestRecord
+    {
+        if ($this->index->has($id)) {
+            return $this->tests[$this->index->get($id)];
+        }
+
+        TestRecord $test = TestRecord($id, TestRecord::key($id));
+        $this->index->set($id, $this->tests->count());
+        $this->tests[] = $test;
+        return $test;
+    }
+
+    /**
+     * Folds one ecotest event into a test's record.
+     */
+    public function apply(TestRecord $test, const json::Value& $event) : void
+    {
+        $test->usedEcotest = true;
+        string $type = Doc::text($event, 'type');
+
+        if ($type == 'fail') {
+            string $summary = Doc::text($event, 'summary');
+            string $file = Doc::text($event, 'file');
+            int64 $line = Doc::number($event, 'line');
+
+            if ($test->failure->empty()) {
+                $test->failure = $summary;
+                $test->failureFile = $file;
+                $test->failureLine = $line;
+                $test->failureDetail = Doc::text($event, 'detail');
+
+                string $expected = Doc::text($event, 'expected');
+                string $actual = Doc::text($event, 'actual');
+                if (!$summary->contains($expected) || !$summary->contains($actual)) {
+                    string $values = "expected: {$expected}\n     got: {$actual}";
+                    if (!$test->failureDetail->empty()) {
+                        $values->append("\n");
+                        $values->append($test->failureDetail);
+                    }
+                    $test->failureDetail = $values;
+                }
+
+                foreach (Doc::list($event, 'context') as const &$scope) {
+                    $test->context[] = $scope->asStr() ?? '';
+                }
+            } else {
+                $test->failureDetail->append("\nalso {$file}:{$line}: {$summary}");
+            }
+            return;
+        }
+
+        if ($type == 'crash') {
+            if ($test->failure->empty()) {
+                string $headline = Doc::text($event, 'headline');
+                string $message = Doc::text($event, 'message');
+                $test->failure = "{$headline}: {$message}";
+                $test->failureFile = Doc::text($event, 'file');
+                $test->failureLine = Doc::number($event, 'line');
+            }
+            return;
+        }
+
+        if ($type == 'skip') {
+            $test->skipReason = Doc::text($event, 'reason');
+            return;
+        }
+
+        if ($type == 'checks') {
+            $test->checks = Doc::number($event, 'count');
+            return;
+        }
+
+        if ($type == 'note') {
+            $test->notes[] = Doc::text($event, 'text');
+            return;
+        }
+
+        if ($type == 'metric') {
+            $test->metricNames[] = Doc::text($event, 'name');
+            $test->metricValues[] = Doc::number($event, 'value');
+            return;
+        }
+
+        if ($type == 'bench') {
+            $test->benches[] = BenchResult(
+                Doc::text($event, 'label'),
+                Doc::number($event, 'p50_ns'),
+                Doc::number($event, 'p95_ns'),
+                Doc::number($event, 'calls')
+            );
+            return;
+        }
+
+        if ($type == 'snapshot-new') {
+            string $path = Doc::text($event, 'path');
+            $test->notes[] = "wrote new snapshot {$path}";
+            return;
+        }
+
+        if ($type == 'snapshot-updated') {
+            string $path = Doc::text($event, 'path');
+            $test->notes[] = "updated snapshot {$path}";
+        }
+    }
+
+    /**
+     * `$path` relative to `$base` when it lies below it, so reports name `tests/date.eco` rather
+     * than a checkout path.
+     */
+    public static function relative(const string& $path, const string& $base) : string
+    {
+        string $here = $base;
+        $here->append('/');
+        if ($path->starts($here)) {
+            return $path->sub($here->size(), $path->size() - $here->size());
+        }
+        return $path;
+    }
+
+    /**
+     * The project a run directory belongs to: what holds its `.ecotest`, or the working directory
+     * for a run kept anywhere else.
+     */
+    public static function projectOf(const string& $dir) : string
+    {
+        usize $at = $dir->find('/.ecotest/');
+        if ($at < $dir->size()) {
+            return $dir->sub(0, $at);
+        }
+
+        return std::env::cwd();
+    }
+
+    /**
+     * Settles every test's outcome from its passes and events.
+     */
+    public function settle() : void
+    {
+        foreach ($this->tests as $test) {
+            $test->settle();
+        }
+    }
+
+    /**
+     * How many tests ended with `$outcome`.
+     */
+    public const function count(Outcome $outcome) : usize
+    {
+        usize $n = 0;
+        foreach ($this->tests as const &$test) {
+            if ($test->outcome == $outcome) {
+                $n++;
+            }
+        }
+        return $n;
+    }
+
+    /**
+     * True when no test failed, timed out or was killed. Flaky tests are judged by the gates.
+     */
+    public const function green() : bool
+    {
+        foreach ($this->tests as const &$test) {
+            if ($test->outcome->broken()) {
+                return false;
+            }
+        }
+        return true;
+    }
+}

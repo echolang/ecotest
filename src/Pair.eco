@@ -1,0 +1,10 @@
+namespace ecotest;
+
+/**
+ * Two generated values, from `gen::pairs`.
+ */
+public struct Pair<A, B>
+{
+    public A $first;
+    public B $second;
+}

@@ -1,0 +1,54 @@
+/**
+ * The command line: flags reach the tool, and every command is dispatched.
+ */
+
+use ecotest::{expect, TempDir};
+use ecotest::cli::{Cli};
+
+test version_and_help_answer_zero
+{
+    expect(Cli::main(['ecotest', '--version']))->is(0);
+    expect(Cli::main(['ecotest', '--help']))->is(0);
+}
+
+test a_bad_command_line_answers_two
+{
+    expect(Cli::main(['ecotest', 'run', '--no-such-flag']))->is(2);
+    expect(Cli::main(['ecotest', 'affected']))->is(2);
+}
+
+test every_command_is_dispatched
+{
+    $empty = TempDir();
+
+    expect(Cli::main(['ecotest', 'report', '--project', $empty->path]))->is(1);
+    expect(Cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--format', 'md']))->is(0);
+    expect(Cli::main(['ecotest', 'history', '--project', $empty->path]))->is(0);
+    expect(Cli::main(['ecotest', 'api', '--project', $empty->path]))->is(1);
+    expect(Cli::main(['ecotest', 'who', 'src/a.eco:1', '--project', $empty->path]))->is(1);
+    expect(Cli::main(['ecotest', 'affected', '--since', 'main', '--project', $empty->path]))->is(1);
+}
+
+test run_takes_every_flag
+{
+    $sample = Sample();
+
+    int32 $code = Cli::main([
+        'ecotest', 'run',
+        '--project', $sample->dir->path,
+        '--echoc', Sample::compiler(),
+        '--build-dir', $sample->dir->file('build'),
+        '--coverage',
+        '--repeat', '1',
+        '--filter', 'adds',
+        '--define', 'UNUSED',
+        '--target', 'tests',
+        '--timeout', '60000',
+        '--coverage-module', 'sample',
+        '--min-coverage', '1',
+        '--min-branch-coverage', '0',
+        '--max-flaky', '0',
+    ]);
+
+    expect($code)->is(0);
+}

@@ -1,0 +1,57 @@
+namespace ecotest::cli;
+
+/**
+ * Path patterns for coverage excludes: `*` matches inside one directory, `**` across them, every
+ * other byte matches itself.
+ */
+public class Glob
+{
+    /**
+     * True when `$path` matches `$pattern` in full.
+     */
+    public static function matches(const string& $pattern, const string& $path) : bool
+    {
+        return Glob::from($pattern, 0, $path, 0);
+    }
+
+    /**
+     * Matches the pattern from `$p` against the path from `$s`.
+     */
+    private static function from(const string& $pattern, usize $p, const string& $path, usize $s) : bool
+    {
+        while ($p < $pattern->size()) {
+            uint8 $c = $pattern->byte($p);
+
+            if ($c == 42) {
+                bool $deep = $p + 1 < $pattern->size() && $pattern->byte($p + 1) == 42;
+                usize $next = $p + 1;
+                if ($deep) {
+                    $next = $p + 2;
+                    // `**/` also matches no directory at all
+                    if ($next < $pattern->size() && $pattern->byte($next) == 47 && Glob::from($pattern, $next + 1, $path, $s)) {
+                        return true;
+                    }
+                }
+
+                for (usize $k = $s; $k <= $path->size(); $k++) {
+                    if (Glob::from($pattern, $next, $path, $k)) {
+                        return true;
+                    }
+                    if ($k < $path->size() && !$deep && $path->byte($k) == 47) {
+                        return false;
+                    }
+                }
+                return false;
+            }
+
+            if ($s >= $path->size() || $path->byte($s) != $c) {
+                return false;
+            }
+
+            $p++;
+            $s++;
+        }
+
+        return $s == $path->size();
+    }
+}

@@ -1,0 +1,268 @@
+namespace ecotest;
+
+/**
+ * Checks on an `array<T>`. `size`, `empty`, `all`, `any` and `sorted` work on any `T` (`sorted`
+ * needs `<`); the checks that compare items (`is`, `has`, `lacks`, `same`) need `==` and print
+ * them with `str::from`.
+ */
+public class ListExpect<T>
+{
+    public array<T> $value;
+
+    public constructor(array<T> $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The list equals `$want`: same length, same items in the same order. A failure names the
+     * first index where they part.
+     */
+    #[caller]
+    public function is(const array<T>& $want) : ListExpect<T>
+    {
+        Session::checked();
+
+        usize $n = $want->count();
+        usize $m = $this->value->count();
+        usize $k = 0;
+
+        while ($k < $n && $k < $m && $want[$k] == $this->value[$k]) {
+            $k++;
+        }
+
+        if ($k == $n && $k == $m) {
+            return $this;
+        }
+
+        string $summary = '';
+        if ($k == $n) {
+            $summary = "expected {$n} items, got {$m}: extra items from index {$k}";
+        } else if ($k == $m) {
+            $summary = "expected {$n} items, got {$m}: missing items from index {$k}";
+        } else {
+            $w = $want[$k];
+            $g = $this->value[$k];
+            $summary = "lists differ at index {$k}: expected {$w}, got {$g}";
+        }
+
+        Failure(
+            $summary,
+            std::src::caller(),
+            $expected: $this->show($want),
+            $actual: $this->show($this->value)
+        )->raise();
+        return $this;
+    }
+
+    /**
+     * The list holds exactly `$count` items.
+     */
+    #[caller]
+    public function size(usize $count) : ListExpect<T>
+    {
+        Session::checked();
+
+        usize $m = $this->value->count();
+        if ($m == $count) {
+            return $this;
+        }
+
+        Failure("expected {$count} items, got {$m}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The list holds no items.
+     */
+    #[caller]
+    public function empty() : ListExpect<T>
+    {
+        Session::checked();
+
+        if ($this->value->empty()) {
+            return $this;
+        }
+
+        usize $m = $this->value->count();
+        Failure("expected no items, got {$m}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * Some item equals `$item`.
+     */
+    #[caller]
+    public function has(const T& $item) : ListExpect<T>
+    {
+        Session::checked();
+
+        foreach ($this->value as const &$each) {
+            if ($each == $item) {
+                return $this;
+            }
+        }
+
+        Failure("expected the list to contain {$item}", std::src::caller(), $actual: $this->show($this->value))->raise();
+        return $this;
+    }
+
+    /**
+     * No item equals `$item`.
+     */
+    #[caller]
+    public function lacks(const T& $item) : ListExpect<T>
+    {
+        Session::checked();
+
+        for (usize $k = 0; $k < $this->value->count(); $k++) {
+            if ($this->value[$k] == $item) {
+                Failure("expected the list not to contain {$item}, found at index {$k}", std::src::caller())->raise();
+                return $this;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Every item passes `$test`. A failure names the first one that does not.
+     */
+    #[caller]
+    public function all(function<bool(const T&)> $test, says: string $what = '') : ListExpect<T>
+    {
+        Session::checked();
+
+        for (usize $k = 0; $k < $this->value->count(); $k++) {
+            if (!$test($this->value[$k])) {
+                string $summary = "item {$k} failed the test";
+                if (!$what->empty()) {
+                    $summary = "item {$k} is not {$what}";
+                }
+
+                Failure($summary, std::src::caller())->raise();
+                return $this;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * At least one item passes `$test`.
+     */
+    #[caller]
+    public function any(function<bool(const T&)> $test, says: string $what = '') : ListExpect<T>
+    {
+        Session::checked();
+
+        foreach ($this->value as const &$each) {
+            if ($test($each)) {
+                return $this;
+            }
+        }
+
+        string $summary = 'no item passed the test';
+        if (!$what->empty()) {
+            $summary = "no item is {$what}";
+        }
+
+        Failure($summary, std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The items are in ascending order. Needs `<` on `T`.
+     */
+    #[caller]
+    public function sorted() : ListExpect<T>
+    {
+        Session::checked();
+
+        for (usize $k = 1; $k < $this->value->count(); $k++) {
+            if ($this->value[$k] < $this->value[$k - 1]) {
+                usize $before = $k - 1;
+                Failure("expected ascending order, item {$k} comes before item {$before}", std::src::caller())->raise();
+                return $this;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * The list holds the same items as `$want`, each as often, in any order.
+     */
+    #[caller]
+    public function same(const array<T>& $want) : ListExpect<T>
+    {
+        Session::checked();
+
+        array<bool> $used = arr::room<bool>($this->value->count());
+        for (usize $k = 0; $k < $this->value->count(); $k++) {
+            $used[] = false;
+        }
+
+        foreach ($want as const &$item) {
+            bool $found = false;
+
+            for (usize $k = 0; $k < $this->value->count(); $k++) {
+                if (!$used[$k] && $this->value[$k] == $item) {
+                    $used[$k] = true;
+                    $found = true;
+                    break;
+                }
+            }
+
+            if (!$found) {
+                Failure(
+                    "expected the same items in any order, {$item} is missing",
+                    std::src::caller(),
+                    $expected: $this->show($want),
+                    $actual: $this->show($this->value)
+                )->raise();
+                return $this;
+            }
+        }
+
+        for (usize $k = 0; $k < $this->value->count(); $k++) {
+            if (!$used[$k]) {
+                $item = $this->value[$k];
+                Failure(
+                    "expected the same items in any order, {$item} is extra",
+                    std::src::caller(),
+                    $expected: $this->show($want),
+                    $actual: $this->show($this->value)
+                )->raise();
+                return $this;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * `$items` as `[a, b, c]`, ending in `, ...]` once a line is full.
+     */
+    private const function show(const array<T>& $items) : string
+    {
+        string $out = '[';
+
+        for (usize $k = 0; $k < $items->count(); $k++) {
+            if ($k > 0) {
+                $out->append(', ');
+            }
+
+            if ($out->size() > Show::$width) {
+                $out->append('...');
+                break;
+            }
+
+            $item = $items[$k];
+            $out->append("{$item}");
+        }
+
+        $out->append(']');
+        return $out;
+    }
+}

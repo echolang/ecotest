@@ -1,0 +1,26 @@
+use ecotest::expect;
+
+test map_checks_pass
+{
+    map<string, int32> $ages = ['ada' => 36, 'bob' => 41];
+
+    expect($ages)->has(key: 'ada')->at('bob', 41)->size(2);
+    expect($ages)->is(['bob' => 41, 'ada' => 36]);
+
+    map<string, int32> $none = [];
+    expect($none)->empty();
+}
+
+#[tests: expects death]
+test map_is_fails
+{
+    map<string, int32> $ages = ['ada' => 36, 'bob' => 41];
+    expect($ages)->is(['ada' => 37, 'cy' => 20]);
+}
+
+#[tests: expects death]
+test map_at_fails
+{
+    map<string, int32> $ages = ['ada' => 36];
+    expect($ages)->at('ada', 35);
+}

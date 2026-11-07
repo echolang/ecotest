@@ -1,0 +1,137 @@
+namespace ecotest::cli;
+
+/**
+ * The run as one JSON document, `run.json`, for other tools. Versioned by `v`.
+ */
+public class JsonReport
+{
+    /**
+     * The JSON document for `$run`.
+     */
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates) : string
+    {
+        json::Value $doc = json::object();
+        $doc['v'] = json::int(1);
+        $doc['echoc'] = json::str($run->version);
+        $doc['ms'] = json::int($run->wallMs);
+        $doc['passes'] = json::int($run->passes as int64);
+        $doc['green'] = json::bool($run->green() && $failedGates->empty());
+
+        json::Value $counts = json::object();
+        $counts['pass'] = json::int($run->count(Outcome::pass) as int64);
+        $counts['fail'] = json::int($run->count(Outcome::fail) as int64);
+        $counts['skip'] = json::int($run->count(Outcome::skip) as int64);
+        $counts['flaky'] = json::int($run->count(Outcome::flaky) as int64);
+        $counts['timeout'] = json::int($run->count(Outcome::timeout) as int64);
+        $counts['signal'] = json::int($run->count(Outcome::signal) as int64);
+        $doc['counts'] = $counts;
+
+        json::Value $tests = json::arr();
+        foreach ($run->tests as const &$test) {
+            json::Value $t = json::object();
+            $t['id'] = json::str($test->id);
+            $t['module'] = json::str($test->module);
+            $t['file'] = json::str($test->file);
+            $t['name'] = json::str($test->name);
+            $t['group'] = json::str($test->group);
+            $t['outcome'] = json::str($test->outcome->word());
+            $t['ms'] = json::int($test->ms());
+
+            json::Value $attempts = json::arr();
+            foreach ($test->attempts as const &$a) {
+                $attempts[] = json::str($a->word());
+            }
+            $t['attempts'] = $attempts;
+
+            if ($test->usedEcotest) {
+                $t['checks'] = json::int($test->checks);
+            }
+            if (!$test->failure->empty()) {
+                json::Value $f = json::object();
+                $f['summary'] = json::str($test->failure);
+                $f['file'] = json::str($test->failureFile);
+                $f['line'] = json::int($test->failureLine);
+                $f['detail'] = json::str($test->failureDetail);
+                json::Value $context = json::arr();
+                foreach ($test->context as const &$scope) {
+                    $context[] = json::str($scope);
+                }
+                $f['context'] = $context;
+                $t['failure'] = $f;
+            }
+            if (!$test->skipReason->empty()) {
+                $t['skip'] = json::str($test->skipReason);
+            }
+            if (!$test->notes->empty()) {
+                json::Value $notes = json::arr();
+                foreach ($test->notes as const &$note) {
+                    $notes[] = json::str($note);
+                }
+                $t['notes'] = $notes;
+            }
+            if (!$test->metricNames->empty()) {
+                json::Value $metrics = json::object();
+                for (usize $i = 0; $i < $test->metricNames->count(); $i++) {
+                    $metrics[$test->metricNames[$i]] = json::int($test->metricValues[$i]);
+                }
+                $t['metrics'] = $metrics;
+            }
+            if (!$test->benches->empty()) {
+                json::Value $benches = json::arr();
+                foreach ($test->benches as const &$b) {
+                    json::Value $one = json::object();
+                    $one['label'] = json::str($b->label);
+                    $one['p50_ns'] = json::int($b->p50);
+                    $one['p95_ns'] = json::int($b->p95);
+                    $one['calls'] = json::int($b->calls);
+                    $benches[] = $one;
+                }
+                $t['benches'] = $benches;
+            }
+
+            $tests[] = $t;
+        }
+        $doc['tests'] = $tests;
+
+        if (!$totals->empty()) {
+            json::Value $cov = json::object();
+            $cov['lines'] = JsonReport::ratio($totals[0]);
+            $cov['branches'] = JsonReport::ratio($totals[1]);
+            $cov['functions'] = JsonReport::ratio($totals[2]);
+
+            json::Value $perFile = json::arr();
+            foreach ($files as const &$file) {
+                json::Value $f = json::object();
+                $f['module'] = json::str($file->module);
+                $f['file'] = json::str($file->file);
+                $f['lines'] = JsonReport::ratio($file->lineTotals());
+                $f['branches'] = JsonReport::ratio($file->branchTotals());
+                $f['functions'] = JsonReport::ratio($file->functionTotals());
+                $f['missed'] = json::str($file->missedRanges());
+                $perFile[] = $f;
+            }
+            $cov['files'] = $perFile;
+            $doc['coverage'] = $cov;
+        }
+
+        json::Value $gates = json::arr();
+        foreach ($failedGates as const &$gate) {
+            $gates[] = json::str($gate);
+        }
+        $doc['failedGates'] = $gates;
+
+        return json::pretty($doc);
+    }
+
+    /**
+     * `{"hit": n, "total": n, "percent": p}`.
+     */
+    private static function ratio(const Ratio& $r) : json::Value
+    {
+        json::Value $v = json::object();
+        $v['hit'] = json::int($r->hit as int64);
+        $v['total'] = json::int($r->total as int64);
+        $v['percent'] = json::float($r->percent());
+        return $v;
+    }
+}

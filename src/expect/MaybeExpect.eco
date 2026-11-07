@@ -1,0 +1,66 @@
+namespace ecotest;
+
+/**
+ * Checks on a `T?`. `some()` hands back the value and stops the test when there is none, even
+ * inside `soft()`.
+ */
+public class MaybeExpect<T>
+{
+    public T? $value;
+
+    public constructor(T? $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The value, or the test stops because it is absent.
+     */
+    #[caller]
+    public function some() : T
+    {
+        Session::checked();
+        std::src::location $at = std::src::caller();
+
+        T $got = guard $this->value else {
+            die(Session::report(Failure('expected a value, got null', $at)), $at);
+        };
+        return $got;
+    }
+
+    /**
+     * A value is present and equals `$want`.
+     */
+    #[caller]
+    public function some(const T& $want) : MaybeExpect<T>
+    {
+        Session::checked();
+
+        T $got = guard $this->value else {
+            Failure("expected {$want}, got null", std::src::caller(), $expected: "{$want}", $actual: 'null')->raise();
+            return $this;
+        };
+
+        if (!($got == $want)) {
+            Failure("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}")->raise();
+        }
+
+        return $this;
+    }
+
+    /**
+     * No value is present.
+     */
+    #[caller]
+    public function none() : MaybeExpect<T>
+    {
+        Session::checked();
+
+        if ($this->value == null) {
+            return $this;
+        }
+
+        Failure('expected null, got a value', std::src::caller())->raise();
+        return $this;
+    }
+}

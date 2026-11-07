@@ -1,0 +1,106 @@
+namespace ecotest;
+
+/**
+ * Checks on a string.
+ */
+public function expect(const string& $value) : TextExpect
+{
+    return TextExpect($value);
+}
+
+/**
+ * Checks on a signed integer of any width.
+ */
+public function expect(int64 $value) : NumberExpect
+{
+    return NumberExpect($value);
+}
+
+/**
+ * Checks on an unsigned integer of any width, `usize` included.
+ */
+public function expect(uint64 $value) : UnsignedExpect
+{
+    return UnsignedExpect($value);
+}
+
+/**
+ * Checks on a float of either width.
+ */
+public function expect(float64 $value) : FloatExpect
+{
+    return FloatExpect($value);
+}
+
+/**
+ * Checks on a `bool`.
+ */
+public function expect(bool $value) : BoolExpect
+{
+    return BoolExpect($value);
+}
+
+/**
+ * Checks on a list.
+ */
+public function expect<T>(const array<T>& $value) : ListExpect<T>
+{
+    return ListExpect<T>($value);
+}
+
+/**
+ * Checks on a map.
+ */
+public function expect<K, V>(const map<K, V>& $value) : MapExpect<K, V>
+{
+    return MapExpect<K, V>($value);
+}
+
+/**
+ * Checks on a `result`: `ok()` for the value, `fails()` for the error.
+ */
+public function expect<T, E>(const result<T, E>& $value) : ResultExpect<T, E>
+{
+    return ResultExpect<T, E>($value);
+}
+
+/**
+ * Checks on a `status`: `fine()` for success, `fails()` for the error.
+ */
+public function expect<E>(const status<E>& $value) : StatusExpect<E>
+{
+    return StatusExpect<E>($value);
+}
+
+/**
+ * Checks on a nullable: `some()` for the value, `none()` for its absence.
+ */
+public function expect<T>(const T?& $value) : MaybeExpect<T>
+{
+    return MaybeExpect<T>($value);
+}
+
+/**
+ * Checks on any other value, such as your own structs, classes and enums. Labelled so it never
+ * competes with the overloads above.
+ */
+public function expect<T>(value: const T& $value) : Expect<T>
+{
+    return Expect<T>($value);
+}
+
+/**
+ * Checks on a `Calls<T>` recorder.
+ */
+public function expect<T>(const Calls<T>& $calls) : CallsExpect<T>
+{
+    return CallsExpect<T>($calls);
+}
+
+/**
+ * Checks on a program run by `ecotest::run`.
+ */
+public function expect(const Ran& $ran) : RanExpect
+{
+    return RanExpect($ran);
+}

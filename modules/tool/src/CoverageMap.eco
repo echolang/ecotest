@@ -1,0 +1,60 @@
+namespace ecotest::cli;
+
+/**
+ * echoc's `coverage/map.json`: every counter of every covered module.
+ */
+public class CoverageMap
+{
+    public string $hash = '';
+    public array<ModuleSites> $modules = [];
+
+    /**
+     * The map at `$path`, or null when there is none or it does not parse.
+     */
+    public static function load(const string& $path) : CoverageMap?
+    {
+        string $text = Doc::read($path);
+        if ($text->empty()) {
+            return null;
+        }
+
+        json::Value $doc = guard json::parse($text) else {
+            return null;
+        };
+
+        CoverageMap $map = CoverageMap();
+        $map->hash = Doc::text($doc, 'hash');
+
+        foreach (Doc::list($doc, 'modules') as const &$module) {
+            ModuleSites $sites = ModuleSites(Doc::text($module, 'name'), Doc::text($module, 'dir'));
+
+            foreach (Doc::list($module, 'counters') as const &$counter) {
+                $sites->sites[] = CoverageSite(
+                    Doc::text($counter, 'file'),
+                    Doc::number($counter, 'line'),
+                    Doc::number($counter, 'column'),
+                    Doc::text($counter, 'kind'),
+                    Doc::text($counter, 'edge'),
+                    Doc::text($counter, 'function')
+                );
+            }
+
+            $map->modules[] = $sites;
+        }
+
+        return $map;
+    }
+
+    /**
+     * The module named `$name`, or null.
+     */
+    public const function module(const string& $name) : ModuleSites?
+    {
+        foreach ($this->modules as const &$module) {
+            if ($module->name == $name) {
+                return $module;
+            }
+        }
+        return null;
+    }
+}

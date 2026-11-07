@@ -1,0 +1,86 @@
+namespace ecotest::cli;
+
+/**
+ * One test's `.ecocov` file: a 160-byte header carrying the test id, then per module its name and
+ * its `uint32` counts, all little endian.
+ */
+public class CounterFile
+{
+    public string $testId = '';
+    public array<string> $modules = [];
+    public array<array<uint32>> $counts = [];
+
+    /**
+     * The counter file at `$path`, or null when it is missing or not a version 2 file.
+     */
+    public static function load(const string& $path) : CounterFile?
+    {
+        string $bytes = Doc::read($path);
+        if ($bytes->size() < 160 || $bytes->sub(0, 6) != 'ECOCOV' || CounterFile::u32($bytes, 8) != 2) {
+            return null;
+        }
+
+        CounterFile $file = CounterFile();
+        uint32 $n = CounterFile::u32($bytes, 12);
+
+        usize $end = 24;
+        while ($end < 152 && $bytes->byte($end) != 0) {
+            $end++;
+        }
+        $file->testId = $bytes->sub(24, $end - 24);
+
+        usize $at = 160;
+        for (uint32 $m = 0; $m < $n; $m++) {
+            if ($at + 8 > $bytes->size()) {
+                return null;
+            }
+
+            usize $nameLength = CounterFile::u32($bytes, $at) as usize;
+            usize $count = CounterFile::u32($bytes, $at + 4) as usize;
+            $at = $at + 8;
+
+            usize $padded = ($nameLength + 3) / 4 * 4;
+            if ($at + $padded + $count * 4 > $bytes->size()) {
+                return null;
+            }
+
+            $file->modules[] = $bytes->sub($at, $nameLength);
+            $at = $at + $padded;
+
+            array<uint32> $values = arr::room<uint32>($count);
+            for (usize $i = 0; $i < $count; $i++) {
+                $values[] = CounterFile::u32($bytes, $at);
+                $at = $at + 4;
+            }
+            $file->counts[] = $values;
+        }
+
+        return $file;
+    }
+
+    /**
+     * The counts of module `$name`, or an empty list.
+     */
+    public const function of(const string& $name) : array<uint32>
+    {
+        for (usize $i = 0; $i < $this->modules->count(); $i++) {
+            if ($this->modules[$i] == $name) {
+                return $this->counts[$i];
+            }
+        }
+
+        array<uint32> $none = [];
+        return $none;
+    }
+
+    /**
+     * The little-endian `uint32` at byte `$at`.
+     */
+    private static function u32(const string& $bytes, usize $at) : uint32
+    {
+        return ($bytes->byte($at) as uint32)
+            | (($bytes->byte($at + 1) as uint32) << 8)
+            | (($bytes->byte($at + 2) as uint32) << 16)
+            | (($bytes->byte($at + 3) as uint32) << 24);
+    }
+}

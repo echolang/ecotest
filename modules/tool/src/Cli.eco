@@ -1,0 +1,170 @@
+namespace ecotest::cli;
+
+use command;
+
+/**
+ * The ecotest command line: the commands, their flags, and the hand-off to `Tool`.
+ *
+ *   ecotest run [--coverage] [--repeat N] [--filter ...] [gates]
+ *   ecotest report [run] --format terminal|md|junit|lcov|html|json
+ *   ecotest history
+ *   ecotest api
+ *   ecotest who <file:line>
+ *   ecotest affected --since <ref>
+ */
+public class Cli
+{
+    /**
+     * Runs the command `$argv` names, the program name first, and answers the exit code.
+     */
+    public static function main(const array<string>& $argv) : int32
+    {
+        command::Command $app = command::Command('ecotest', '0.1.0', 'run echoc tests and report on them');
+
+        command::Subcommand $run = $app->command('run', 'run the tests and report', 'Runs echoc test, merges what the tests recorded through ecotest, prints a summary and writes every report into the run directory.');
+        command::Subcommand $report = $app->command('report', 'render a stored run', 'Renders the newest run, or the one named, in another format.');
+        command::Subcommand $history = $app->command('history', 'trends across runs', 'Duration and outcome trends from the run history.');
+        command::Subcommand $api = $app->command('api', 'public API no test calls', 'Lists public functions and methods whose coverage counter never ran in the newest run.');
+        command::Subcommand $who = $app->command('who', 'tests that ran a line', 'Names the tests that ran a source line in the newest run.');
+        command::Subcommand $affected = $app->command('affected', 'run the tests touching a change', 'Runs only the tests whose coverage touches lines changed since a git ref.');
+
+        $app->positional($report, '[run]', 'the run directory', 'Defaults to the newest run.', 0, 1, '');
+        $app->positional($who, '<file:line>', 'the source line', 'A path, or its tail, and a line number.', 1, 1, '');
+
+        command::Flag $coverage = $app->flag('coverage', '', 'measure line, branch and function coverage');
+        command::Arg $repeat = $app->arg('repeat', '', '<n>', 'run every test n times and flag the flaky ones');
+        command::Arg $filter = $app->repeat('filter', '', '<spec>', 'which tests to run, as echoc test --filter');
+        command::Arg $target = $app->arg('target', '', '<name>', 'a test target from the manifest');
+        command::Arg $define = $app->repeat('define', '', '<name>', 'a flag #[if: NAME] can test');
+        command::Arg $timeout = $app->arg('timeout', '', '<ms>', 'kill a test that runs longer');
+        command::Arg $echoc = $app->arg('echoc', '', '<path>', 'the echoc to run');
+        command::Arg $buildDir = $app->arg('build-dir', '', '<dir>', 'echoc build directory');
+        command::Arg $module = $app->repeat('coverage-module', '', '<name>', 'also report coverage of this module');
+        command::Arg $minCoverage = $app->arg('min-coverage', '', '<percent>', 'fail below this line coverage');
+        command::Arg $minBranches = $app->arg('min-branch-coverage', '', '<percent>', 'fail below this branch coverage');
+        command::Arg $minDiff = $app->arg('min-diff-coverage', '', '<percent>', 'fail below this coverage of changed lines');
+        command::Arg $maxFlaky = $app->arg('max-flaky', '', '<n>', 'fail with more flaky tests');
+        command::Arg $since = $app->arg('since', '', '<ref>', 'git ref for diff coverage and affected');
+        command::Arg $format = $app->arg('format', '', '<name>', 'terminal, md, junit, lcov, html or json');
+        command::Arg $project = $app->arg('project', '', '<dir>', 'the module to test, the current directory by default');
+
+        foreach ([$coverage] as $f) {
+            $app->accept($f, $run);
+            $app->accept($f, $affected);
+        }
+        foreach ([$repeat, $filter, $target, $define, $timeout, $echoc, $buildDir, $minCoverage, $minBranches, $minDiff, $maxFlaky] as $a) {
+            $app->accept($a, $run);
+            $app->accept($a, $affected);
+        }
+        $app->accept($module, $run);
+        $app->accept($module, $report);
+        $app->accept($module, $api);
+        $app->accept($since, $run);
+        $app->accept($since, $affected);
+        $app->require($since, $affected);
+        $app->accept($format, $report);
+        $app->accept($echoc, $api);
+        foreach ([$run, $report, $history, $api, $who, $affected] as $sub) {
+            $app->accept($project, $sub);
+        }
+
+        $r = $app->parse($argv);
+
+        if (Cli::refused($r, $app)) {
+            return 2;
+        }
+
+        $parsed = $r->parsed;
+
+        if ($parsed->wantsVersion) {
+            std::io::println(command::renderVersion($app));
+            return 0;
+        }
+
+        if ($parsed->wantsHelp) {
+            command::CLIContext $help = .from($parsed, $app, .stdout);
+            $help->print(command::renderHelp($app, $parsed, $help));
+            return 0;
+        }
+
+        $tool = Tool();
+        $tool->project = Files::resolve(std::env::cwd(), $parsed->value($project));
+        $tool->echoc = $parsed->value($echoc);
+        if ($tool->echoc->empty()) {
+            $tool->echoc = string(std::env::var('ECHOC', 'echoc'));
+        }
+        $tool->buildDir = $parsed->value($buildDir);
+        if ($tool->buildDir->empty()) {
+            $tool->buildDir = 'ecobuild';
+        }
+        $tool->coverage = $parsed->stated($coverage);
+        $tool->repeat = (str::uint($parsed->value($repeat)) ?? 1) as usize;
+        $tool->modules = $parsed->values($module);
+        $tool->since = $parsed->value($since);
+        $tool->format = $parsed->value($format);
+
+        foreach ($parsed->values($filter) as const &$spec) {
+            $tool->forwarded[] = '--filter';
+            $tool->forwarded[] = $spec;
+        }
+        foreach ($parsed->values($define) as const &$name) {
+            $tool->forwarded[] = '--define';
+            $tool->forwarded[] = $name;
+        }
+        if ($parsed->stated($target)) {
+            $tool->forwarded[] = '--target';
+            $tool->forwarded[] = $parsed->value($target);
+        }
+        if ($parsed->stated($timeout)) {
+            $tool->forwarded[] = '--timeout';
+            $tool->forwarded[] = $parsed->value($timeout);
+        }
+
+        $tool->gates->minLines = str::float($parsed->value($minCoverage)) ?? -1.0;
+        $tool->gates->minBranches = str::float($parsed->value($minBranches)) ?? -1.0;
+        $tool->gates->minDiff = str::float($parsed->value($minDiff)) ?? -1.0;
+        $tool->gates->maxFlaky = str::int($parsed->value($maxFlaky)) ?? -1;
+
+        string $subject = $parsed->subject($app);
+
+        if ($subject == 'run') {
+            return $tool->run();
+        }
+
+        if ($subject == 'report') {
+            string $dir = '';
+            if (!$parsed->positionals->empty()) {
+                $dir = $parsed->positionals[0];
+            }
+            return $tool->report($dir);
+        }
+
+        if ($subject == 'history') {
+            return $tool->history();
+        }
+
+        if ($subject == 'api') {
+            return $tool->api();
+        }
+
+        if ($subject == 'who') {
+            return $tool->who($parsed->positionals[0]);
+        }
+
+        return $tool->affected();
+    }
+
+    /**
+     * Prints why the command line was refused, when it was. True when it was.
+     */
+    private static function refused(const command::Outcome& $r, const command::Command& $app) : bool
+    {
+        command::Error $e = guard $r->error else {
+            return false;
+        };
+
+        command::CLIContext $err = .from($r->parsed, $app, .stderr);
+        $err->print(command::renderError($e, $app, $r->parsed, $err));
+        return true;
+    }
+}

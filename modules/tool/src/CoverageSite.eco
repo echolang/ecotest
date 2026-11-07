@@ -1,0 +1,15 @@
+namespace ecotest::cli;
+
+/**
+ * One counter echoc planted: where it is and what it counts (`fn`, `line` or `branch`, with the
+ * branch edge such as `then` or `arm`).
+ */
+public struct CoverageSite
+{
+    public string $file;
+    public int64 $line;
+    public int64 $column;
+    public string $kind;
+    public string $edge;
+    public string $function;
+}

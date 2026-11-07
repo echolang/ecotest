@@ -1,0 +1,27 @@
+/*
+ * ecotest: checks, failures that name the test's line, soft checks, context, skips and per-test
+ * events for `echoc test`. Standard library only, so any module can add it to its test target.
+ */
+
+#[module: "ecotest"]
+#[version: "0.1.0"]
+#[epm::license: "MIT"]
+#[epm::description: "Expressive checks and test events for echoc test"]
+
+#[sources: "src/**/*.eco"]
+
+// the runner: `epm run ecotest run --coverage` in a module that requires ecotest (epm runs only
+// dependencies' tools); here, `echoc run --target ecotest -- run --coverage`. its sources are ecotest-tool's (modules/tool, where
+// its tests measure them), and its CLI, JSON and HTTP libraries are compiled into the tool, never
+// into a consumer's tests
+#[target: exe { name: "ecotest", entry: "cli/main.eco", public: true }] {
+    #[sources: "cli/*.eco"]
+    #[sources: "modules/tool/src/**/*.eco"]
+    #[requires: "echolang/libcommand" { version: "^0.1", source: git "https://github.com/echolang/libcommand" }]
+    #[requires: "echolang/libjson" { version: "^0.1", source: git "https://github.com/echolang/libjson" }]
+    #[requires: "echolang/libcurl" { version: "^1.0", source: git "https://github.com/echolang/libcurl" }]
+}
+
+#[target: test] {
+    #[sources: "tests/**/*.eco"]
+}

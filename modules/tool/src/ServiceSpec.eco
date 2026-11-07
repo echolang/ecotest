@@ -1,0 +1,38 @@
+namespace ecotest::cli;
+
+/**
+ * One service from `ecotest.json`: the command that starts it, how to tell it is ready, the URL
+ * tests reach it at, and extra environment.
+ */
+public struct ServiceSpec
+{
+    public string $name;
+    public array<string> $command;
+    public string $readyUrl;
+    public int64 $readyMs;
+    public int64 $timeoutMs;
+    public string $url;
+    public array<string> $envNames;
+    public array<string> $envValues;
+
+    /**
+     * The variable tests read the URL from: `ECOTEST_<NAME>_URL`, upper case, non-alphanumerics
+     * as `_`.
+     */
+    public const function variable() : string
+    {
+        string $out = 'ECOTEST_';
+        for (usize $i = 0; $i < $this->name->size(); $i++) {
+            uint8 $b = $this->name->byte($i);
+            if ($b >= 97 && $b <= 122) {
+                $out->push($b - 32);
+            } else if (($b >= 65 && $b <= 90) || ($b >= 48 && $b <= 57)) {
+                $out->push($b);
+            } else {
+                $out->push(95);
+            }
+        }
+        $out->append('_URL');
+        return $out;
+    }
+}

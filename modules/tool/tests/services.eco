@@ -1,0 +1,76 @@
+/**
+ * Services from `ecotest.json`: started, waited for, handed to the tests, logged and stopped.
+ */
+
+use ecotest::{expect, TempDir};
+use ecotest::cli::{Tool, Doc, Services};
+
+test a_service_ready_by_delay_runs_beside_the_tests
+{
+    $sample = Sample();
+    $sample->dir->write('ecotest.json', '{"services": [{"name": "idle", "run": ["sleep", "30"], "ready": {"ms": 20}, "url": "http://127.0.0.1:1", "env": {"MODE": "test"}}]}');
+
+    expect($sample->tool()->run())->is(0);
+    expect(Doc::read(std::env::join($sample->latest(), 'services/idle.log')))->empty();
+}
+
+test a_service_ready_over_http_gets_its_url_from_the_probe
+{
+    $sample = Sample();
+    $sample->dir->write('ecotest.json', '{"services": [{"name": "web", "run": ["python3", "-m", "http.server", "18734", "--bind", "127.0.0.1"], "ready": {"http": "http://127.0.0.1:18734/", "timeout_ms": 10000}}]}');
+
+    Tool $tool = $sample->tool();
+    expect($tool->run())->is(0);
+    expect($tool->services->envNames)->is(['ECOTEST_WEB_URL']);
+    expect($tool->services->envValues)->is(['http://127.0.0.1:18734']);
+}
+
+test a_failing_run_prints_the_end_of_each_service_log
+{
+    $sample = Sample();
+    $sample->dir->write('ecotest.json', '{"services": [{"name": "chatty", "run": ["sh", "-c", "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do echo line $i; done; sleep 30"], "ready": {"ms": 200}}]}');
+
+    Tool $tool = $sample->tool();
+    $tool->forwarded = ['--define', 'BROKEN'];
+
+    expect($tool->run())->is(1);
+    expect($tool->services->tails($sample->latest(), 12))->has('line 14')->lacks('line 2\n');
+}
+
+test a_service_that_cannot_start_stops_the_run
+{
+    foreach ([
+        '{"services": [{"name": "nothing", "ready": {"ms": 1}}]}',
+        '{"services": [{"name": "missing", "run": ["/nonexistent/server"]}]}',
+        '{"services": [{"name": "deaf", "run": ["sleep", "30"], "ready": {"http": "http://127.0.0.1:9", "timeout_ms": 300}}]}',
+        '{"services": [{"name": "a/b", "run": ["sleep", "30"]}]}',
+        '{"services": [{"name": "lost", "run": ["python3", "-m", "http.server", "18735", "--bind", "127.0.0.1"], "ready": {"http": "http://127.0.0.1:18735/missing", "timeout_ms": 1500}}]}',
+    ] as const &$config) {
+        $sample = Sample();
+        $sample->dir->write('ecotest.json', $config);
+        $at = ecotest::context($config);
+
+        expect($sample->tool()->run())->is(1);
+    }
+}
+
+test a_service_with_no_ready_check_is_ready_at_once
+{
+    $sample = Sample();
+    $sample->dir->write('ecotest.json', '{"services": [{"name": "plain", "run": ["sleep", "30"]}]}');
+
+    expect($sample->tool()->run())->is(0);
+}
+
+test a_service_url_comes_from_its_ready_probe
+{
+    Services $services = Services();
+    $doc = json::parse('[{"name": "a", "ready": {"http": "http://h:1/health"}}, {"name": "b", "ready": {"http": "http://h:2"}}, {"name": "c", "ready": {"http": "h:3/x"}}]')->unwrap();
+    array<json::Value> $none = [];
+    $services->configure($doc->asArray() ?? $none);
+
+    expect($services->specs->count())->is(3);
+    expect($services->specs[0]->url)->is('http://h:1');
+    expect($services->specs[1]->url)->is('http://h:2');
+    expect($services->specs[2]->url)->empty();
+}

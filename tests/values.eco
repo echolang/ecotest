@@ -1,0 +1,19 @@
+use ecotest::expect;
+
+test value_checks_pass
+{
+    expect(value: Point(1, 2))->is(Point(1, 2))->isNot(Point(2, 1));
+    expect(value: Point(1, 2))->satisfies((const Point& $p) => $p->x < $p->y, says: 'rising');
+}
+
+#[tests: expects death]
+test value_is_fails
+{
+    expect(value: Point(1, 2))->is(Point(1, 3));
+}
+
+#[tests: expects death]
+test value_satisfies_fails
+{
+    expect(value: Point(2, 1))->satisfies((const Point& $p) => $p->x < $p->y, says: 'rising');
+}

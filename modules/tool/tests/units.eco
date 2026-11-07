@@ -1,0 +1,77 @@
+use ecotest::expect;
+use ecotest::cli::{GitDiff, Glob, Coverage, ServiceSpec, Ratio, Outcome, TestRecord, Run, FileCoverage};
+
+test git_diff_hunks_become_changed_lines
+{
+    string $text = "diff --git a/src/a.eco b/src/a.eco\n--- a/src/a.eco\n+++ b/src/a.eco\n@@ -3,0 +4,2 @@ fn\n+x\n+y\n@@ -10 +12 @@\n-a\n+b\n+++ /dev/null\n";
+    $diff = GitDiff::parse($text);
+
+    expect($diff->files)->is(['src/a.eco']);
+    expect($diff->lines[0])->is([4, 5, 12]);
+}
+
+test globs_match_inside_and_across_directories
+{
+    expect(Glob::matches('examples/**', 'examples/a/b.eco'))->yes();
+    expect(Glob::matches('src/*.eco', 'src/a.eco'))->yes();
+    expect(Glob::matches('src/*.eco', 'src/x/a.eco'))->no();
+    expect(Glob::matches('**/gen/*.eco', 'src/gen/a.eco'))->yes();
+    expect(Glob::matches('**/gen/*.eco', 'gen/a.eco'))->yes();
+}
+
+test paths_match_by_their_tail
+{
+    expect(Coverage::sameFile('src/date.eco', 'mylib/src/date.eco'))->yes();
+    expect(Coverage::sameFile('src/date.eco', 'src/mydate.eco'))->no();
+    expect(Coverage::sameFile('date.eco', 'src/date.eco'))->yes();
+}
+
+test a_service_url_variable_is_upper_case
+{
+    array<string> $none = [];
+    $spec = ServiceSpec('my-api', $none, '', 0, 0, '', $none, $none);
+    expect($spec->variable())->is('ECOTEST_MY_API_URL');
+}
+
+test ratios_print_one_decimal
+{
+    expect(Ratio(1, 3)->shown())->is('33.3%');
+    expect(Ratio(0, 0)->percent())->is(100.0);
+}
+
+test passes_that_disagree_are_flaky
+{
+    $t = TestRecord('m/a.eco::t', 'm_a.eco__t');
+    $t->attempts = [Outcome::pass, Outcome::fail];
+    $t->settle();
+    expect($t->outcome == Outcome::flaky)->yes();
+
+    $s = TestRecord('m/a.eco::s', 'm_a.eco__s');
+    $s->attempts = [Outcome::pass];
+    $s->skipReason = 'no db';
+    $s->settle();
+    expect($s->outcome == Outcome::skip)->yes();
+}
+
+test missed_lines_fold_into_ranges
+{
+    $f = FileCoverage('m', 'src/a.eco', '/x/src/a.eco');
+    $f->lines->set(1, 1);
+    $f->lines->set(2, 0);
+    $f->lines->set(3, 0);
+    $f->lines->set(5, 0);
+    expect($f->missedRanges())->is('2-3, 5');
+    expect($f->lineTotals()->hit)->is(1);
+}
+
+test a_run_folds_events_into_its_tests
+{
+    $run = Run('nowhere');
+    $t = $run->find('m/a.eco::t');
+    $doc = guard json::parse('{"type":"fail","summary":"expected 1, got 2","expected":"1","actual":"2","detail":"","context":["row 3"],"file":"tests/a.eco","line":7}');
+    $run->apply($t, $doc);
+
+    expect($t->failure)->is('expected 1, got 2');
+    expect($t->failureLine)->is(7);
+    expect($t->context)->is(['row 3']);
+}

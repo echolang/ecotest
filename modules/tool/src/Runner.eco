@@ -1,0 +1,91 @@
+namespace ecotest::cli;
+
+/**
+ * Runs `echoc test` once per pass into a run directory. Each pass gets its own `report.jsonl`,
+ * an `events/` directory the tests write into through `ECOTEST_RUN_DIR`, and a copy of echoc's
+ * coverage files, which echoc clears on its next run.
+ */
+public class Runner
+{
+    public string $project = '.';
+    public string $echoc = 'echoc';
+    public array<string> $forwarded = [];
+    public bool $coverage = false;
+    public string $buildDir = 'ecobuild';
+    public usize $repeat = 1;
+    public uint64 $seed = 0;
+    public array<string> $envNames = [];
+    public array<string> $envValues = [];
+
+    /**
+     * Runs every pass into `$dir`. True when echoc could be started for each of them.
+     */
+    public function run(const string& $dir) : bool
+    {
+        for (usize $pass = 1; $pass <= $this->repeat; $pass++) {
+            string $passDir = std::env::join($dir, "pass-{$pass}");
+            Files::mkdirs(std::env::join($passDir, 'events'));
+
+            array<string> $args = ['test', '--report', std::env::join($passDir, 'report.jsonl')];
+            if ($this->coverage) {
+                $args[] = '--coverage';
+            }
+            if ($this->buildDir != 'ecobuild') {
+                $args[] = '--build-dir';
+                $args[] = $this->buildDir;
+            }
+            foreach ($this->forwarded as const &$word) {
+                $args[] = $word;
+            }
+
+            std::process::command $echoc = std::process::command($this->echoc, $args);
+            $echoc->dir($this->project);
+            $echoc->env('ECOTEST_RUN_DIR', $passDir);
+            // a test that runs echoc itself reaches the same compiler
+            $echoc->env('ECHOC', $this->echoc);
+            $echoc->env('ECOTEST_SEED', "{$this->seed}");
+            for (usize $i = 0; $i < $this->envNames->count(); $i++) {
+                $echoc->env($this->envNames[$i], $this->envValues[$i]);
+            }
+
+            if ($this->repeat > 1) {
+                std::io::println("ecotest: pass {$pass} of {$this->repeat}");
+            }
+
+            result<std::process::exit_status, std::io::ioerror> $ran = $echoc->status();
+            if ($ran->failed()) {
+                $e = $ran->failure();
+                std::io::println("ecotest: cannot run {$this->echoc}: {$e}");
+                return false;
+            }
+
+            if ($this->coverage) {
+                $this->keepCoverage($passDir);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Copies echoc's coverage map and counter files into the pass.
+     */
+    private function keepCoverage(const string& $passDir) : void
+    {
+        string $from = std::env::join(Files::resolve($this->project, $this->buildDir), 'coverage');
+        string $to = std::env::join($passDir, 'coverage');
+        Files::mkdirs(std::env::join($to, 'tests'));
+
+        result<bool, std::io::ioerror> $map = std::io::copy(std::env::join($from, 'map.json'), std::env::join($to, 'map.json'));
+
+        std::io::dir $listing = guard std::io::opendir(std::env::join($from, 'tests')) else {
+            return;
+        };
+
+        foreach ($listing as const &$entry) {
+            result<bool, std::io::ioerror> $copied = std::io::copy($entry->path(), std::env::join(std::env::join($to, 'tests'), $entry->name()));
+        }
+
+        $listing->close();
+    }
+}

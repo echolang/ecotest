@@ -1,0 +1,71 @@
+namespace ecotest;
+
+/**
+ * A small seeded generator (xorshift64*). The same seed gives the same values on every machine,
+ * which is what lets a failed property be replayed from the seed it prints.
+ */
+public struct Random
+{
+    public uint64 $state;
+
+    public constructor(uint64 $seed)
+    {
+        $this->state = $seed;
+
+        // xorshift never leaves zero
+        if ($this->state == 0) {
+            $this->state = 11400714819323198485;
+        }
+    }
+
+    /**
+     * The next 64 random bits.
+     */
+    public function next() : uint64
+    {
+        uint64 $x = $this->state;
+        $x = $x ^ ($x >> 12);
+        $x = $x ^ ($x << 25);
+        $x = $x ^ ($x >> 27);
+        $this->state = $x;
+        return $x * 2685821657736338717;
+    }
+
+    /**
+     * A number in `[0, $n)`, or 0 when `$n` is 0.
+     */
+    public function below(uint64 $n) : uint64
+    {
+        if ($n == 0) {
+            return 0;
+        }
+
+        return $this->next() % $n;
+    }
+
+    /**
+     * A number in `[$low, $high]`, both ends included.
+     */
+    public function range(int64 $low, int64 $high) : int64
+    {
+        if ($high <= $low) {
+            return $low;
+        }
+
+        uint64 $span = ($high - $low) as uint64;
+        if ($span == 18446744073709551615) {
+            return $this->next() as int64;
+        }
+
+        return $low + ($this->below($span + 1) as int64);
+    }
+
+    /**
+     * A float in `[0, 1)`.
+     */
+    public function unit() : float64
+    {
+        uint64 $bits = $this->next() >> 11;
+        return ($bits as float64) / 9007199254740992.0;
+    }
+}

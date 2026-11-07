@@ -1,0 +1,27 @@
+namespace ecotest;
+
+/**
+ * A recorder for calls a fake receives. A class, so the closure handed to the code under test and
+ * the test itself share one list: `$calls = Calls<string>();`, then `$calls->record($x)` inside the
+ * fake and `expect($calls)->times(2)` afterwards.
+ */
+public class Calls<T>
+{
+    public array<T> $seen = [];
+
+    /**
+     * Records one call with its argument.
+     */
+    public function record(T $value) : void
+    {
+        $this->seen[] = $value;
+    }
+
+    /**
+     * How many calls were recorded.
+     */
+    public const function count() : usize
+    {
+        return $this->seen->count();
+    }
+}

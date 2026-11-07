@@ -1,0 +1,68 @@
+namespace ecotest::cli;
+
+/**
+ * The run as JUnit XML, the format CI servers read: one suite per file, one case per test.
+ */
+public class JunitReport
+{
+    /**
+     * The JUnit XML of `$run`.
+     */
+    public static function render(const Run& $run) : string
+    {
+        usize $failures = $run->count(Outcome::fail) + $run->count(Outcome::flaky);
+        usize $errors = $run->count(Outcome::timeout) + $run->count(Outcome::signal);
+        usize $skipped = $run->count(Outcome::skip);
+        usize $all = $run->tests->count();
+        float64 $secs = ($run->wallMs as float64) / 1000.0;
+
+        string $out = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+        $out->append("<testsuites name=\"ecotest\" tests=\"{$all}\" failures=\"{$failures}\" errors=\"{$errors}\" skipped=\"{$skipped}\" time=\"{$secs:.3f}\">\n");
+
+        string $suite = '';
+        foreach ($run->tests as const &$test) {
+            string $file = "{$test->module}/{$test->file}";
+            if ($file != $suite) {
+                if (!$suite->empty()) {
+                    $out->append("  </testsuite>\n");
+                }
+                $suite = $file;
+                string $name = Escape::markup($test->file);
+                $out->append("  <testsuite name=\"{$name}\">\n");
+            }
+
+            string $name = Escape::markup($test->name);
+            string $class = Escape::markup($test->module);
+            float64 $took = ($test->ms() as float64) / 1000.0;
+            $out->append("    <testcase name=\"{$name}\" classname=\"{$class}\" time=\"{$took:.3f}\"");
+
+            if ($test->outcome == Outcome::pass) {
+                $out->append("/>\n");
+                continue;
+            }
+
+            $out->append(">\n");
+            string $message = Escape::markup($test->failure);
+            string $body = Escape::markup("{$test->failureFile}:{$test->failureLine}\n{$test->failure}\n{$test->failureDetail}\n{$test->output}");
+
+            if ($test->outcome == Outcome::skip) {
+                string $reason = Escape::markup($test->skipReason);
+                $out->append("      <skipped message=\"{$reason}\"/>\n");
+            } else if ($test->outcome == Outcome::timeout || $test->outcome == Outcome::signal) {
+                string $word = $test->outcome->word();
+                $out->append("      <error type=\"{$word}\" message=\"{$message}\">{$body}</error>\n");
+            } else {
+                string $word = $test->outcome->word();
+                $out->append("      <failure type=\"{$word}\" message=\"{$message}\">{$body}</failure>\n");
+            }
+
+            $out->append("    </testcase>\n");
+        }
+
+        if (!$suite->empty()) {
+            $out->append("  </testsuite>\n");
+        }
+        $out->append("</testsuites>\n");
+        return $out;
+    }
+}

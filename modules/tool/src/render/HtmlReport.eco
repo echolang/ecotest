@@ -1,0 +1,169 @@
+namespace ecotest::cli;
+
+/**
+ * The run as one self-contained HTML page: the verdict, every test with its failure, and per-file
+ * coverage with the source shaded by what ran.
+ */
+public class HtmlReport
+{
+    /**
+     * The page for `$run`.
+     */
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates) : string
+    {
+        usize $passed = $run->count(Outcome::pass);
+        usize $failed = $run->count(Outcome::fail) + $run->count(Outcome::timeout) + $run->count(Outcome::signal);
+        usize $skipped = $run->count(Outcome::skip);
+        usize $flaky = $run->count(Outcome::flaky);
+        bool $green = $run->green() && $failedGates->empty();
+
+        string $verdict = 'Tests passed';
+        string $tone = 'good';
+        if (!$green) {
+            $verdict = 'Tests failed';
+            $tone = 'bad';
+        }
+
+        string $out = '<!doctype html><html lang="en"><head><meta charset="utf-8">';
+        $out->append('<meta name="viewport" content="width=device-width, initial-scale=1"><title>ecotest report</title>');
+        $out->append(HtmlReport::style());
+        $out->append('</head><body><main>');
+        $out->append("<h1 class=\"{$tone}\">{$verdict}</h1>");
+
+        $out->append('<section class="cards">');
+        $out->append(HtmlReport::card('passed', "{$passed}"));
+        $out->append(HtmlReport::card('failed', "{$failed}"));
+        $out->append(HtmlReport::card('skipped', "{$skipped}"));
+        $out->append(HtmlReport::card('flaky', "{$flaky}"));
+        $out->append(HtmlReport::card('time', "{$run->wallMs} ms"));
+        if (!$totals->empty()) {
+            $out->append(HtmlReport::card('lines', $totals[0]->shown()));
+            $out->append(HtmlReport::card('branches', $totals[1]->shown()));
+            $out->append(HtmlReport::card('functions', $totals[2]->shown()));
+        }
+        $out->append('</section>');
+
+        foreach ($failedGates as const &$gate) {
+            string $g = Escape::markup($gate);
+            $out->append("<p class=\"gate\">{$g}</p>");
+        }
+
+        $out->append('<h2>Tests</h2><table><thead><tr><th>outcome</th><th>test</th><th class="num">ms</th><th class="num">checks</th></tr></thead><tbody>');
+        foreach ($run->tests as const &$test) {
+            string $word = $test->outcome->word();
+            string $id = Escape::markup($test->id);
+            int64 $ms = $test->ms();
+            string $checks = '';
+            if ($test->usedEcotest) {
+                $checks = "{$test->checks}";
+            }
+
+            $out->append("<tr class=\"{$word}\"><td><span class=\"tag {$word}\">{$word}</span></td><td>{$id}");
+
+            if (!$test->failure->empty() && $test->outcome != Outcome::pass) {
+                string $where = Escape::markup("{$test->failureFile}:{$test->failureLine}");
+                string $what = Escape::markup($test->failure);
+                string $detail = Escape::markup($test->failureDetail);
+                $out->append("<pre>{$where}\n{$what}\n{$detail}</pre>");
+            }
+            if (!$test->skipReason->empty()) {
+                string $why = Escape::markup($test->skipReason);
+                $out->append("<div class=\"why\">{$why}</div>");
+            }
+            foreach ($test->notes as const &$note) {
+                string $n = Escape::markup($note);
+                $out->append("<div class=\"why\">{$n}</div>");
+            }
+
+            $out->append("</td><td class=\"num\">{$ms}</td><td class=\"num\">{$checks}</td></tr>");
+        }
+        $out->append('</tbody></table>');
+
+        if (!$files->empty()) {
+            $out->append('<h2>Coverage</h2><table><thead><tr><th>file</th><th class="num">lines</th><th class="num">branches</th><th class="num">functions</th></tr></thead><tbody>');
+            foreach ($files as const &$file) {
+                string $name = Escape::markup($file->file);
+                string $l = $file->lineTotals()->shown();
+                string $b = $file->branchTotals()->shown();
+                string $f = $file->functionTotals()->shown();
+                $out->append("<tr><td><a href=\"#{$name}\">{$name}</a></td><td class=\"num\">{$l}</td><td class=\"num\">{$b}</td><td class=\"num\">{$f}</td></tr>");
+            }
+            $out->append('</tbody></table>');
+
+            foreach ($files as const &$file) {
+                $out->append(HtmlReport::source($file));
+            }
+        }
+
+        $out->append('</main></body></html>');
+        return $out;
+    }
+
+    /**
+     * One number with its label.
+     */
+    private static function card(const string& $label, const string& $value) : string
+    {
+        return "<div class=\"card\"><b>{$value}</b><span>{$label}</span></div>";
+    }
+
+    /**
+     * The file's source, each line shaded by whether it ran, with its hit count.
+     */
+    private static function source(const FileCoverage& $file) : string
+    {
+        string $name = Escape::markup($file->file);
+        string $out = "<details id=\"{$name}\"><summary>{$name}</summary><pre class=\"src\">";
+
+        string $text = Doc::read($file->path);
+        int64 $number = 0;
+
+        foreach (str::split($text, "\n") as const &$line) {
+            $number++;
+            string $cls = '';
+            string $count = '';
+
+            if ($file->lines->has($number)) {
+                uint64 $hits = $file->lines->get($number);
+                $count = "{$hits}";
+                $cls = 'hit';
+                if ($hits == 0) {
+                    $cls = 'miss';
+                }
+            }
+
+            string $code = Escape::markup(string($line));
+            $out->append("<span class=\"{$cls}\"><i>{$number:>5}</i><u>{$count:>6}</u> {$code}</span>\n");
+        }
+
+        $out->append('</pre></details>');
+        return $out;
+    }
+
+    /**
+     * The page's styles, light and dark.
+     */
+    private static function style() : string
+    {
+        return '<style>
+:root{--bg:#fbfbfa;--fg:#1d1d1f;--mute:#6e6e73;--line:#e4e4e2;--good:#1f7a3f;--bad:#b42318;--warn:#a15c07;--hit:#e7f5ec;--miss:#fde8e7;}
+@media (prefers-color-scheme:dark){:root{--bg:#161617;--fg:#ececee;--mute:#9b9ba1;--line:#2c2c2f;--good:#4cc27a;--bad:#ff6b5e;--warn:#e3a44a;--hit:#16301f;--miss:#3a1b19;}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:32px 16px}
+h1{font-size:28px;margin:0 0 20px}h1.good{color:var(--good)}h1.bad{color:var(--bad)}
+h2{font-size:18px;margin:32px 0 12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.card{border:1px solid var(--line);border-radius:10px;padding:12px}.card b{display:block;font-size:20px}.card span{color:var(--mute);font-size:13px}
+.gate{color:var(--bad);font-weight:600}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mute);font-weight:500;font-size:13px}.num{text-align:right;font-variant-numeric:tabular-nums}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor}
+.tag.pass{color:var(--good)}.tag.fail,.tag.timeout,.tag.signal{color:var(--bad)}.tag.skip,.tag.flaky{color:var(--warn)}
+pre{white-space:pre-wrap;font:13px/1.45 ui-monospace,Menlo,monospace;margin:8px 0 0;color:var(--mute)}
+.why{color:var(--mute);font-size:13px}
+details{border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:0 12px}summary{cursor:pointer;padding:10px 0;font-weight:500}
+pre.src{color:var(--fg);overflow-x:auto;white-space:pre}pre.src span{display:block}pre.src .hit{background:var(--hit)}pre.src .miss{background:var(--miss)}
+pre.src i,pre.src u{font-style:normal;text-decoration:none;color:var(--mute)}
+</style>';
+    }
+}

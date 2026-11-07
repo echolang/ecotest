@@ -1,0 +1,109 @@
+namespace ecotest::cli;
+
+/**
+ * The lines changed since a git ref, read from `git diff -U0`: added and modified lines per file,
+ * paths relative to the repository root.
+ */
+public class GitDiff
+{
+    public array<string> $files = [];
+    public array<array<int64>> $lines = [];
+
+    /**
+     * The diff of the working tree in `$dir` against `$ref`, from the program `$git`, or null when
+     * it refuses.
+     */
+    public static function since(const string& $git, const string& $dir, const string& $ref) : GitDiff?
+    {
+        std::process::command $diff = std::process::command($git, ['diff', '-U0', '--no-color', $ref, '--']);
+        $diff->dir($dir);
+        result<std::process::output, std::io::ioerror> $ran = $diff->output();
+        if ($ran->failed()) {
+            return null;
+        }
+
+        std::process::output $o = $ran->unwrap();
+        if (!$o->status->success()) {
+            return null;
+        }
+
+        return GitDiff::parse($o->stdout);
+    }
+
+    /**
+     * The changed lines in the text of a `git diff -U0`.
+     */
+    public static function parse(const string& $text) : GitDiff
+    {
+        GitDiff $diff = GitDiff();
+        string $file = '';
+
+        foreach (str::lines($text) as const &$raw) {
+            string $line = string($raw);
+
+            if ($line->starts('+++ ')) {
+                $file = '';
+                if ($line->starts('+++ b/')) {
+                    $file = $line->sub(6, $line->size() - 6);
+                    $diff->files[] = $file;
+                    array<int64> $none = [];
+                    $diff->lines[] = $none;
+                }
+                continue;
+            }
+
+            if (!$line->starts('@@ ') || $file->empty()) {
+                continue;
+            }
+
+            // @@ -a,b +c,d @@: lines c .. c+d-1 are new; d defaults to 1
+            usize $plus = $line->find('+');
+            usize $end = $line->find(' ', $plus);
+            string $span = $line->sub($plus + 1, $end - $plus - 1);
+
+            int64 $start = 0;
+            int64 $count = 1;
+            usize $comma = $span->find(',');
+            if ($comma < $span->size()) {
+                $start = str::int($span->sub(0, $comma)) ?? 0;
+                $count = str::int($span->sub($comma + 1, $span->size() - $comma - 1)) ?? 0;
+            } else {
+                $start = str::int($span) ?? 0;
+            }
+
+            usize $at = $diff->lines->count() - 1;
+            for (int64 $k = 0; $k < $count; $k++) {
+                $diff->lines[$at][] = $start + $k;
+            }
+        }
+
+        return $diff;
+    }
+
+    /**
+     * Changed lines that have code, and of those, lines that ran.
+     */
+    public const function coverage(const array<FileCoverage>& $files) : Ratio
+    {
+        Ratio $r = Ratio(0, 0);
+
+        foreach ($files as const &$file) {
+            for (usize $i = 0; $i < $this->files->count(); $i++) {
+                if (!Coverage::sameFile($this->files[$i], $file->file)) {
+                    continue;
+                }
+
+                foreach ($this->lines[$i] as const &$line) {
+                    if ($file->lines->has($line)) {
+                        $r->total++;
+                        if ($file->lines->get($line) > 0) {
+                            $r->hit++;
+                        }
+                    }
+                }
+            }
+        }
+
+        return $r;
+    }
+}

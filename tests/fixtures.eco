@@ -1,0 +1,51 @@
+/**
+ * Types the tests check through `expect(value:)` and the result checks.
+ */
+
+internal enum Fault
+{
+    case empty;
+    case bad;
+}
+
+internal struct Point
+{
+    public int32 $x;
+    public int32 $y;
+}
+
+operator (const Point& $a) == (const Point& $b) : bool
+{
+    return $a->x == $b->x && $a->y == $b->y;
+}
+
+internal function parse(const string& $raw) : result<int32, Fault>
+{
+    if ($raw->empty()) {
+        return .error(.empty);
+    }
+
+    int64 $n = guard str::int($raw) else {
+        return .error(.bad);
+    };
+
+    return .ok($n as int32);
+}
+
+internal function check(bool $works) : status<Fault>
+{
+    if ($works) {
+        return .ok();
+    }
+
+    return .error(.bad);
+}
+
+internal function find(bool $there) : int32?
+{
+    if ($there) {
+        return 3;
+    }
+
+    return null;
+}

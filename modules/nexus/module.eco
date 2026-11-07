@@ -1,0 +1,20 @@
+/*
+ * ecotest-nexus: an ecotest-http transport that hands requests straight to a nexus kernel. The
+ * same `Api` tests then run in process, with no socket, and coverage counts the app's code.
+ */
+
+#[module: "ecotest-nexus"]
+#[version: "0.1.0"]
+#[epm::license: "MIT"]
+#[epm::description: "Run ecotest-http tests against a nexus app in process"]
+
+#[depends: "../http"]
+#[depends: "../../../nexus"]
+
+#[sources: "src/*.eco"]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+    #[depends: "../../../nexus/modules/testing"]
+    #[depends: "../../../container"]
+}

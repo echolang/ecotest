@@ -1,0 +1,38 @@
+namespace ecotest::cli;
+
+/**
+ * Escaping for the XML and HTML reports.
+ */
+public class Escape
+{
+    /**
+     * `$text` with `&`, `<`, `>`, `"` and `'` replaced by entities, and control bytes other than
+     * tab and newline dropped, which XML 1.0 cannot carry.
+     */
+    public static function markup(const string& $text) : string
+    {
+        string $out = '';
+
+        for (usize $i = 0; $i < $text->size(); $i++) {
+            uint8 $b = $text->byte($i);
+
+            if ($b == 38) {
+                $out->append('&amp;');
+            } else if ($b == 60) {
+                $out->append('&lt;');
+            } else if ($b == 62) {
+                $out->append('&gt;');
+            } else if ($b == 34) {
+                $out->append('&quot;');
+            } else if ($b == 39) {
+                $out->append('&#39;');
+            } else if ($b < 32 && $b != 9 && $b != 10) {
+                continue;
+            } else {
+                $out->push($b);
+            }
+        }
+
+        return $out;
+    }
+}

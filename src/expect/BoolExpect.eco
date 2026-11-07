@@ -1,0 +1,59 @@
+namespace ecotest;
+
+/**
+ * Checks on a `bool`. `says:` names the condition in the failure, since the expression that
+ * produced it is gone by the time the check runs.
+ */
+public class BoolExpect
+{
+    public bool $value;
+
+    public constructor(bool $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The value is `true`.
+     */
+    #[caller]
+    public function yes(says: string $what = '') : BoolExpect
+    {
+        Session::checked();
+
+        if ($this->value) {
+            return $this;
+        }
+
+        Failure(BoolExpect::summary('true', $what), std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The value is `false`.
+     */
+    #[caller]
+    public function no(says: string $what = '') : BoolExpect
+    {
+        Session::checked();
+
+        if (!$this->value) {
+            return $this;
+        }
+
+        Failure(BoolExpect::summary('false', $what), std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * "expected true", or "expected ready to be true" when the check was named.
+     */
+    private static function summary(const string& $want, const string& $says) : string
+    {
+        if ($says->empty()) {
+            return "expected {$want}";
+        }
+
+        return "expected {$says} to be {$want}";
+    }
+}

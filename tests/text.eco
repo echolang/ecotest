@@ -1,0 +1,56 @@
+use ecotest::expect;
+
+test text_checks_pass
+{
+    expect('abc')->is('abc')->isNot('abd')->has('b')->lacks('z');
+    expect('abc')->startsWith('ab')->endsWith('bc')->length(3);
+    expect('')->empty();
+}
+
+#[tests: expects death]
+test text_is_fails
+{
+    expect('abc')->is('abd');
+}
+
+#[tests: expects death]
+test text_is_fails_with_a_diff
+{
+    expect("a\nb")->is("a\nc");
+}
+
+#[tests: expects death]
+test text_has_fails
+{
+    expect('abc')->has('z');
+}
+
+#[tests: expects death]
+test text_lacks_fails
+{
+    expect('abc')->lacks('b');
+}
+
+#[tests: expects death]
+test text_starts_with_fails
+{
+    expect('abc')->startsWith('b');
+}
+
+#[tests: expects death]
+test text_ends_with_fails
+{
+    expect('abc')->endsWith('a');
+}
+
+#[tests: expects death]
+test text_empty_fails
+{
+    expect('a')->empty();
+}
+
+#[tests: expects death]
+test text_length_fails
+{
+    expect('abc')->length(2);
+}

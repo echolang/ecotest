@@ -1,0 +1,93 @@
+namespace ecotest;
+
+/**
+ * Checks on a `result<T, E>`. `ok()` and `fails()` hand back the value or the error, so they
+ * replace a hand-written unwrap helper; they stop the test even inside `soft()`, since there is
+ * nothing to go on with. A failure prints the error, so `E` needs `str::from`; `T` is printed only
+ * by `ok($want)`, which compares it.
+ */
+public class ResultExpect<T, E>
+{
+    public result<T, E> $value;
+
+    public constructor(result<T, E> $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The value, or the test stops with the error.
+     */
+    #[caller]
+    public function ok() : T
+    {
+        Session::checked();
+
+        if (!$this->value->has_value()) {
+            $e = $this->value->failure();
+            Failure("expected ok, got error {$e}", std::src::caller(), $actual: "{$e}")->stop();
+        }
+
+        return $this->value->unwrap();
+    }
+
+    /**
+     * The result is ok and its value equals `$want`.
+     */
+    #[caller]
+    public function ok(const T& $want) : ResultExpect<T, E>
+    {
+        Session::checked();
+
+        if (!$this->value->has_value()) {
+            $e = $this->value->failure();
+            Failure("expected ok {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}")->raise();
+            return $this;
+        }
+
+        $got = $this->value->unwrap();
+        if (!($got == $want)) {
+            Failure("expected ok {$want}, got ok {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}")->raise();
+        }
+
+        return $this;
+    }
+
+    /**
+     * The error, or the test stops because the result was ok.
+     */
+    #[caller]
+    public function fails() : E
+    {
+        Session::checked();
+
+        // the ok value is not printed: a check that only wants the error asks nothing of `T`
+        if ($this->value->has_value()) {
+            Failure('expected an error, got ok', std::src::caller())->stop();
+        }
+
+        return $this->value->failure();
+    }
+
+    /**
+     * The result is an error equal to `$want`. Needs `==` on `E`; for an error enum whose cases
+     * carry values, take `fails()` and check what it returns.
+     */
+    #[caller]
+    public function fails(const E& $want) : ResultExpect<T, E>
+    {
+        Session::checked();
+
+        if ($this->value->has_value()) {
+            Failure("expected error {$want}, got ok", std::src::caller(), $expected: "{$want}")->raise();
+            return $this;
+        }
+
+        $e = $this->value->failure();
+        if (!($e == $want)) {
+            Failure("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}")->raise();
+        }
+
+        return $this;
+    }
+}

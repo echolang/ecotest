@@ -1,0 +1,91 @@
+namespace ecotest;
+
+/**
+ * One check that did not hold: a one-line summary, what was expected and what came instead,
+ * an optional detail such as a diff, the context scopes that were open, and the test line that
+ * made the check.
+ */
+public struct Failure
+{
+    public string $summary;
+    public string $expected;
+    public string $actual;
+    public string $detail;
+    public array<string> $context;
+    public std::src::location $at;
+
+    public constructor(
+        string $summary,
+        std::src::location $at,
+        string $expected = '',
+        string $actual = '',
+        string $detail = ''
+    ) {
+        $this->summary = $summary;
+        $this->at = $at;
+        $this->expected = $expected;
+        $this->actual = $actual;
+        $this->detail = $detail;
+        $this->context = [];
+    }
+
+    /**
+     * The report printed when the test stops: the summary, then the expected and actual values,
+     * the detail and the context, each indented under it.
+     */
+    public const function render() : string
+    {
+        string $out = $this->summary;
+
+        // a summary that already quotes both values says it once
+        bool $quoted = $this->summary->contains($this->expected) && $this->summary->contains($this->actual);
+
+        if ((!$this->expected->empty() || !$this->actual->empty()) && !$quoted) {
+            $out->append("\n  expected: {$this->expected}");
+            $out->append("\n       got: {$this->actual}");
+        }
+
+        if (!$this->detail->empty()) {
+            $out->append("\n");
+            $out->append(Show::indent(str::rtrim($this->detail), 2));
+        }
+
+        foreach ($this->context as const &$scope) {
+            $out->append("\n  in {$scope}");
+        }
+
+        return $out;
+    }
+
+    /**
+     * The `fail` event for this failure.
+     */
+    public const function event() : Event
+    {
+        return Event('fail')
+            ->text('summary', $this->summary)
+            ->text('expected', $this->expected)
+            ->text('actual', $this->actual)
+            ->text('detail', $this->detail)
+            ->texts('context', $this->context)
+            ->at($this->at);
+    }
+
+    /**
+     * Records the failure with the session: it stops the test, or is held until the enclosing
+     * `soft()` scope ends.
+     */
+    public function raise() : void
+    {
+        Session::fail($this);
+    }
+
+    /**
+     * Records the failure and stops the test even inside `soft()`. For checks that return a value,
+     * where there is nothing to go on with.
+     */
+    public function stop() : void
+    {
+        Session::stop($this);
+    }
+}

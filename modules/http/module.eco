@@ -1,0 +1,21 @@
+/*
+ * ecotest-http: integration tests over HTTP. One `Api` talks to a service through a `Transport`,
+ * so the same tests run against a deployed URL, a service ecotest started, or an app in process.
+ * Checks on a reply are ecotest checks: they name the test's line and show the exchange.
+ */
+
+#[module: "ecotest-http"]
+#[version: "0.1.0"]
+#[epm::license: "MIT"]
+#[epm::description: "HTTP integration testing on top of ecotest"]
+
+#[depends: "../.."]
+#[requires: "echolang/libcurl" { version: "^1.0", source: git "https://github.com/echolang/libcurl" }]
+#[requires: "echolang/libjson" { version: "^0.1", source: git "https://github.com/echolang/libjson" }]
+
+#[sources: "src/*.eco"]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+    #[requires: "echolang/libhttp" { version: "^0.2", source: git "https://github.com/echolang/libhttp" }]
+}

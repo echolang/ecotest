@@ -1,0 +1,54 @@
+namespace ecotest;
+
+/**
+ * Times `$work` and records a `bench` event with the median and 95th percentile per call. It first
+ * finds a batch size that takes about a millisecond, then samples batches until `budget` is spent,
+ * so a fast call and a slow one both get a stable number. Prints one line, which `--verbose` shows.
+ */
+public function bench(
+    const string& $label,
+    function<void()> $work,
+    budget: std::time::duration $budget = std::time::duration::millis(200)
+) : void {
+    $work();
+
+    uint64 $batch = 1;
+    while ($batch < Batch::$ceiling) {
+        std::time::instant $probe = std::time::instant::now();
+        for (uint64 $i = 0; $i < $batch; $i++) {
+            $work();
+        }
+
+        if ($probe->elapsed()->as_nanos() >= 1000000) {
+            break;
+        }
+
+        $batch = $batch * 2;
+    }
+
+    array<int64> $samples = [];
+    std::time::instant $started = std::time::instant::now();
+
+    while ($samples->count() < 5 || ($started->elapsed()->as_nanos() < $budget->as_nanos() && $samples->count() < 1000)) {
+        std::time::instant $at = std::time::instant::now();
+        for (uint64 $i = 0; $i < $batch; $i++) {
+            $work();
+        }
+        $samples[] = $at->elapsed()->as_nanos() / ($batch as int64);
+    }
+
+    $samples->sort();
+    usize $n = $samples->count();
+    int64 $median = $samples[$n / 2];
+    int64 $slow = $samples[($n * 95) / 100];
+    uint64 $calls = $batch * ($n as uint64);
+
+    Event('bench')
+        ->text('label', $label)
+        ->number('p50_ns', $median)
+        ->number('p95_ns', $slow)
+        ->number('calls', $calls as int64)
+        ->emit();
+
+    echo "bench {$label}: {$median} ns/op (p95 {$slow} ns, {$calls} calls)";
+}

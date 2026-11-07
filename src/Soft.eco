@@ -1,0 +1,19 @@
+namespace ecotest;
+
+/**
+ * A soft scope: while it lives, failed checks are held instead of stopping the test. When the
+ * last one goes, every held failure is reported together and the test stops at the first one's
+ * line. Made by `ecotest::soft()`.
+ */
+public class Soft
+{
+    public constructor()
+    {
+        Session::enterSoft();
+    }
+
+    destructor()
+    {
+        Session::leaveSoft();
+    }
+}

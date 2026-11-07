@@ -1,0 +1,74 @@
+use ecotest::expect;
+use ecotest::{TempDir, Calls};
+
+test a_temp_dir_holds_files_and_goes_away
+{
+    string $where = '';
+    {
+        $dir = TempDir();
+        $where = $dir->path;
+        string $file = $dir->write('a.txt', 'hello');
+        expect($dir->read('a.txt'))->some('hello');
+        expect(std::io::exists($file))->ok(true);
+    }
+
+    expect(std::io::exists($where))->ok(false);
+}
+
+test calls_are_recorded_and_checked
+{
+    $calls = Calls<string>();
+    $notify = function(string $who) : void {
+        $calls->record($who);
+    };
+
+    $notify('ada');
+    $notify('bob');
+
+    expect($calls)->times(2)->nth(0, 'ada')->with('bob');
+}
+
+test eventually_waits_for_a_condition
+{
+    int64 $start = std::time::timestamp::now()->unix_millis();
+    ecotest::eventually(() : bool => std::time::timestamp::now()->unix_millis() - $start >= 20);
+}
+
+#[tests: expects death]
+test eventually_gives_up
+{
+    ecotest::eventually(() : bool => false, within: std::time::duration::millis(30));
+}
+
+test a_program_runs_and_is_checked
+{
+    $ran = ecotest::run('echo', ['hello']);
+    expect($ran)->succeeds()->stdout()->is("hello\n");
+    expect($ran)->stderr()->empty();
+}
+
+#[tests: expects death]
+test a_wrong_exit_code_fails
+{
+    expect(ecotest::run('false'))->exits(0);
+}
+
+test notes_and_metrics_are_recorded
+{
+    ecotest::note('ran against the fixture set');
+    ecotest::metric('rows', 12);
+    expect(true)->yes();
+}
+
+test a_bench_records_its_numbers
+{
+    int64 $sum = 0;
+    ecotest::bench('add', function() : void {
+        $sum = $sum + 1;
+    }, budget: std::time::duration::millis(20));
+}
+
+test a_snapshot_is_written_then_matched
+{
+    expect("line one\nline two")->snapshot();
+}

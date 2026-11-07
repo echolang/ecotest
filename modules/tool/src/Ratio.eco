@@ -1,0 +1,31 @@
+namespace ecotest::cli;
+
+/**
+ * Hit out of total, for lines, branches and functions.
+ */
+public struct Ratio
+{
+    public usize $hit;
+    public usize $total;
+
+    /**
+     * The percentage hit, 100 when there is nothing to hit.
+     */
+    public const function percent() : float64
+    {
+        if ($this->total == 0) {
+            return 100.0;
+        }
+
+        return 100.0 * ($this->hit as float64) / ($this->total as float64);
+    }
+
+    /**
+     * `81.4%`, one decimal.
+     */
+    public const function shown() : string
+    {
+        float64 $p = $this->percent();
+        return "{$p:.1f}%";
+    }
+}

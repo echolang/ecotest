@@ -1,0 +1,83 @@
+namespace ecotest::cli;
+
+/**
+ * The run as Markdown, for a CI step summary or a pull request comment.
+ */
+public class MarkdownReport
+{
+    /**
+     * The Markdown summary of `$run`.
+     */
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates) : string
+    {
+        usize $passed = $run->count(Outcome::pass);
+        usize $failed = $run->count(Outcome::fail) + $run->count(Outcome::timeout) + $run->count(Outcome::signal);
+        usize $skipped = $run->count(Outcome::skip);
+        usize $flaky = $run->count(Outcome::flaky);
+
+        string $verdict = 'passed';
+        if (!$run->green() || !$failedGates->empty()) {
+            $verdict = 'failed';
+        }
+
+        string $out = "## Tests {$verdict}\n\n";
+        $out->append("| passed | failed | skipped | flaky | time |\n|---:|---:|---:|---:|---:|\n");
+        $out->append("| {$passed} | {$failed} | {$skipped} | {$flaky} | {$run->wallMs} ms |\n\n");
+
+        if (!$totals->empty()) {
+            string $l = $totals[0]->shown();
+            string $b = $totals[1]->shown();
+            string $f = $totals[2]->shown();
+            $out->append("**Coverage:** {$l} lines, {$b} branches, {$f} functions\n\n");
+        }
+
+        foreach ($failedGates as const &$gate) {
+            $out->append("- :x: {$gate}\n");
+        }
+        if (!$failedGates->empty()) {
+            $out->append("\n");
+        }
+
+        bool $headed = false;
+        foreach ($run->tests as const &$test) {
+            if (!$test->outcome->broken() && $test->outcome != Outcome::flaky) {
+                continue;
+            }
+            if (!$headed) {
+                $out->append("### Failures\n\n");
+                $headed = true;
+            }
+
+            string $word = $test->outcome->word();
+            $out->append("- **{$word}** `{$test->id}`");
+            if (!$test->failureFile->empty()) {
+                $out->append(" at `{$test->failureFile}:{$test->failureLine}`");
+            }
+            $out->append("\n");
+            if (!$test->failure->empty() || !$test->failureDetail->empty()) {
+                $out->append("  ```\n");
+                $out->append(Text::indent($test->failure, 2));
+                $out->append("\n");
+                if (!$test->failureDetail->empty()) {
+                    $out->append(Text::indent($test->failureDetail, 2));
+                    $out->append("\n");
+                }
+                $out->append("  ```\n");
+            }
+        }
+
+        bool $skipHead = false;
+        foreach ($run->tests as const &$test) {
+            if ($test->outcome != Outcome::skip) {
+                continue;
+            }
+            if (!$skipHead) {
+                $out->append("\n### Skipped\n\n");
+                $skipHead = true;
+            }
+            $out->append("- `{$test->id}`: {$test->skipReason}\n");
+        }
+
+        return $out;
+    }
+}

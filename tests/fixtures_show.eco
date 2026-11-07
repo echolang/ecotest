@@ -1,0 +1,15 @@
+namespace str;
+
+public function from(const Point& $p) : string
+{
+    return "Point({$p->x}, {$p->y})";
+}
+
+public function from(Fault $f) : string
+{
+    if ($f == Fault::empty) {
+        return 'empty';
+    }
+
+    return 'bad';
+}

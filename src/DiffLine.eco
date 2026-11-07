@@ -1,0 +1,10 @@
+namespace ecotest;
+
+/**
+ * One row of a diff, before it is printed.
+ */
+internal struct DiffLine
+{
+    internal DiffMark $mark;
+    internal string $text;
+}

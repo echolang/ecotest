@@ -1,0 +1,87 @@
+namespace ecotest;
+
+/**
+ * Checks on a `Calls<T>` recorder.
+ */
+public class CallsExpect<T>
+{
+    public Calls<T> $calls;
+
+    public constructor(Calls<T> $calls)
+    {
+        $this->calls = $calls;
+    }
+
+    /**
+     * Exactly `$count` calls were recorded.
+     */
+    #[caller]
+    public function times(usize $count) : CallsExpect<T>
+    {
+        Session::checked();
+
+        usize $got = $this->calls->count();
+        if ($got != $count) {
+            Failure("expected {$count} calls, got {$got}", std::src::caller())->raise();
+        }
+
+        return $this;
+    }
+
+    /**
+     * No call was recorded.
+     */
+    #[caller]
+    public function never() : CallsExpect<T>
+    {
+        Session::checked();
+
+        usize $got = $this->calls->count();
+        if ($got != 0) {
+            Failure("expected no calls, got {$got}", std::src::caller())->raise();
+        }
+
+        return $this;
+    }
+
+    /**
+     * Call number `$index`, counting from 0, was made with `$want`.
+     */
+    #[caller]
+    public function nth(usize $index, const T& $want) : CallsExpect<T>
+    {
+        Session::checked();
+
+        usize $got = $this->calls->count();
+        if ($index >= $got) {
+            Failure("expected a call number {$index}, only {$got} were made", std::src::caller())->raise();
+            return $this;
+        }
+
+        $made = $this->calls->seen[$index];
+        if (!($made == $want)) {
+            Failure("call {$index}: expected {$want}, got {$made}", std::src::caller(), $expected: "{$want}", $actual: "{$made}")->raise();
+        }
+
+        return $this;
+    }
+
+    /**
+     * Some call was made with `$want`.
+     */
+    #[caller]
+    public function with(const T& $want) : CallsExpect<T>
+    {
+        Session::checked();
+
+        foreach ($this->calls->seen as const &$made) {
+            if ($made == $want) {
+                return $this;
+            }
+        }
+
+        usize $got = $this->calls->count();
+        Failure("expected a call with {$want} among {$got} calls", std::src::caller())->raise();
+        return $this;
+    }
+}

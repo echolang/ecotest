@@ -1,0 +1,115 @@
+namespace ecotest;
+
+/**
+ * Checks on a float. `is` compares exactly; use `near` for anything computed.
+ */
+public class FloatExpect
+{
+    public float64 $value;
+
+    public constructor(float64 $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The number equals `$want`.
+     */
+    #[caller]
+    public function is(float64 $want) : FloatExpect
+    {
+        Session::checked();
+
+        if ($this->value == $want) {
+            return $this;
+        }
+
+        Failure("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}")->raise();
+        return $this;
+    }
+
+    /**
+     * The number differs from `$other`.
+     */
+    #[caller]
+    public function isNot(float64 $other) : FloatExpect
+    {
+        Session::checked();
+
+        if ($this->value != $other) {
+            return $this;
+        }
+
+        Failure("expected anything but {$other}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The number is greater than `$bound`.
+     */
+    #[caller]
+    public function above(float64 $bound) : FloatExpect
+    {
+        Session::checked();
+
+        if ($this->value > $bound) {
+            return $this;
+        }
+
+        Failure("expected more than {$bound}, got {$this->value}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The number is less than `$bound`.
+     */
+    #[caller]
+    public function below(float64 $bound) : FloatExpect
+    {
+        Session::checked();
+
+        if ($this->value < $bound) {
+            return $this;
+        }
+
+        Failure("expected less than {$bound}, got {$this->value}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The number lies in `[$low, $high]`, both ends included.
+     */
+    #[caller]
+    public function between(float64 $low, float64 $high) : FloatExpect
+    {
+        Session::checked();
+
+        if ($this->value >= $low && $this->value <= $high) {
+            return $this;
+        }
+
+        Failure("expected {$low} to {$high}, got {$this->value}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The number is within `$within` of `$want`: `1e-9` unless stated.
+     */
+    #[caller]
+    public function near(float64 $want, float64 $within = 0.000000001) : FloatExpect
+    {
+        Session::checked();
+
+        float64 $off = $this->value - $want;
+        if ($off < 0.0) {
+            $off = 0.0 - $off;
+        }
+
+        if ($off <= $within) {
+            return $this;
+        }
+
+        Failure("expected {$want} within {$within}, got {$this->value} (off by {$off})", std::src::caller())->raise();
+        return $this;
+    }
+}

@@ -1,0 +1,22 @@
+namespace ecotest;
+
+/**
+ * A generator for property tests: how to make a random `T`, how to offer smaller versions of one
+ * that failed, and how to print one. Built by the functions in `ecotest::gen`.
+ */
+public class Gen<T>
+{
+    public function<T(Random&)> $make;
+    public function<array<T>(const T&)> $shrink;
+    public function<string(const T&)> $show;
+
+    public constructor(
+        function<T(Random&)> $make,
+        function<array<T>(const T&)> $shrink,
+        function<string(const T&)> $show
+    ) {
+        $this->make = $make;
+        $this->shrink = $shrink;
+        $this->show = $show;
+    }
+}

@@ -1,0 +1,244 @@
+namespace ecotest::http;
+
+/**
+ * A service under test: a base URL, default headers, and the transport that carries requests.
+ * Every request returns a `Reply` to check.
+ */
+public class Api
+{
+    public string $base;
+    public Transport $transport;
+    public array<string> $headerNames = [];
+    public array<string> $headerValues = [];
+
+    /**
+     * A service at `$base`, such as `http://127.0.0.1:8080`, reached over sockets.
+     */
+    public constructor(const string& $base)
+    {
+        $this->base = Api::trimmed($base);
+        $this->transport = CurlTransport();
+    }
+
+    /**
+     * The service ecotest started under `$name` (the `services` list of `ecotest.json`). Outside
+     * `ecotest run` its `ECOTEST_<NAME>_URL` is unset and the test is skipped, not failed.
+     */
+    #[caller]
+    public constructor(service: const string& $name)
+    {
+        string $variable = Api::variable($name);
+        string $url = ecotest::needs(env: $variable);
+        $this->base = Api::trimmed($url);
+        $this->transport = CurlTransport();
+    }
+
+    /**
+     * A service reached through `$transport`, such as an app dispatched in process.
+     */
+    public constructor(transport: Transport $transport, base: const string& $base = 'http://app')
+    {
+        $this->base = Api::trimmed($base);
+        $this->transport = $transport;
+    }
+
+    /**
+     * Sends `$name: $value` with every request from here on.
+     */
+    public function with(const string& $name, const string& $value) : Api
+    {
+        $this->headerNames[] = $name;
+        $this->headerValues[] = $value;
+        return $this;
+    }
+
+    /**
+     * Sends `Authorization: Bearer $token` with every request from here on.
+     */
+    public function bearer(const string& $token) : Api
+    {
+        return $this->with('Authorization', "Bearer {$token}");
+    }
+
+    /**
+     * GET `$path`.
+     */
+    public function get(const string& $path) : Reply
+    {
+        return $this->send(Verb::get, $path, '', '');
+    }
+
+    /**
+     * HEAD `$path`.
+     */
+    public function head(const string& $path) : Reply
+    {
+        return $this->send(Verb::head, $path, '', '');
+    }
+
+    /**
+     * DELETE `$path`.
+     */
+    public function delete(const string& $path) : Reply
+    {
+        return $this->send(Verb::delete, $path, '', '');
+    }
+
+    /**
+     * POST JSON text to `$path`.
+     */
+    public function post(const string& $path, json: const string& $text) : Reply
+    {
+        return $this->send(Verb::post, $path, $text, 'application/json');
+    }
+
+    /**
+     * POST a JSON document to `$path`.
+     */
+    public function post(const string& $path, json: const json::Value& $doc) : Reply
+    {
+        return $this->send(Verb::post, $path, json::dump($doc->clone()), 'application/json');
+    }
+
+    /**
+     * POST a body of `$type` to `$path`.
+     */
+    public function post(const string& $path, body: const string& $body, type: const string& $type) : Reply
+    {
+        return $this->send(Verb::post, $path, $body, $type);
+    }
+
+    /**
+     * POST form fields to `$path`, URL-encoded.
+     */
+    public function post(const string& $path, form: const map<string, string>& $fields) : Reply
+    {
+        return $this->send(Verb::post, $path, Api::encode($fields), 'application/x-www-form-urlencoded');
+    }
+
+    /**
+     * PUT JSON text to `$path`.
+     */
+    public function put(const string& $path, json: const string& $text) : Reply
+    {
+        return $this->send(Verb::put, $path, $text, 'application/json');
+    }
+
+    /**
+     * PUT a body of `$type` to `$path`.
+     */
+    public function put(const string& $path, body: const string& $body, type: const string& $type) : Reply
+    {
+        return $this->send(Verb::put, $path, $body, $type);
+    }
+
+    /**
+     * PATCH JSON text to `$path`.
+     */
+    public function patch(const string& $path, json: const string& $text) : Reply
+    {
+        return $this->send(Verb::patch, $path, $text, 'application/json');
+    }
+
+    /**
+     * Sends a request built here and returns what came back. A transport failure is kept on the
+     * reply, so the first check on it fails at the test's line.
+     */
+    public function send(Verb $verb, const string& $path, const string& $body, const string& $type) : Reply
+    {
+        Request $request = Request($verb, Api::join($this->base, $path));
+        $request->body = $body;
+
+        for (usize $i = 0; $i < $this->headerNames->count(); $i++) {
+            $request->header($this->headerNames[$i], $this->headerValues[$i]);
+        }
+        if (!$type->empty()) {
+            $request->header('Content-Type', $type);
+        }
+
+        result<Response, TransportError> $sent = $this->transport->send($request);
+        if ($sent->failed()) {
+            string $why = $sent->failure()->message();
+            return Reply($request, Response(0), $why);
+        }
+
+        return Reply($request, $sent->unwrap(), '');
+    }
+
+    /**
+     * `ECOTEST_<NAME>_URL`, the variable the ecotest tool exports for service `$name`.
+     */
+    public static function variable(const string& $name) : string
+    {
+        string $out = 'ECOTEST_';
+        for (usize $i = 0; $i < $name->size(); $i++) {
+            uint8 $b = $name->byte($i);
+            if ($b >= 97 && $b <= 122) {
+                $out->push($b - 32);
+            } else if (($b >= 65 && $b <= 90) || ($b >= 48 && $b <= 57)) {
+                $out->push($b);
+            } else {
+                $out->push(95);
+            }
+        }
+        $out->append('_URL');
+        return $out;
+    }
+
+    /**
+     * `$base` without a trailing `/`.
+     */
+    private static function trimmed(const string& $base) : string
+    {
+        if ($base->ends('/')) {
+            return $base->sub(0, $base->size() - 1);
+        }
+        return $base;
+    }
+
+    /**
+     * `$base` and `$path` with exactly one `/` between them. A full URL as `$path` wins.
+     */
+    private static function join(const string& $base, const string& $path) : string
+    {
+        if ($path->starts('http://') || $path->starts('https://')) {
+            return $path;
+        }
+        if ($path->starts('/')) {
+            return "{$base}{$path}";
+        }
+        return "{$base}/{$path}";
+    }
+
+    /**
+     * Form fields as `a=1&b=two`, with everything but unreserved bytes percent-encoded.
+     */
+    private static function encode(const map<string, string>& $fields) : string
+    {
+        string $out = '';
+        string $hex = '0123456789ABCDEF';
+
+        foreach ($fields as $key => const &$value) {
+            if (!$out->empty()) {
+                $out->append('&');
+            }
+
+            string $pair = "{$key}={$value}";
+            usize $eq = $key->size();
+            for (usize $i = 0; $i < $pair->size(); $i++) {
+                uint8 $b = $pair->byte($i);
+                bool $plain = ($b >= 97 && $b <= 122) || ($b >= 65 && $b <= 90) || ($b >= 48 && $b <= 57)
+                    || $b == 45 || $b == 46 || $b == 95 || $b == 126 || $i == $eq;
+                if ($plain) {
+                    $out->push($b);
+                } else {
+                    $out->push(37);
+                    $out->push($hex->byte(($b / 16) as usize));
+                    $out->push($hex->byte(($b % 16) as usize));
+                }
+            }
+        }
+
+        return $out;
+    }
+}

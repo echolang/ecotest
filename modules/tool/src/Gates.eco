@@ -1,0 +1,54 @@
+namespace ecotest::cli;
+
+/**
+ * The thresholds a run must meet. A negative bound is off.
+ */
+public struct Gates
+{
+    public float64 $minLines = -1.0;
+    public float64 $minBranches = -1.0;
+    public float64 $minDiff = -1.0;
+    public int64 $maxFlaky = -1;
+    public int64 $slowMs = -1;
+
+    /**
+     * Every failed gate as a line, empty when all hold. `$diff` is the diff coverage, or null when
+     * none was measured.
+     */
+    public const function check(const Run& $run, const array<Ratio>& $totals, Ratio? $diff) : array<string>
+    {
+        array<string> $failed = [];
+
+        if ($this->minLines >= 0.0 && !$totals->empty()) {
+            float64 $got = $totals[0]->percent();
+            if ($got < $this->minLines) {
+                $failed[] = "line coverage {$got:.1f}% is below {$this->minLines:.1f}%";
+            }
+        }
+
+        if ($this->minBranches >= 0.0 && $totals->count() > 1) {
+            float64 $got = $totals[1]->percent();
+            if ($got < $this->minBranches) {
+                $failed[] = "branch coverage {$got:.1f}% is below {$this->minBranches:.1f}%";
+            }
+        }
+
+        // no diff to measure has nothing to fall short of: a ratio over no lines reads as whole
+        if ($this->minDiff >= 0.0) {
+            Ratio $d = $diff ?? Ratio(0, 0);
+            float64 $got = $d->percent();
+            if ($got < $this->minDiff) {
+                $failed[] = "diff coverage {$got:.1f}% is below {$this->minDiff:.1f}%";
+            }
+        }
+
+        if ($this->maxFlaky >= 0) {
+            int64 $flaky = $run->count(Outcome::flaky) as int64;
+            if ($flaky > $this->maxFlaky) {
+                $failed[] = "{$flaky} flaky tests, at most {$this->maxFlaky} allowed";
+            }
+        }
+
+        return $failed;
+    }
+}

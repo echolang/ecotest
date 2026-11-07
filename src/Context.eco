@@ -1,0 +1,21 @@
+namespace ecotest;
+
+/**
+ * A line of context, such as the table row being checked, attached to every failure while the
+ * value lives. Made by `ecotest::context()`.
+ */
+public class Context
+{
+    public constructor(const string& $text)
+    {
+        Session::start();
+        Session::$context[] = $text;
+    }
+
+    destructor()
+    {
+        if (!Session::$context->empty()) {
+            string $dropped = Session::$context->pop();
+        }
+    }
+}

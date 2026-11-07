@@ -1,0 +1,173 @@
+namespace ecotest;
+
+/**
+ * Checks on a string. `is` prints a line diff when either side spans several lines.
+ */
+public class TextExpect
+{
+    public string $value;
+
+    public constructor(string $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The text equals `$want`, byte for byte.
+     */
+    #[caller]
+    public function is(const string& $want) : TextExpect
+    {
+        Session::checked();
+
+        if ($this->value == $want) {
+            return $this;
+        }
+
+        if ($want->contains("\n") || $this->value->contains("\n")) {
+            string $diff = '(- expected, + got)\n';
+            $diff->append(Diff::lines($want, $this->value));
+            Failure('text differs', std::src::caller(), $detail: $diff)->raise();
+            return $this;
+        }
+
+        $w = Show::text($want);
+        $g = Show::text($this->value);
+        Failure("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g)->raise();
+        return $this;
+    }
+
+    /**
+     * The text differs from `$other`.
+     */
+    #[caller]
+    public function isNot(const string& $other) : TextExpect
+    {
+        Session::checked();
+
+        if ($this->value != $other) {
+            return $this;
+        }
+
+        $o = Show::text($other);
+        Failure("expected anything but {$o}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The text contains `$part`.
+     */
+    #[caller]
+    public function has(const string& $part) : TextExpect
+    {
+        Session::checked();
+
+        if ($this->value->contains($part)) {
+            return $this;
+        }
+
+        $g = Show::text($this->value);
+        $p = Show::text($part);
+        Failure("expected {$g} to contain {$p}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The text does not contain `$part`.
+     */
+    #[caller]
+    public function lacks(const string& $part) : TextExpect
+    {
+        Session::checked();
+
+        if (!$this->value->contains($part)) {
+            return $this;
+        }
+
+        $g = Show::text($this->value);
+        $p = Show::text($part);
+        Failure("expected {$g} not to contain {$p}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The text begins with `$prefix`.
+     */
+    #[caller]
+    public function startsWith(const string& $prefix) : TextExpect
+    {
+        Session::checked();
+
+        if ($this->value->starts($prefix)) {
+            return $this;
+        }
+
+        $g = Show::text($this->value);
+        $p = Show::text($prefix);
+        Failure("expected {$g} to start with {$p}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The text ends with `$suffix`.
+     */
+    #[caller]
+    public function endsWith(const string& $suffix) : TextExpect
+    {
+        Session::checked();
+
+        if ($this->value->ends($suffix)) {
+            return $this;
+        }
+
+        $g = Show::text($this->value);
+        $s = Show::text($suffix);
+        Failure("expected {$g} to end with {$s}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The text has no bytes.
+     */
+    #[caller]
+    public function empty() : TextExpect
+    {
+        Session::checked();
+
+        if ($this->value->empty()) {
+            return $this;
+        }
+
+        $g = Show::text($this->value);
+        Failure("expected empty text, got {$g}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The text is `$bytes` bytes long.
+     */
+    #[caller]
+    public function length(usize $bytes) : TextExpect
+    {
+        Session::checked();
+
+        usize $size = $this->value->size();
+        if ($size == $bytes) {
+            return $this;
+        }
+
+        Failure("expected {$bytes} bytes, got {$size}", std::src::caller(), $actual: Show::text($this->value))->raise();
+        return $this;
+    }
+
+    /**
+     * The text matches the test's next snapshot file. The first run writes the file; see
+     * `Snapshot` for where it lives and how to accept a change.
+     */
+    #[caller]
+    public function snapshot() : TextExpect
+    {
+        Snapshot::check($this->value, std::src::caller());
+        return $this;
+    }
+}

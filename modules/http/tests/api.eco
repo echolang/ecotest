@@ -1,0 +1,77 @@
+use ecotest::http::{Api, JsonPath};
+
+test checks_pass_on_a_live_server
+{
+    $server = TestServer();
+    $api = Api($server->start());
+
+    $api->get('/users/1')
+        ->status(200)
+        ->ok()
+        ->type('application/json')
+        ->json('$.name', 'Ada')
+        ->json('$.id', 1)
+        ->json('$.admin', false)
+        ->json('$.score', 2.5)
+        ->isNull('$.note')
+        ->present('$.items[0].id')
+        ->count('$.items', 2)
+        ->matches('$.items[*].id', (const json::Value& $v) : bool => ($v->asInt() ?? 0) > 0, says: 'positive')
+        ->faster(than: 2000);
+
+    $api->get('/plain')->body('hello there')->has('there');
+
+    $id = $api->post('/users', json: '{"id":7,"name":"Bob"}')->status(201)->json('$.name', 'Bob')->capture('$.id');
+    ecotest::expect($id)->is('7');
+
+    $api->bearer('t0k')->get('/whoami')->body('Bearer t0k');
+}
+
+test a_snapshot_redacts_fields_that_change
+{
+    $server = TestServer();
+    $api = Api($server->start());
+    $api->get('/users/1')->snapshot(['$.items[*].at']);
+}
+
+#[tests: expects death]
+test a_wrong_status_fails
+{
+    $server = TestServer();
+    $api = Api($server->start());
+    $api->get('/users/1')->status(404);
+}
+
+#[tests: expects death]
+test a_wrong_json_value_fails
+{
+    $server = TestServer();
+    $api = Api($server->start());
+    $api->get('/users/1')->json('$.name', 'Bob');
+}
+
+#[tests: expects death]
+test an_unreachable_service_fails_the_first_check
+{
+    $api = Api('http://127.0.0.1:9');
+    $api->get('/')->ok();
+}
+
+test a_missing_service_skips
+{
+    $api = Api(service: 'not-started-anywhere');
+    $api->get('/')->ok();
+}
+
+test json_paths_walk_keys_indexes_and_wildcards
+{
+    json::Value $doc = guard json::parse('{"a":{"b":[{"c":1},{"c":2}]},"odd key":3}');
+
+    ecotest::expect(JsonPath::steps('$.a.b[0].c'))->is(['a', 'b', '[0]', 'c']);
+    ecotest::expect(JsonPath::all($doc, '$.a.b[*].c')->count())->is(2);
+    ecotest::expect(JsonPath::show(JsonPath::one($doc, "$['odd key']") ?? json::nil()))->is('3');
+    ecotest::expect(JsonPath::one($doc, '$.a.missing'))->none();
+
+    JsonPath::replace($doc, '$.a.b[*].c', json::str('x'));
+    ecotest::expect(JsonPath::show(JsonPath::one($doc, '$.a.b[1].c') ?? json::nil()))->is('"x"');
+}

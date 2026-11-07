@@ -1,0 +1,209 @@
+namespace ecotest;
+
+/**
+ * What one test process knows about itself: which test it is, where its events go, the open
+ * `soft()` and `context()` scopes, and the failures held until a soft scope ends. Started by the
+ * first ecotest call in the process; without `ECHO_TEST_ID` and `ECOTEST_RUN_DIR` nothing is
+ * written and every check still works.
+ */
+public class Session
+{
+    internal static bool $started = false;
+    internal static string $id = '';
+    internal static string $events = '';
+    internal static int32 $soft = 0;
+    internal static array<Failure> $held = [];
+    internal static array<string> $context = [];
+    internal static bool $reported = false;
+    internal static Tally $tally = Tally();
+
+    /**
+     * Reads the test's identity, opens its event file and installs the crash hook. Safe to call
+     * any number of times.
+     */
+    public static function start() : void
+    {
+        if (Session::$started) {
+            return;
+        }
+
+        Session::$started = true;
+        Session::$id = string(std::env::var('ECHO_TEST_ID', ''));
+
+        string $dir = string(std::env::var('ECOTEST_RUN_DIR', ''));
+        if (!$dir->empty() && !Session::$id->empty()) {
+            string $folder = std::env::join($dir, 'events');
+            result<bool, std::io::ioerror> $made = std::io::mkdir($folder);
+            string $name = Session::key(Session::$id);
+            $name->append('.jsonl');
+            Session::$events = std::env::join($folder, $name);
+            // a static's field is not a place; the handle is
+            Tally $tally = Session::$tally;
+            $tally->path = Session::$events;
+        }
+
+        crash::set_hook(&crashed);
+    }
+
+    /**
+     * The file-name form of a test id: every byte outside `[A-Za-z0-9_.-]` becomes `_`, the same
+     * rule echoc uses for the test's coverage file, so both join on one key.
+     */
+    public static function key(const string& $id) : string
+    {
+        string $out = '';
+
+        for (usize $i = 0; $i < $id->size(); $i++) {
+            uint8 $b = $id->byte($i);
+            bool $plain = ($b >= 97 && $b <= 122)
+                || ($b >= 65 && $b <= 90)
+                || ($b >= 48 && $b <= 57)
+                || $b == 95 || $b == 45 || $b == 46;
+
+            if ($plain) {
+                $out->push($b);
+            } else {
+                $out->push(95);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Counts one check towards the test's `checks` event.
+     */
+    public static function checked() : void
+    {
+        Session::start();
+        Tally $tally = Session::$tally;
+        $tally->checks = $tally->checks + 1;
+    }
+
+    /**
+     * Appends one event line to the test's event file. Does nothing without one.
+     */
+    public static function write(const string& $line) : void
+    {
+        Session::start();
+
+        if (Session::$events->empty()) {
+            return;
+        }
+
+        Session::append(Session::$events, $line);
+    }
+
+    /**
+     * Appends `$line` and a newline to `$path`. A file that cannot be opened loses the line: a
+     * report is never a reason to fail the test.
+     */
+    internal static function append(const string& $path, const string& $line) : void
+    {
+        std::io::file $f = guard std::io::append($path) else {
+            return;
+        };
+
+        result<usize, std::io::ioerror> $wrote = $f->write("{$line}\n");
+        $f->close();
+    }
+
+    /**
+     * Takes a failure: held while a `soft()` scope is open, otherwise the test stops here.
+     */
+    public static function fail(Failure $failure) : void
+    {
+        Session::start();
+        $failure->context = Session::$context;
+
+        if (Session::$soft > 0) {
+            Session::$held[] = $failure;
+            return;
+        }
+
+        Session::stop($failure);
+    }
+
+    /**
+     * Writes the failure's event and stops the test at the failure's own line, whatever scope is
+     * open.
+     */
+    public static function stop(Failure $failure) : void
+    {
+        die(Session::report($failure), $failure->at);
+    }
+
+    /**
+     * Writes the failure's event as the test's last word and answers the report to stop with. For
+     * a `guard ... else` that has to end in its own `die`.
+     */
+    public static function report(Failure $failure) : string
+    {
+        Session::start();
+
+        if ($failure->context->empty()) {
+            $failure->context = Session::$context;
+        }
+
+        Session::$reported = true;
+        $failure->event()->emit();
+        Session::$tally->flush();
+        return $failure->render();
+    }
+
+    /**
+     * Opens a `soft()` scope.
+     */
+    internal static function enterSoft() : void
+    {
+        Session::start();
+        Session::$soft = Session::$soft + 1;
+    }
+
+    /**
+     * Closes a `soft()` scope. The outermost one reports every held failure together and stops
+     * the test at the first one's line.
+     */
+    internal static function leaveSoft() : void
+    {
+        Session::$soft = Session::$soft - 1;
+
+        if (Session::$soft > 0 || Session::$held->empty()) {
+            return;
+        }
+
+        Session::$reported = true;
+        usize $count = Session::$held->count();
+        string $text = "{$count} checks failed";
+
+        foreach (Session::$held as const &$failure) {
+            $failure->event()->emit();
+
+            std::src::location $at = $failure->at;
+            $text->append("\n\n{$at->file}:{$at->line}\n");
+            $text->append(Show::indent($failure->render(), 2));
+        }
+
+        Session::$tally->flush();
+        die($text, Session::$held[0]->at);
+    }
+}
+
+/**
+ * The crash hook ecotest installs. A plain `assert`, `die` or `guard` stop that no check reported
+ * becomes a `crash` event, then the default report prints as usual.
+ */
+internal function crashed(const crash::info& $info) : void
+{
+    if (!Session::$reported) {
+        Event('crash')
+            ->text('headline', string($info->headline))
+            ->text('message', string($info->message))
+            ->text('file', string($info->file))
+            ->number('line', $info->line as int64)
+            ->emit();
+        Session::$tally->flush();
+    }
+
+    crash::default_hook($info);
+}

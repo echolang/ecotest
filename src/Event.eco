@@ -1,0 +1,94 @@
+namespace ecotest;
+
+/**
+ * One line of the test's event file, built field by field. `emit()` hands it to the session, which
+ * drops it when the run has no event file.
+ */
+public class Event
+{
+    private string $line = '';
+
+    public constructor(const string& $type)
+    {
+        $this->line = '{"type":';
+        $this->line->append(Json::quote($type));
+    }
+
+    /**
+     * Adds a string field.
+     */
+    public function text(const string& $key, const string& $value) : Event
+    {
+        $this->key($key);
+        $this->line->append(Json::quote($value));
+        return $this;
+    }
+
+    /**
+     * Adds an integer field.
+     */
+    public function number(const string& $key, int64 $value) : Event
+    {
+        $this->key($key);
+        $this->line->append("{$value}");
+        return $this;
+    }
+
+    /**
+     * Adds a list of strings.
+     */
+    public function texts(const string& $key, const array<string>& $values) : Event
+    {
+        $this->key($key);
+        $this->line->append('[');
+
+        for (usize $i = 0; $i < $values->count(); $i++) {
+            if ($i > 0) {
+                $this->line->append(',');
+            }
+            $this->line->append(Json::quote($values[$i]));
+        }
+
+        $this->line->append(']');
+        return $this;
+    }
+
+    /**
+     * Adds `file`, `line` and `column` from a source site.
+     */
+    public function at(const std::src::location& $at) : Event
+    {
+        $this->text('file', string($at->file));
+        $this->number('line', $at->line as int64);
+        $this->number('column', $at->column as int64);
+        return $this;
+    }
+
+    /**
+     * The finished line, without a trailing newline.
+     */
+    public const function render() : string
+    {
+        string $out = $this->line;
+        $out->append('}');
+        return $out;
+    }
+
+    /**
+     * Writes the separator and the quoted key of the next field.
+     */
+    private function key(const string& $key) : void
+    {
+        $this->line->append(',');
+        $this->line->append(Json::quote($key));
+        $this->line->append(':');
+    }
+
+    /**
+     * Appends the line to the test's event file, if the run has one.
+     */
+    public function emit() : void
+    {
+        Session::write($this->render());
+    }
+}

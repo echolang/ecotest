@@ -1,0 +1,11 @@
+namespace ecotest;
+
+/**
+ * One line of a diff: kept, only expected, or only got.
+ */
+internal enum DiffMark
+{
+    case same;
+    case want;
+    case got;
+}

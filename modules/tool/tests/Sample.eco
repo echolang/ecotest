@@ -1,0 +1,155 @@
+/**
+ * A small module the tool is run against, written into a temp directory per test so runs never
+ * share a build. Green by default; `--define BROKEN` adds a failing check and a plain crash,
+ * `--define FLAKY` a test that fails on the second pass only.
+ */
+
+use ecotest::{expect, TempDir};
+use ecotest::cli::{Tool};
+
+internal class Sample
+{
+    public TempDir $dir = TempDir();
+
+    public constructor()
+    {
+        string $root = Sample::ecotestRoot();
+
+        $this->dir->write('module.eco', "#[module: \"sample\"]\n#[sources: \"src/*.eco\"]\n\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[depends: \"{$root}\"]\n}\n");
+        bool $src = std::io::mkdir($this->dir->file('src'))->or(false);
+        bool $tests = std::io::mkdir($this->dir->file('tests'))->or(false);
+
+        $this->dir->write('src/math.eco', 'public function add(int64 $a, int64 $b) : int64
+{
+    return $a + $b;
+}
+
+public function halve(int64 $n) : int64
+{
+    if ($n < 0) {
+        return 0;
+    }
+
+    return $n / 2;
+}
+
+public function unused() : int64
+{
+    return 7;
+}
+');
+
+        $this->dir->write('tests/math.eco', 'use ecotest::expect;
+
+test adds
+{
+    expect(add(2, 3))->is(5);
+    ecotest::note(\'sums small numbers\');
+    ecotest::metric(\'pairs\', 1);
+}
+
+test halves
+{
+    expect(halve(8))->is(4);
+}
+
+test benches
+{
+    ecotest::bench(\'add\', function() : void {
+        int64 $n = add(1, 2);
+    });
+}
+
+test checks_nothing
+{
+    int64 $n = add(1, 1);
+}
+
+test needs_a_database
+{
+    $url = ecotest::needs(env: \'SAMPLE_NEVER_SET\');
+}
+
+#[if: BROKEN]
+test halves_wrongly
+{
+    $at = ecotest::context(\'case 3\');
+    expect(halve(3))->is(2);
+}
+
+test crashes
+{
+    expect(1)->is(1);
+    die(\'plain stop\');
+}
+#[end]
+
+#[if: FLAKY]
+test flips
+{
+    string $dir = string(std::env::var(\'ECOTEST_RUN_DIR\', \'\'));
+    expect($dir->ends(\'pass-2\'))->no();
+}
+#[end]
+');
+    }
+
+    /**
+     * A tool pointed at this module, with its own build directory and the compiler under test.
+     */
+    public function tool() : Tool
+    {
+        Tool $tool = Tool();
+        $tool->project = $this->dir->path;
+        $tool->echoc = Sample::compiler();
+        return $tool;
+    }
+
+    /**
+     * The newest run directory of this module.
+     */
+    public function latest() : string
+    {
+        return ecotest::cli::Files::latest($this->dir->file('.ecotest'));
+    }
+
+    /**
+     * The newest run's `run.json`, parsed.
+     */
+    public function runJson() : json::Value
+    {
+        string $text = ecotest::cli::Doc::read(std::env::join($this->latest(), 'run.json'));
+        return expect(json::parse($text))->ok();
+    }
+
+    /**
+     * The test called `$name` in the newest run's `run.json`.
+     */
+    public function result(const string& $name) : json::Value
+    {
+        foreach (ecotest::cli::Doc::list($this->runJson(), 'tests') as const &$test) {
+            if (ecotest::cli::Doc::text($test, 'name') == $name) {
+                return $test;
+            }
+        }
+
+        return expect(json::parse('null'))->ok();
+    }
+
+    /**
+     * The echoc the outer run uses, which `ecotest run` hands down as `ECHOC`.
+     */
+    public static function compiler() : string
+    {
+        return string(std::env::var('ECHOC', 'echoc'));
+    }
+
+    /**
+     * The ecotest repository root, two levels above this module.
+     */
+    public static function ecotestRoot() : string
+    {
+        string $here = std::env::cwd();
+        return std::env::join(std::env::join($here, '..'), '..');
+    }
+}

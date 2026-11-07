@@ -1,0 +1,18 @@
+namespace ecotest::cli;
+
+/**
+ * The counters of one module, in the order its counts are stored, with the directory its file
+ * paths are relative to.
+ */
+public class ModuleSites
+{
+    public string $name;
+    public string $dir;
+    public array<CoverageSite> $sites = [];
+
+    public constructor(const string& $name, const string& $dir)
+    {
+        $this->name = $name;
+        $this->dir = $dir;
+    }
+}

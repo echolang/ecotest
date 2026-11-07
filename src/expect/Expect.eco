@@ -1,0 +1,71 @@
+namespace ecotest;
+
+/**
+ * Checks on any other value: your structs, classes and enums. Reached through the labelled
+ * `expect(value: $x)`, because an unlabelled catch-all would leave `expect($list)` with two equally
+ * good overloads. Comparing needs `==` on `T` and printing needs `str::from` for it.
+ */
+public class Expect<T>
+{
+    public T $value;
+
+    public constructor(T $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * The value equals `$want`.
+     */
+    #[caller]
+    public function is(const T& $want) : Expect<T>
+    {
+        Session::checked();
+
+        if ($this->value == $want) {
+            return $this;
+        }
+
+        $got = $this->value;
+        Failure("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}")->raise();
+        return $this;
+    }
+
+    /**
+     * The value differs from `$other`.
+     */
+    #[caller]
+    public function isNot(const T& $other) : Expect<T>
+    {
+        Session::checked();
+
+        if (!($this->value == $other)) {
+            return $this;
+        }
+
+        Failure("expected anything but {$other}", std::src::caller())->raise();
+        return $this;
+    }
+
+    /**
+     * The value passes `$test`. `says:` names what it should be in the failure.
+     */
+    #[caller]
+    public function satisfies(function<bool(const T&)> $test, says: string $what = '') : Expect<T>
+    {
+        Session::checked();
+
+        if ($test($this->value)) {
+            return $this;
+        }
+
+        $got = $this->value;
+        string $summary = "{$got} failed the test";
+        if (!$what->empty()) {
+            $summary = "expected {$what}, got {$got}";
+        }
+
+        Failure($summary, std::src::caller(), $actual: "{$got}")->raise();
+        return $this;
+    }
+}

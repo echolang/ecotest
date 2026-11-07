@@ -1,0 +1,52 @@
+/**
+ * Replies built in memory, the summaries of what checks on them failed, and an environment
+ * variable set for the rest of one test process.
+ */
+
+use ecotest::http::{Reply, Request, Response, Verb};
+
+internal extern {
+    function setenv as c_setenv(ptr<const uint8> $name, ptr<const uint8> $value, int32 $overwrite) : int32;
+}
+
+/**
+ * A reply to `GET http://app/x` with `$status`, `$body` and the headers given as name, value pairs.
+ */
+internal function reply(int64 $status, const string& $body, array<string> $headers = []) : Reply
+{
+    Response $res = Response($status);
+    $res->body = $body;
+    for (usize $i = 0; $i + 1 < $headers->count(); $i = $i + 2) {
+        $res->headerNames[] = $headers[$i];
+        $res->headerValues[] = $headers[$i + 1];
+    }
+    return Reply(Request(Verb::get, 'http://app/x'), $res, '');
+}
+
+/**
+ * A request to `GET http://app/x` that got no response.
+ */
+internal function lost() : Reply
+{
+    return Reply(Request(Verb::get, 'http://app/x'), Response(0), 'refused');
+}
+
+/**
+ * The summaries of what `$body` failed, in order.
+ */
+internal function said(function<void()> $body) : array<string>
+{
+    array<string> $out = [];
+    foreach (ecotest::caught($body) as const &$failure) {
+        $out[] = $failure->summary;
+    }
+    return $out;
+}
+
+/**
+ * Sets `$name` for the rest of this test's process.
+ */
+internal function setVar(const string& $name, const string& $value) : void
+{
+    int32 $done = c_setenv($name->cstr(), $value->cstr(), 1);
+}

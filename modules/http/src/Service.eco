@@ -1,0 +1,69 @@
+namespace ecotest::http;
+
+/**
+ * A service a single test starts and stops itself: the program runs until the value goes. For
+ * services shared by many tests, list them in `ecotest.json` and use `Api(service:)` instead.
+ */
+public class Service
+{
+    public string $url;
+    private std::process::child $child;
+
+    /**
+     * Starts `$program` with `$arguments`, then waits until `$ready` answers with a 2xx or 3xx, at
+     * most `within`. `$url` is the base URL tests use. Stops the test when it never gets ready.
+     */
+    #[caller]
+    public constructor(
+        const string& $program,
+        array<string> $arguments,
+        ready: const string& $ready,
+        url: const string& $url,
+        within: std::time::duration $limit = std::time::duration::secs(10)
+    ) {
+        std::src::location $at = std::src::caller();
+        $this->url = $url;
+
+        std::process::command $cmd = std::process::command($program, $arguments);
+        $cmd->stdout(.discard);
+        $cmd->stderr(.discard);
+
+        result<std::process::child, std::io::ioerror> $spawned = $cmd->spawn();
+        if ($spawned->failed()) {
+            $e = $spawned->failure();
+            ecotest::Failure("cannot start {$program}: {$e}", $at)->stop();
+        }
+        $this->child = $spawned->unwrap();
+
+        std::time::instant $started = std::time::instant::now();
+        while ($started->elapsed()->as_millis() < $limit->as_millis()) {
+            curl::Request $probe = curl::Request::get($ready);
+            $probe->timeout(500);
+            result<curl::Response, curl::Error> $answer = curl::send($probe);
+            if (!$answer->failed()) {
+                int64 $status = $answer->unwrap()->status;
+                if ($status >= 200 && $status < 400) {
+                    return;
+                }
+            }
+            std::time::sleep(std::time::duration::millis(50));
+        }
+
+        int64 $ms = $limit->as_millis();
+        ecotest::Failure("{$program} was not ready at {$ready} within {$ms} ms", $at)->stop();
+    }
+
+    /**
+     * An `Api` for this service.
+     */
+    public function api() : Api
+    {
+        return Api($this->url);
+    }
+
+    destructor()
+    {
+        status<std::io::ioerror> $killed = $this->child->kill();
+        result<std::process::exit_status, std::io::ioerror> $waited = $this->child->wait();
+    }
+}

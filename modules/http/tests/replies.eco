@@ -1,0 +1,128 @@
+/**
+ * Every check on a reply, failing and passing, on replies built in memory.
+ */
+
+use ecotest::expect;
+use ecotest::http::{Reply};
+
+test a_request_without_a_response_fails_every_check_with_the_reason
+{
+    $got = said(function() : void {
+        lost()->status(200)->ok()->header('a', 'b')->type('x')->body('x')->has('x')
+            ->json('$.a', 'x')->present('$.a')->count('$.a', 1)
+            ->matches('$.a', (const json::Value& $v) : bool => true)
+            ->faster(than: 1)->snapshot();
+    });
+
+    expect($got->count())->is(12);
+    expect($got)->all((const string& $s) : bool => $s == 'no response to GET http://app/x: refused');
+}
+
+test status_header_and_body_failures_show_the_exchange
+{
+    Reply $r = reply(200, 'plain text', ['Content-Type', 'text/plain', 'X-Id', '7']);
+    $r->ok()->header('x-id', '7')->type('text/')->body('plain text')->has('plain');
+
+    $failures = ecotest::caught(function() : void {
+        $r->status(201)->header('X-Id', '8')->header('X-Gone', '1')->type('application/json')
+            ->body('other')->has('zzz')->faster(than: 0)->json('$.a', 'x');
+        reply(500, '')->ok();
+        reply(101, '')->ok()->type('text/plain');
+    });
+
+    array<string> $summaries = [];
+    foreach ($failures as const &$f) {
+        $summaries[] = $f->summary;
+    }
+
+    expect($summaries->count())->is(11);
+    expect($summaries[0])->is('expected status 201, got 200');
+    expect($summaries[1])->is('expected header X-Id: 8, got 7');
+    expect($summaries[2])->is('expected header X-Gone: 1, it is missing');
+    expect($summaries[3])->is("expected Content-Type application/json, got 'text/plain'");
+    expect($summaries[4])->is('the body differs');
+    expect($summaries[5])->is("expected the body to contain 'zzz'");
+    expect($summaries[6])->is('expected an answer within 0 ms, took 0 ms');
+    expect($summaries[7])->startsWith('expected a JSON body (');
+    expect($summaries[8])->is('expected a 2xx status, got 500');
+    expect($summaries[9])->is('expected a 2xx status, got 101');
+    expect($summaries[10])->is("expected Content-Type text/plain, got ''");
+
+    expect($failures[0]->detail)->is("GET http://app/x\n-> 200 in 0 ms\n   Content-Type: text/plain\n   X-Id: 7\n\nplain text");
+    expect($failures[8]->detail)->is("GET http://app/x\n-> 500 in 0 ms");
+}
+
+test json_failures_name_the_path
+{
+    Reply $r = reply(200, '{"s":"a","i":1,"f":1.5,"b":true,"n":null,"l":[1,2],"o":{"k":1}}');
+    $r->json('$.s', 'a')->json('$.i', 1)->json('$.f', 1.5)->json('$.b', true)->isNull('$.n')
+        ->present('$.o.k')->count('$.l', 2)
+        ->matches('$.l[*]', (const json::Value& $v) : bool => ($v->asInt() ?? 0) > 0);
+
+    $got = said(function() : void {
+        $r->json('$.s', 'b')->json('$.i', 2)->json('$.f', 2.5)->json('$.b', false)->isNull('$.s')
+            ->json('$.gone', 'x')->present('$.gone')->count('$.gone', 1)->count('$.o', 1)->count('$.l', 3)
+            ->matches('$.gone', (const json::Value& $v) : bool => true)
+            ->matches('$.l[*]', (const json::Value& $v) : bool => ($v->asInt() ?? 0) > 1)
+            ->matches('$.l[*]', (const json::Value& $v) : bool => ($v->asInt() ?? 0) > 1, says: 'big');
+    });
+
+    expect($got)->is([
+        'expected $.s = "b", got "a"',
+        'expected $.i = 2, got 1',
+        'expected $.f = 2.5, got 1.5',
+        'expected $.b = false, got true',
+        'expected $.s = null, got "a"',
+        'expected $.gone = "x", found nothing there',
+        'expected a value at $.gone',
+        'expected 1 items at $.gone, found nothing there',
+        'expected 1 items at $.o, got 1',
+        'expected 3 items at $.l, got 2',
+        'expected a value at $.gone',
+        '$.l[*] = 1 failed the test',
+        'expected $.l[*] to be big, got 1',
+    ]);
+}
+
+test capture_hands_back_text_or_json
+{
+    Reply $r = reply(200, '{"s":"a","i":1,"o":{"k":1}}');
+
+    expect($r->capture('$.s'))->is('a');
+    expect($r->capture('$.i'))->is('1');
+    expect($r->capture('$.o'))->is('{"k":1}');
+}
+
+#[tests: expects death]
+test capture_stops_on_a_body_that_is_not_json
+{
+    string $id = reply(200, 'plain')->capture('$.id');
+}
+
+#[tests: expects death]
+test capture_stops_when_nothing_is_there
+{
+    string $id = reply(200, '{}')->capture('$.id');
+}
+
+test a_long_body_is_cut_in_the_report
+{
+    $failures = ecotest::caught(function() : void {
+        reply(500, str::repeat('x', 1300))->ok();
+    });
+
+    expect($failures[0]->detail)->endsWith("\n   ... 100 more bytes");
+}
+
+test a_body_that_is_not_json_is_snapshot_as_it_is
+{
+    reply(200, 'plain words')->snapshot();
+}
+
+#[tests: expects death]
+test capture_stops_even_inside_caught_on_a_body_that_is_not_json
+{
+    $failures = ecotest::caught(function() : void {
+        string $id = reply(200, 'plain')->capture('$.id');
+    });
+}
