@@ -111,7 +111,8 @@ public class Tool
         $runner->seed = $stamp as uint64;
         $runner->envNames = $this->services->envNames;
         $runner->envValues = $this->services->envValues;
-        $runner->view = $this->liveView();
+        LiveView? $view = $this->liveView($dir);
+        $runner->view = $view;
 
         bool $ran = $runner->run($dir);
         $this->services->stop();
@@ -120,7 +121,12 @@ public class Tool
             return 1;
         }
 
-        return $this->finish($dir);
+        // a watched run was folded as its rows arrived; otherwise it is read back from the directory
+        LiveView $watched = guard $view else {
+            return $this->finish($dir, Run::load($dir));
+        };
+        $watched->run->settle();
+        return $this->finish($dir, $watched->run);
     }
 
     /**
@@ -142,21 +148,22 @@ public class Tool
         Run $run = Run::load($dir);
         array<FileCoverage> $files = [];
         array<Ratio> $totals = [];
-        $this->measure($dir, $files, $totals);
-        array<string> $failedGates = [];
+        $this->measure($dir, $run, $files, $totals);
+        // a stored run is shown, not judged again: the gates only mark the coverage
+        Verdict $verdict = Verdict::of($run, $this->gates, []);
 
         if ($this->format == 'md') {
-            std::io::print(MarkdownReport::render($run, $files, $totals, $failedGates));
+            std::io::print(MarkdownReport::render($run, $files, $totals, $verdict));
         } else if ($this->format == 'junit') {
             std::io::print(JunitReport::render($run));
         } else if ($this->format == 'lcov') {
             std::io::print(LcovReport::render($files));
         } else if ($this->format == 'html') {
-            std::io::print(HtmlReport::render($run, $files, $totals, $failedGates, $this->gates));
+            std::io::print(HtmlReport::render($run, $files, $totals, $verdict));
         } else if ($this->format == 'json') {
-            std::io::print(JsonReport::render($run, $files, $totals, $failedGates));
+            std::io::print(JsonReport::render($run, $files, $totals, $verdict));
         } else {
-            std::io::print($this->summary($run, $files, $totals, $failedGates, '', ''));
+            std::io::print($this->summary($run, $files, $totals, $verdict, '', ''));
         }
 
         return 0;
@@ -353,20 +360,19 @@ public class Tool
     }
 
     /**
-     * Loads, renders and stores a finished run. Returns the process exit code.
+     * Judges, renders and stores `$run`, finished in `$dir`. Returns the process exit code.
      */
-    private function finish(const string& $dir) : int32
+    private function finish(const string& $dir, const Run& $run) : int32
     {
-        Run $run = Run::load($dir);
         array<FileCoverage> $files = [];
         array<Ratio> $totals = [];
-        $this->measure($dir, $files, $totals);
+        $this->measure($dir, $run, $files, $totals);
 
         Ratio? $diff = $this->changed($files);
-        array<string> $failedGates = $this->gates->check($run, $totals, $diff);
+        Verdict $verdict = $this->gates->check($run, $totals, $diff);
 
-        Files::write(std::env::join($dir, 'run.json'), JsonReport::render($run, $files, $totals, $failedGates));
-        Files::write(std::env::join($dir, 'summary.md'), MarkdownReport::render($run, $files, $totals, $failedGates));
+        Files::write(std::env::join($dir, 'run.json'), JsonReport::render($run, $files, $totals, $verdict));
+        Files::write(std::env::join($dir, 'summary.md'), MarkdownReport::render($run, $files, $totals, $verdict));
         Files::write(std::env::join($dir, 'junit.xml'), JunitReport::render($run));
         if (!$files->empty()) {
             Files::write(std::env::join($dir, 'lcov.info'), LcovReport::render($files));
@@ -375,7 +381,7 @@ public class Tool
         string $report = '';
         if ($this->html) {
             $report = std::env::join($dir, 'report.html');
-            Files::write($report, HtmlReport::render($run, $files, $totals, $failedGates, $this->gates));
+            Files::write($report, HtmlReport::render($run, $files, $totals, $verdict));
         }
 
         History::append(std::env::join($this->root(), 'history.jsonl'), $dir, $run, $totals);
@@ -384,20 +390,20 @@ public class Tool
             std::io::print($this->services->tails($dir, 12));
         }
 
-        std::io::print($this->summary($run, $files, $totals, $failedGates, $this->diffText($diff), $report));
+        std::io::print($this->summary($run, $files, $totals, $verdict, $this->diffText($diff), $report));
 
-        if (!$run->green() || !$failedGates->empty()) {
+        if (!$verdict->green) {
             return 1;
         }
         return 0;
     }
 
     /**
-     * Fills `$files` and `$totals` from run `$dir`'s coverage, when it has any.
+     * Fills `$files` and `$totals` from the coverage of `$run`, kept in `$dir`, when it has any.
      */
-    private const function measure(const string& $dir, array<FileCoverage>& $files, array<Ratio>& $totals) : void
+    private const function measure(const string& $dir, const Run& $run, array<FileCoverage>& $files, array<Ratio>& $totals) : void
     {
-        Coverage $c = guard $this->coverageOf($dir) else {
+        Coverage $c = guard $this->scoped($dir, $run) else {
             return;
         };
 
@@ -439,13 +445,13 @@ public class Tool
      * The summary the terminal gets: styled when the page takes it, plain otherwise. `$diff` and
      * `$report` are left out when empty.
      */
-    private const function summary(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates, const string& $diff, const string& $report) : string
+    private const function summary(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
     {
         Look $look = guard $this->look() else {
-            return TerminalReport::render($run, $files, $totals, $failedGates, $diff, $report);
+            return TerminalReport::render($run, $files, $totals, $verdict, $diff, $report);
         };
 
-        return PrettyReport::render($look, $run, $files, $totals, $failedGates, $diff, $report);
+        return PrettyReport::render($look, $run, $files, $totals, $verdict, $diff, $report);
     }
 
     /**
@@ -464,9 +470,9 @@ public class Tool
     }
 
     /**
-     * The view that watches a run live, or null when echoc writes its own listing.
+     * The view that watches the run in `$dir` live, or null when echoc writes its own listing.
      */
-    private const function liveView() : LiveView?
+    private const function liveView(const string& $dir) : LiveView?
     {
         command::CLIContext $live = guard $this->live else {
             return null;
@@ -475,7 +481,9 @@ public class Tool
         if (!$this->style->live($live->caps)) {
             return null;
         }
-        return LiveView($live);
+        LiveView $view = LiveView($live);
+        $view->run = Run($dir);
+        return $view;
     }
 
     /**
@@ -487,6 +495,14 @@ public class Tool
             return null;
         }
 
+        return $this->scoped($dir, Run::load($dir));
+    }
+
+    /**
+     * The coverage of `$run`, kept in `$dir`, with this tool's module scope and excludes, or null.
+     */
+    private const function scoped(const string& $dir, const Run& $run) : Coverage?
+    {
         Coverage $c = guard Coverage::load($dir) else {
             return null;
         };
@@ -494,7 +510,6 @@ public class Tool
         $c->modules = $this->modules;
 
         // the modules whose tests ran are the ones under test; --coverage-module adds to them
-        Run $run = Run::load($dir);
         foreach ($run->tests as const &$test) {
             if (!$c->reports($test->module)) {
                 $c->modules[] = $test->module;

@@ -15,7 +15,7 @@ public class TerminalReport
      * The summary of `$run`. `$diff` is the diff coverage sentence and `$report` the HTML report's
      * path; either may be empty.
      */
-    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates, const string& $diff, const string& $report) : string
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
     {
         string $out = "\n";
 
@@ -48,10 +48,8 @@ public class TerminalReport
             $out->append(TerminalReport::coverage($files, $totals));
         }
 
-        if (!$failedGates->empty()) {
-            foreach ($failedGates as const &$gate) {
-                $out->append("gate      FAIL {$gate}\n");
-            }
+        foreach ($verdict->failed as const &$gate) {
+            $out->append("gate      FAIL {$gate}\n");
         }
 
         if (!$diff->empty()) {

@@ -19,6 +19,8 @@ public class LiveView
     private element::Progress? $bar = null;
     private usize $passed = 0;
     private usize $failed = 0;
+    private usize $asserting = 0;
+    private int64 $assertions = 0;
     private std::time::instant $since = std::time::instant::now();
 
     // the last test finished since the bar was drawn; the bar moves once per batch of rows
@@ -27,8 +29,13 @@ public class LiveView
     // which pass this is, when there are several, for the rows that settle
     private string $pass = '';
 
-    // the pass as far as it got: each finished test with the events it wrote
-    private Run $run = Run('');
+    // the pass being watched, where its tests left their events; empty until one begins
+    private string $passDir = '';
+
+    /**
+     * The run as far as it got, every row folded in as it arrived, so it need not be read again.
+     */
+    public Run $run = Run('');
 
     public constructor(command::CLIContext $ctx)
     {
@@ -43,9 +50,12 @@ public class LiveView
      */
     public function begin(usize $pass, usize $passes, const string& $passDir) : void
     {
-        $this->run = Run($passDir);
+        $this->run->passes++;
+        $this->passDir = $passDir;
         $this->passed = 0;
         $this->failed = 0;
+        $this->asserting = 0;
+        $this->assertions = 0;
         $this->since = std::time::instant::now();
 
         $this->pass = '';
@@ -105,6 +115,13 @@ public class LiveView
      */
     private function take(const json::Value& $row) : void
     {
+        // a row before any pass began belongs to none
+        if ($this->passDir->empty()) {
+            return;
+        }
+
+        // a test's row comes once it has exited, so its events are all written
+        TestRecord? $folded = $this->run->fold($row, $this->passDir);
         string $type = Doc::text($row, 'type');
 
         if ($type == 'run') {
@@ -112,14 +129,15 @@ public class LiveView
             return;
         }
 
-        if ($type == 'test') {
-            $this->finished($row);
+        if ($type == 'end') {
+            $this->close(true);
             return;
         }
 
-        if ($type == 'end') {
-            $this->close(true);
-        }
+        TestRecord $test = guard $folded else {
+            return;
+        };
+        $this->finished($test);
     }
 
     /**
@@ -167,39 +185,32 @@ public class LiveView
     }
 
     /**
-     * A test's report row: a pass scrolls through the window, a broken test stays above it with
-     * where it stopped, and the bar moves on.
+     * A test finished, folded with the events it wrote: a pass scrolls through the window, a broken
+     * test stays above it with where it stopped, and the bar moves on.
      */
-    private function finished(const json::Value& $row) : void
+    private function finished(const TestRecord& $test) : void
     {
         if ($this->bar == null) {
             return;
         }
 
-        Outcome $outcome = Outcome::of(Doc::text($row, 'status'));
-        string $id = Doc::text($row, 'id');
-        string $module = Doc::text($row, 'module');
-        string $title = $this->look->title($id, $module);
-
-        // the test has exited, so its events are all written
-        TestRecord $test = $this->run->find($id);
-        string $passDir = $this->run->dir;
-        $this->run->events($test, $passDir);
+        Outcome $outcome = $test->latest();
+        string $title = $this->look->title($test);
+        if ($test->usedEcotest) {
+            $this->asserting++;
+            $this->assertions = $this->assertions + $test->checks;
+        }
 
         if ($outcome->broken()) {
             $this->failed++;
 
             string $lines = $this->look->headline($outcome, $title);
 
-            json::Value $failure = Doc::object($row, 'failure');
-            if ($failure->isObject()) {
-                string $file = Doc::text($failure, 'file');
-                int64 $line = Doc::number($failure, 'line');
+            if (!$test->failure->empty()) {
                 // the summary shows the rest; one row keeps the window's height honest
-                string $message = Doc::text($failure, 'message');
-                usize $cut = $message->find("\n");
-                $message = $message->sub(0, $cut);
-                string $where = $this->look->mute("  {$this->look->rail} {$file}:{$line}  {$message}");
+                usize $cut = $test->failure->find("\n");
+                string $message = $test->failure->sub(0, $cut);
+                string $where = $this->look->mute("  {$this->look->rail} {$test->failureFile}:{$test->failureLine}  {$message}");
                 $lines->append("\n{$where}");
             }
 
@@ -207,7 +218,7 @@ public class LiveView
         } else {
             $this->passed++;
 
-            int64 $ms = Doc::number($row, 'ms');
+            int64 $ms = $test->ms();
             // drawn muted behind the window's rail, so the mark carries no colour
             string $mark = $this->look->glyph($outcome);
             string $pushed = "{$mark} {$title}  {$ms} ms";
@@ -254,8 +265,8 @@ public class LiveView
         if ($this->failed > 0) {
             $summary->append(" {$this->look->dot} {$this->failed} failed");
         }
-        if ($this->run->asserting() > 0) {
-            string $asserted = $this->look->many($this->run->assertions(), 'assertion');
+        if ($this->asserting > 0) {
+            string $asserted = $this->look->many($this->assertions, 'assertion');
             $summary->append(" {$this->look->dot} {$asserted}");
         }
         $summary->append(" in {$secs:.1f} s{$this->pass}");

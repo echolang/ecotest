@@ -5,10 +5,15 @@
 
 use ecotest::{expect, TempDir};
 use ecotest::cli::{
-    Run, TestRecord, Outcome, BenchResult, FileCoverage, Ratio, Escape, Text, Files, History, Doc, Gates,
+    Run, TestRecord, Outcome, BenchResult, FileCoverage, Ratio, Escape, Text, Files, History, Doc, Gates, Verdict,
     TerminalReport, MarkdownReport, JunitReport, HtmlReport, JsonReport, ServiceSpec, GitDiff, Glob,
     PrettyReport, Look, Highlight
 };
+
+internal function judged(const Run& $run, const array<string>& $failed) : Verdict
+{
+    return Verdict::of($run, Gates(), $failed);
+}
 
 internal function record(const string& $file, const string& $name, Outcome $outcome) : TestRecord
 {
@@ -89,7 +94,8 @@ test the_terminal_report_shows_every_outcome_and_the_coverage
 {
     array<FileCoverage> $files = handCovered();
     array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    string $out = TerminalReport::render(handMade(), $files, $totals, ['coverage 66.7% is below 90%'], '', '');
+    Run $run = handMade();
+    string $out = TerminalReport::render($run, $files, $totals, judged($run, ['coverage 66.7% is below 90%']), '', '');
 
     expect($out)
         ->has('7 tests: 2 passed, 3 failed, 2 skipped, 0 flaky')
@@ -109,9 +115,8 @@ test an_empty_run_reports_without_timing_or_checks
     Run $empty = Run('/p/.ecotest/run-2');
     array<FileCoverage> $none = [];
     array<Ratio> $noTotals = [];
-    array<string> $noGates = [];
 
-    expect(TerminalReport::render($empty, $none, $noTotals, $noGates, '', ''))->has('0 tests')->lacks('time ')->lacks('checks ');
+    expect(TerminalReport::render($empty, $none, $noTotals, judged($empty, []), '', ''))->has('0 tests')->lacks('time ')->lacks('checks ');
 }
 
 test the_pretty_report_in_ascii_puts_failures_first_and_closes_with_the_verdict
@@ -127,7 +132,7 @@ test the_pretty_report_in_ascii_puts_failures_first_and_closes_with_the_verdict
     $run->passes = 2;
     $run->reached = 2;
 
-    string $out = PrettyReport::render(Look(command::plain()), $run, handCovered(), $totals, ['coverage 66.7% is below 90%'], '50.0% of 2 changed lines with code ran since main', '/p/report.html');
+    string $out = PrettyReport::render(Look(command::plain()), $run, handCovered(), $totals, judged($run, ['coverage 66.7% is below 90%']), '50.0% of 2 changed lines with code ran since main', '/p/report.html');
 
     expect($out)
         ->lacks("\x1b[")
@@ -161,9 +166,8 @@ test the_pretty_report_in_colour_badges_a_green_run
     $run->tests[] = record('tests/a.eco', 'passes', Outcome::pass);
     array<FileCoverage> $none = [];
     array<Ratio> $totals = [Ratio(9, 10), Ratio(1, 4), Ratio(0, 0)];
-    array<string> $noGates = [];
 
-    string $out = PrettyReport::render(Look(command::TerminalCapabilities(true, true, 80, true)), $run, $none, $totals, $noGates, '', '');
+    string $out = PrettyReport::render(Look(command::TerminalCapabilities(true, true, 80, true)), $run, $none, $totals, judged($run, []), '', '');
 
     expect($out)->has("\x1b[7m PASS ")->has('  1 test  ')->lacks('assertion')->has('━')->has('─')->has('a.eco › passes')->lacks('report ')->lacks('✗');
 }
@@ -175,23 +179,22 @@ test the_pretty_report_says_when_echoc_never_reached_the_tests
     $run->reached = 1;
     array<FileCoverage> $none = [];
     array<Ratio> $noTotals = [];
-    array<string> $noGates = [];
 
-    string $pretty = PrettyReport::render(Look(command::plain()), $run, $none, $noTotals, $noGates, '', '');
+    string $pretty = PrettyReport::render(Look(command::plain()), $run, $none, $noTotals, judged($run, []), '', '');
     expect($pretty)->has('x echoc stopped before the tests ran in 1 of 2 passes')->has('FAIL  0 tests  0 passed')->lacks('slowest');
 
     $run->passes = 1;
     $run->reached = 0;
-    expect(PrettyReport::render(Look(command::plain()), $run, $none, $noTotals, $noGates, '', ''))->has('tests ran\n');
-    expect(TerminalReport::render($run, $none, $noTotals, $noGates, '', ''))->has('stopped   echoc did not reach the tests in 1 of 1 passes');
+    expect(PrettyReport::render(Look(command::plain()), $run, $none, $noTotals, judged($run, []), '', ''))->has('tests ran\n');
+    expect(TerminalReport::render($run, $none, $noTotals, judged($run, []), '', ''))->has('stopped   echoc did not reach the tests in 1 of 1 passes');
     expect($run->green())->no();
 }
 
 test the_markdown_report_carries_failures_with_their_detail
 {
     array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    array<string> $noGates = [];
-    string $out = MarkdownReport::render(handMade(), handCovered(), $totals, $noGates);
+    Run $run = handMade();
+    string $out = MarkdownReport::render($run, handCovered(), $totals, judged($run, []));
 
     expect($out)->has('## Tests failed')->has('expected 2, got 1')->has('  a <detail> & more');
     expect($out)->has('### Skipped')->has('no cache');
@@ -216,16 +219,18 @@ test junit_groups_by_file_and_types_each_outcome
 test html_and_json_carry_the_same_run
 {
     array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    array<string> $gates = ['too low'];
+    Run $run = handMade();
+    Verdict $verdict = judged($run, ['too low']);
 
-    expect(HtmlReport::render(handMade(), handCovered(), $totals, $gates, Gates()))->has('fails')->has('src/half.eco')->has('too low');
-    expect(JsonReport::render(handMade(), handCovered(), $totals, $gates))->has('"timeout": 1')->has('"row 3"')->has('"rows": 3');
+    expect(HtmlReport::render($run, handCovered(), $totals, $verdict))->has('fails')->has('src/half.eco')->has('too low');
+    expect(JsonReport::render($run, handCovered(), $totals, $verdict))->has('"timeout": 1')->has('"row 3"')->has('"rows": 3');
 }
 
 test the_html_report_puts_broken_tests_first_and_says_why
 {
     array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    string $out = HtmlReport::render(handMade(), handCovered(), $totals, ['line coverage is below <90%>'], Gates());
+    Run $run = handMade();
+    string $out = HtmlReport::render($run, handCovered(), $totals, judged($run, ['line coverage is below <90%>']));
 
     expect($out)
         ->has('Tests <span class="gen ">failed</span>')
@@ -233,7 +238,7 @@ test the_html_report_puts_broken_tests_first_and_says_why
         ->has('<span class="badge bad">3 failures</span><span class="badge bad">1 gate failed</span>')
         ->has('2 of 7 tests passed in 1.50 s. 3 failed and 2 were skipped. 1 gate failed.')
         ->has('<p class="callout-title">Gate failed</p><div>line coverage is below &lt;90%&gt;</div>')
-        ->has('<tr class="bad" data-group="failed"><td><span class="oc fail"><i></i>fail</span></td><td><div class="tid"><span>m/tests/a.eco::</span>fails</div>')
+        ->has('<tr class="bad" data-group="failed"><td><span class="oc fail"><i></i>fail</span></td><td><div class="tid"><span>tests/a.eco::</span>fails</div>')
         ->has('<span class="oc timeout">')
         ->has('<span class="oc signal">')
         ->has('<div class="failure-head"><span class="dot"></span>tests/a.eco:9</div><div class="failure-msg">expected 2, got 1</div><div class="failure-detail">a &lt;detail&gt; &amp; more</div>')
@@ -268,9 +273,8 @@ test the_html_report_badges_a_green_run_and_leaves_out_coverage_it_lacks
     $run->tests[] = $odd;
     array<FileCoverage> $none = [];
     array<Ratio> $noTotals = [];
-    array<string> $noGates = [];
 
-    string $out = HtmlReport::render($run, $none, $noTotals, $noGates, Gates());
+    string $out = HtmlReport::render($run, $none, $noTotals, judged($run, []));
 
     expect($out)
         ->has('Tests <span class="gen good">passed</span>')
@@ -294,12 +298,11 @@ test the_html_report_marks_gates_and_what_falls_short
     $run->tests[] = record('tests/c.eco', 'waits', Outcome::skip);
     $run->tests[] = record('tests/c.eco', 'breaks', Outcome::fail);
     array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    array<string> $noGates = [];
     Gates $gates = Gates();
     $gates->minLines = 90.0;
     $gates->minBranches = 50.0;
 
-    string $out = HtmlReport::render($run, handCovered(), $totals, $noGates, $gates);
+    string $out = HtmlReport::render($run, handCovered(), $totals, Verdict::of($run, $gates, []));
 
     expect($out)
         ->has('<span class="badge bad">1 failure</span><span class="badge bad">echoc stopped</span><span class="badge warn">1 flaky</span>')
@@ -323,9 +326,9 @@ test the_html_report_shades_each_source_line_by_what_ran
     $file->lines->set(1, 3);
     $file->lines->set(2, 0);
     array<Ratio> $totals = [Ratio(1, 2), Ratio(0, 0), Ratio(0, 0)];
-    array<string> $noGates = [];
+    Run $run = handMade();
 
-    string $out = HtmlReport::render(handMade(), [$file], $totals, $noGates, Gates());
+    string $out = HtmlReport::render($run, [$file], $totals, judged($run, []));
 
     expect($out)
         ->has('<div class="row hit"><span class="ln">1</span><span class="hits">3×</span><code><span class="k">return</span> <span class="n">1</span><span class="p">;</span></code></div>')
@@ -497,7 +500,8 @@ test the_diff_gate_holds_without_a_diff_and_above_its_bar
     array<Ratio> $none = [];
     Run $run = Run('/p/.ecotest/run-1');
 
-    expect($gates->check($run, $none, null))->empty();
-    expect($gates->check($run, $none, Ratio(3, 4)))->empty();
-    expect($gates->check($run, $none, Ratio(1, 4))->count())->is(1);
+    expect($gates->check($run, $none, null)->failed)->empty();
+    expect($gates->check($run, $none, Ratio(3, 4))->failed)->empty();
+    expect($gates->check($run, $none, Ratio(1, 4))->failed->count())->is(1);
+    expect($gates->check($run, $none, Ratio(1, 4))->green)->no();
 }

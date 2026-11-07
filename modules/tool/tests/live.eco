@@ -4,7 +4,7 @@
  */
 
 use ecotest::{expect, TempDir};
-use ecotest::cli::{Tail, LiveView, Tool, Style, Doc};
+use ecotest::cli::{Tail, LiveView, Tool, Style, Doc, Run, Gates, Verdict, JsonReport, FileCoverage, Ratio};
 
 internal function terminal() : command::CLIContext
 {
@@ -92,7 +92,7 @@ test a_view_shows_the_compile_then_the_tests_on_a_pipe
     $view->row(expect(json::parse('{"type":"run","selected":3}'))->ok());
     $view->output("echoc listing\n");
     $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'))->ok());
-    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::stops","module":"m","status":"fail","failure":{"file":"tests/a.eco","line":9,"message":"expected 2, got 1\\n  in row 3"}}'))->ok());
+    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::stops","module":"m","status":"fail","failure":{"headline":"fatal error","file":"tests/a.eco","line":9,"message":"expected 2, got 1\\n  in row 3"}}'))->ok());
     $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::hangs","module":"m","status":"timeout"}'))->ok());
     $view->row(expect(json::parse('{"type":"end"}'))->ok());
 
@@ -102,7 +102,7 @@ test a_view_shows_the_compile_then_the_tests_on_a_pipe
         ->has('compiled in')
         ->has('v a.eco > adds  3 ms - 3 assertions')
         ->has('x a.eco > stops')
-        ->has('| tests/a.eco:9  expected 2, got 1')
+        ->has('| tests/a.eco:9  fatal error: expected 2, got 1')
         ->lacks('in row 3')
         ->has('a.eco > hangs  timeout')
         ->has('1 passed - 2 failed - 3 assertions in');
@@ -152,6 +152,32 @@ test a_pretty_run_on_a_pipe_writes_rows_and_names_each_pass
 
     expect($tool->run())->is(0);
     expect(rows($live))->has('pass 1 of 2')->has('pass 2 of 2')->has('math.eco > halves');
+}
+
+test a_watched_run_reports_what_reading_it_back_would
+{
+    $sample = Sample();
+    Tool $tool = pretty($sample, pipe());
+    $tool->repeat = 2;
+    $tool->forwarded = ['--define', 'BROKEN'];
+    expect($tool->run())->is(1);
+
+    Run $back = Run::load($sample->latest());
+    array<FileCoverage> $none = [];
+    array<Ratio> $noTotals = [];
+    json::Value $read = expect(json::parse(JsonReport::render($back, $none, $noTotals, Verdict::of($back, Gates(), []))))->ok();
+    json::Value $watched = $sample->runJson();
+
+    expect(Doc::number($watched, 'passes'))->is(2);
+    expect(Doc::number($watched, 'ms'))->is(Doc::number($read, 'ms'));
+    expect(json::pretty(Doc::object($watched, 'counts')))->is(json::pretty(Doc::object($read, 'counts')));
+    array<json::Value> $tests = Doc::list($watched, 'tests');
+    array<json::Value> $readTests = Doc::list($read, 'tests');
+    expect($tests->empty())->no();
+    expect($tests->count())->is($readTests->count());
+    for (usize $i = 0; $i < $tests->count(); $i++) {
+        expect(json::pretty($tests[$i]))->is(json::pretty($readTests[$i]));
+    }
 }
 
 test a_compile_error_fails_the_spinner_and_prints_echocs_log

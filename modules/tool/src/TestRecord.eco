@@ -64,6 +64,53 @@ public class TestRecord
     }
 
     /**
+     * Where the test sits as people read it: the file part of its id with the module dropped, as in
+     * `tests/a.eco`. Empty for an id without `::`.
+     */
+    public const function suite() : string
+    {
+        string $local = $this->local();
+        usize $at = $local->find('::');
+        if ($at == $local->size()) {
+            return '';
+        }
+        return $local->sub(0, $at);
+    }
+
+    /**
+     * The test's own name: what its id has after `::`, or the whole id without one.
+     */
+    public const function label() : string
+    {
+        string $local = $this->local();
+        usize $at = $local->find('::');
+        if ($at == $local->size()) {
+            return $local;
+        }
+        return $local->sub($at + 2, $local->size() - $at - 2);
+    }
+
+    /**
+     * The id without its module in front.
+     */
+    private const function local() : string
+    {
+        string $prefix = "{$this->module}/";
+        if ($this->module->empty() || !$this->id->starts($prefix)) {
+            return $this->id;
+        }
+        return $this->id->sub($prefix->size(), $this->id->size() - $prefix->size());
+    }
+
+    /**
+     * How the latest pass went.
+     */
+    public const function latest() : Outcome
+    {
+        return $this->attempts[$this->attempts->count() - 1];
+    }
+
+    /**
      * The duration of the last pass, in milliseconds.
      */
     public const function ms() : int64

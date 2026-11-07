@@ -54,56 +54,68 @@ public class Run
     {
         $this->passes++;
 
-        array<json::Value> $rows = Doc::lines(Doc::read(std::env::join($passDir, 'report.jsonl')));
-
-        foreach ($rows as const &$row) {
-            string $type = Doc::text($row, 'type');
-
-            if ($type == 'run') {
-                $this->version = Doc::text($row, 'version');
-                $this->reached++;
-                continue;
-            }
-
-            if ($type == 'end') {
-                $this->wallMs = $this->wallMs + Doc::number($row, 'ms');
-                continue;
-            }
-
-            if ($type != 'test') {
-                continue;
-            }
-
-            TestRecord $test = $this->find(Doc::text($row, 'id'));
-            $test->module = Doc::text($row, 'module');
-            $test->file = Run::relative(Doc::text($row, 'file'), Run::projectOf($this->dir));
-            $test->name = Doc::text($row, 'name');
-            $test->group = Doc::text($row, 'group');
-            $test->attempts[] = Outcome::of(Doc::text($row, 'status'));
-            $test->durations[] = Doc::number($row, 'ms');
-            $test->output = Doc::text($row, 'output');
-
-            // reset per pass: the last pass's events describe the last pass's failure, and a note
-            // or a bench every pass wrote is reported once
-            $test->failure = '';
-            $test->failureDetail = '';
-            $test->context = [];
-            $test->notes = [];
-            $test->metricNames = [];
-            $test->metricValues = [];
-            $test->benches = [];
-
-            $this->events($test, $passDir);
-
-            json::Value $crash = Doc::object($row, 'failure');
-            if ($test->failure->empty() && $crash->isObject()) {
-                string $headline = Doc::text($crash, 'headline');
-                string $message = Doc::text($crash, 'message');
-                $test->failure = "{$headline}: {$message}";
-                $test->failureFile = Doc::text($crash, 'file');
-                $test->failureLine = Doc::number($crash, 'line');
-            }
+        foreach (Doc::lines(Doc::read(std::env::join($passDir, 'report.jsonl'))) as const &$row) {
+            TestRecord? $test = $this->fold($row, $passDir);
         }
+    }
+
+    /**
+     * Folds one of echoc's report rows from the pass at `$passDir` into the run: the run starting,
+     * a test finishing with the events it wrote, or the end. Answers the test a test row is about.
+     */
+    public function fold(const json::Value& $row, const string& $passDir) : TestRecord?
+    {
+        string $type = Doc::text($row, 'type');
+
+        if ($type == 'run') {
+            $this->version = Doc::text($row, 'version');
+            $this->reached++;
+            return null;
+        }
+
+        if ($type == 'end') {
+            $this->wallMs = $this->wallMs + Doc::number($row, 'ms');
+            return null;
+        }
+
+        if ($type != 'test') {
+            return null;
+        }
+
+        TestRecord $test = $this->find(Doc::text($row, 'id'));
+        $test->module = Doc::text($row, 'module');
+        $test->file = Run::relative(Doc::text($row, 'file'), Run::projectOf($this->dir));
+        $test->name = Doc::text($row, 'name');
+        $test->group = Doc::text($row, 'group');
+        $test->attempts[] = Outcome::of(Doc::text($row, 'status'));
+        $test->durations[] = Doc::number($row, 'ms');
+        $test->output = Doc::text($row, 'output');
+
+        // reset per pass: the last pass's events describe the last pass's failure, and a note
+        // or a bench every pass wrote is reported once
+        $test->failure = '';
+        $test->failureDetail = '';
+        $test->context = [];
+        $test->notes = [];
+        $test->metricNames = [];
+        $test->metricValues = [];
+        $test->benches = [];
+
+        string $events = std::env::join(std::env::join($passDir, 'events'), "{$test->key}.jsonl");
+        foreach (Doc::lines(Doc::read($events)) as const &$event) {
+            $this->apply($test, $event);
+        }
+
+        json::Value $crash = Doc::object($row, 'failure');
+        if ($test->failure->empty() && $crash->isObject()) {
+            string $headline = Doc::text($crash, 'headline');
+            string $message = Doc::text($crash, 'message');
+            $test->failure = "{$headline}: {$message}";
+            $test->failureFile = Doc::text($crash, 'file');
+            $test->failureLine = Doc::number($crash, 'line');
+        }
+
+        return $test;
     }
 
     /**
@@ -119,17 +131,6 @@ public class Run
         $this->index->set($id, $this->tests->count());
         $this->tests[] = $test;
         return $test;
-    }
-
-    /**
-     * Applies every event `$test` wrote in the pass at `$passDir`.
-     */
-    public function events(TestRecord $test, const string& $passDir) : void
-    {
-        string $path = std::env::join(std::env::join($passDir, 'events'), "{$test->key}.jsonl");
-        foreach (Doc::lines(Doc::read($path)) as const &$event) {
-            $this->apply($test, $event);
-        }
     }
 
     /**

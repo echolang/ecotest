@@ -16,7 +16,7 @@ public class PrettyReport
      * The summary of `$run` drawn with `$look`. `$diff` is the diff coverage sentence and `$report`
      * the HTML report's path; either may be empty.
      */
-    public static function render(const Look& $look, const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates, const string& $diff, const string& $report) : string
+    public static function render(const Look& $look, const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
     {
         string $out = "\n";
         $out->append(PrettyReport::failures($look, $run));
@@ -39,7 +39,7 @@ public class PrettyReport
             $measured->append(PrettyReport::label($look, 'diff'));
             $measured->append("{$diff}\n");
         }
-        foreach ($failedGates as const &$gate) {
+        foreach ($verdict->failed as const &$gate) {
             $measured->append(PrettyReport::label($look, 'gate'));
             $measured->append($look->paint("{$look->fail} {$gate}", command::SGR_ERROR));
             $measured->append("\n");
@@ -49,7 +49,7 @@ public class PrettyReport
             $out->append("\n");
         }
 
-        $out->append(PrettyReport::verdict($look, $run, $failedGates->empty()));
+        $out->append(PrettyReport::verdict($look, $run, $verdict->green));
 
         if (!$report->empty()) {
             $out->append(PrettyReport::label($look, 'report'));
@@ -129,7 +129,7 @@ public class PrettyReport
                 continue;
             }
 
-            string $headline = $look->headline($test->outcome, $look->title($test->id, $test->module));
+            string $headline = $look->headline($test->outcome, $look->title($test));
             $out->append("  {$headline}\n");
 
             if (!$test->failureFile->empty()) {
@@ -165,7 +165,7 @@ public class PrettyReport
             $out->append(PrettyReport::lead($look, 'slowest', $out));
 
             int64 $took = $test->ms();
-            string $title = $look->title($test->id, $test->module);
+            string $title = $look->title($test);
             $out->append("{$took:>6} ms  {$title}\n");
         }
 
@@ -197,7 +197,7 @@ public class PrettyReport
 
         foreach ($run->tests as const &$test) {
             if ($test->usedEcotest && $test->outcome == Outcome::pass && $test->checks == 0) {
-                string $title = $look->title($test->id, $test->module);
+                string $title = $look->title($test);
                 $out->append(PrettyReport::under());
                 $out->append($look->paint('none', command::SGR_WARNING));
                 $out->append("  {$title}\n");
@@ -228,7 +228,7 @@ public class PrettyReport
             $out->append(PrettyReport::lead($look, $word, $out));
 
             string $mark = $look->mark($outcome);
-            string $title = $look->title($test->id, $test->module);
+            string $title = $look->title($test);
             string $muted = $look->mute($why);
             $out->append("{$mark} {$title}  {$muted}\n");
         }
@@ -247,7 +247,7 @@ public class PrettyReport
             if ($test->notes->empty() && $test->metricNames->empty() && $test->benches->empty()) {
                 continue;
             }
-            string $title = $look->mute($look->title($test->id, $test->module));
+            string $title = $look->mute($look->title($test));
 
             foreach ($test->notes as const &$note) {
                 $out->append(PrettyReport::label($look, 'note'));
@@ -297,7 +297,7 @@ public class PrettyReport
     /**
      * The closing line: a PASS or FAIL badge, the counts that are not zero, and the time.
      */
-    private static function verdict(const Look& $look, const Run& $run, bool $gatesHeld) : string
+    private static function verdict(const Look& $look, const Run& $run, bool $ok) : string
     {
         usize $passed = $run->count(Outcome::pass);
         usize $failed = $run->broken();
@@ -306,7 +306,6 @@ public class PrettyReport
         usize $all = $run->tests->count();
         float64 $secs = ($run->wallMs as float64) / 1000.0;
 
-        bool $ok = $run->green() && $gatesHeld;
         string $tone = command::outcomeSgr($ok);
         string $word = 'FAIL';
         if ($ok) {

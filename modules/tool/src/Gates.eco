@@ -12,34 +12,28 @@ public struct Gates
     public int64 $slowMs = -1;
 
     /**
-     * Every failed gate as a line, empty when all hold. `$diff` is the diff coverage, or null when
-     * none was measured.
+     * The verdict on `$run`, with every failed gate as a line. `$diff` is the diff coverage, or
+     * null when none was measured.
      */
-    public const function check(const Run& $run, const array<Ratio>& $totals, Ratio? $diff) : array<string>
+    public const function check(const Run& $run, const array<Ratio>& $totals, Ratio? $diff) : Verdict
     {
         array<string> $failed = [];
 
-        if ($this->minLines >= 0.0 && !$totals->empty()) {
+        if (!$totals->empty() && Gates::below($totals[0], $this->minLines)) {
             float64 $got = $totals[0]->percent();
-            if ($got < $this->minLines) {
-                $failed[] = "line coverage {$got:.1f}% is below {$this->minLines:.1f}%";
-            }
+            $failed[] = "line coverage {$got:.1f}% is below {$this->minLines:.1f}%";
         }
 
-        if ($this->minBranches >= 0.0 && $totals->count() > 1) {
+        if ($totals->count() > 1 && Gates::below($totals[1], $this->minBranches)) {
             float64 $got = $totals[1]->percent();
-            if ($got < $this->minBranches) {
-                $failed[] = "branch coverage {$got:.1f}% is below {$this->minBranches:.1f}%";
-            }
+            $failed[] = "branch coverage {$got:.1f}% is below {$this->minBranches:.1f}%";
         }
 
         // no diff to measure has nothing to fall short of: a ratio over no lines reads as whole
-        if ($this->minDiff >= 0.0) {
-            Ratio $d = $diff ?? Ratio(0, 0);
+        Ratio $d = $diff ?? Ratio(0, 0);
+        if (Gates::below($d, $this->minDiff)) {
             float64 $got = $d->percent();
-            if ($got < $this->minDiff) {
-                $failed[] = "diff coverage {$got:.1f}% is below {$this->minDiff:.1f}%";
-            }
+            $failed[] = "diff coverage {$got:.1f}% is below {$this->minDiff:.1f}%";
         }
 
         if ($this->maxFlaky >= 0) {
@@ -49,6 +43,14 @@ public struct Gates
             }
         }
 
-        return $failed;
+        return Verdict::of($run, $this, $failed);
+    }
+
+    /**
+     * True when `$r` falls short of the bound `$min`. A negative bound is off, so nothing does.
+     */
+    public static function below(const Ratio& $r, float64 $min) : bool
+    {
+        return $min >= 0.0 && $r->percent() < $min;
     }
 }

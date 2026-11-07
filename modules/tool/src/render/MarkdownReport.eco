@@ -8,19 +8,19 @@ public class MarkdownReport
     /**
      * The Markdown summary of `$run`.
      */
-    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates) : string
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict) : string
     {
         usize $passed = $run->count(Outcome::pass);
         usize $failed = $run->broken();
         usize $skipped = $run->count(Outcome::skip);
         usize $flaky = $run->count(Outcome::flaky);
 
-        string $verdict = 'passed';
-        if (!$run->green() || !$failedGates->empty()) {
-            $verdict = 'failed';
+        string $word = 'failed';
+        if ($verdict->green) {
+            $word = 'passed';
         }
 
-        string $out = "## Tests {$verdict}\n\n";
+        string $out = "## Tests {$word}\n\n";
         $out->append("| passed | failed | skipped | flaky | time |\n|---:|---:|---:|---:|---:|\n");
         $out->append("| {$passed} | {$failed} | {$skipped} | {$flaky} | {$run->wallMs} ms |\n\n");
 
@@ -31,10 +31,10 @@ public class MarkdownReport
             $out->append("**Coverage:** {$l} lines, {$b} branches, {$f} functions\n\n");
         }
 
-        foreach ($failedGates as const &$gate) {
+        foreach ($verdict->failed as const &$gate) {
             $out->append("- :x: {$gate}\n");
         }
-        if (!$failedGates->empty()) {
+        if (!$verdict->failed->empty()) {
             $out->append("\n");
         }
 

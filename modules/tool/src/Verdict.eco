@@ -1,0 +1,21 @@
+namespace ecotest::cli;
+
+/**
+ * What a run comes to once the gates have judged it: the gates, every one that failed as a line,
+ * and whether the run is green with all of them held. Reports render this rather than judging the
+ * run again.
+ */
+public struct Verdict
+{
+    public Gates $gates;
+    public array<string> $failed;
+    public bool $green;
+
+    /**
+     * The verdict on `$run`, which fell short of `$failed` of `$gates`.
+     */
+    public static function of(const Run& $run, const Gates& $gates, const array<string>& $failed) : Verdict
+    {
+        return Verdict($gates, $failed, $run->green() && $failed->empty());
+    }
+}

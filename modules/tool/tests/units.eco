@@ -98,12 +98,19 @@ test styles_are_named_and_follow_the_stream_on_auto
     expect(Style::simple->styled($forced))->no();
 }
 
+internal function titled(const string& $id, const string& $module) : TestRecord
+{
+    TestRecord $t = TestRecord($id, TestRecord::key($id));
+    $t->module = $module;
+    return $t;
+}
+
 test a_look_titles_ids_and_fills_meters
 {
     Look $ascii = Look(command::plain());
-    expect($ascii->title('m/tests/a.eco::adds', 'm'))->is('tests/a.eco > adds');
-    expect($ascii->title('other/a.eco::adds', 'm'))->is('other/a.eco > adds');
-    expect($ascii->title('loose', ''))->is('loose');
+    expect($ascii->title(titled('m/tests/a.eco::adds', 'm')))->is('tests/a.eco > adds');
+    expect($ascii->title(titled('other/a.eco::adds', 'm')))->is('other/a.eco > adds');
+    expect($ascii->title(titled('loose', '')))->is('loose');
     expect($ascii->meter(50.0, 4))->is('##..');
     expect($ascii->meter(120.0, 4))->is('####');
     expect($ascii->mark(Outcome::timeout))->is('x');

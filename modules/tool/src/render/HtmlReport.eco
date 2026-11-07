@@ -8,18 +8,16 @@ namespace ecotest::cli;
 public class HtmlReport
 {
     /**
-     * The page for `$run`. `$gates` marks the line and branch thresholds on the coverage bars and
-     * shades what falls short of them; with no gate set nothing counts as short.
+     * The page for `$run`. The verdict's gates mark the line and branch thresholds on the coverage
+     * bars and shade what falls short of them; with no gate set nothing counts as short.
      */
-    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates, const Gates& $gates) : string
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict) : string
     {
         usize $total = $run->tests->count();
         usize $count = $files->count();
-        bool $green = $run->green() && $failedGates->empty();
-
         string $status = 'Red';
         string $statusTone = '';
-        if ($green) {
+        if ($verdict->green) {
             $status = 'Green';
             $statusTone = 'good';
         }
@@ -43,12 +41,12 @@ public class HtmlReport
         $out->append('<button type="button" class="themebtn" id="themebtn" aria-label="Toggle light and dark theme" title="Toggle theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"></path></svg></button></header>');
 
         $out->append('<div class="body">');
-        $out->append(HtmlReport::side($run, $files, $totals, $gates));
+        $out->append(HtmlReport::side($run, $files, $totals, $verdict->gates));
         $out->append('<main class="main">');
-        $out->append(HtmlReport::hero($run, $totals, $failedGates, $gates, $green));
+        $out->append(HtmlReport::hero($run, $totals, $verdict));
         $out->append(HtmlReport::tests($run));
         if (!$files->empty()) {
-            $out->append(HtmlReport::coverage($files, $gates));
+            $out->append(HtmlReport::coverage($files, $verdict->gates));
         }
         $out->append('</main></div>');
 
@@ -144,7 +142,7 @@ public class HtmlReport
     /**
      * The verdict, the counts, the coverage totals and every failed gate.
      */
-    private static function hero(const Run& $run, const array<Ratio>& $totals, const array<string>& $failedGates, const Gates& $gates, bool $green) : string
+    private static function hero(const Run& $run, const array<Ratio>& $totals, const Verdict& $verdict) : string
     {
         usize $total = $run->tests->count();
         usize $passed = $run->count(Outcome::pass);
@@ -154,19 +152,19 @@ public class HtmlReport
         usize $stopped = $run->stopped();
         float64 $secs = ($run->wallMs as float64) / 1000.0;
 
-        string $verdict = 'failed';
+        string $word = 'failed';
         string $tone = '';
-        if ($green) {
-            $verdict = 'passed';
+        if ($verdict->green) {
+            $word = 'passed';
             $tone = 'good';
         }
 
         string $out = '<section class="hero" id="summary">';
         $out->append(HtmlReport::mark('class="wave" width="620" height="620"', '2.4', true));
         $out->append('<div class="crumbs"><span>ecotest</span><span>/</span><span class="here">Run report</span></div>');
-        $out->append("<div class=\"titlerow\"><h1 class=\"h1\">Tests <span class=\"gen {$tone}\">{$verdict}</span></h1><div class=\"badges\">");
+        $out->append("<div class=\"titlerow\"><h1 class=\"h1\">Tests <span class=\"gen {$tone}\">{$word}</span></h1><div class=\"badges\">");
 
-        string $gatesFailed = Text::plural($failedGates->count(), 'gate', 'gates');
+        string $gatesFailed = Text::plural($verdict->failed->count(), 'gate', 'gates');
         if ($failed > 0) {
             string $b = Text::plural($failed, 'failure', 'failures');
             $out->append("<span class=\"badge bad\">{$b}</span>");
@@ -174,13 +172,13 @@ public class HtmlReport
         if ($stopped > 0) {
             $out->append('<span class="badge bad">echoc stopped</span>');
         }
-        if (!$failedGates->empty()) {
+        if (!$verdict->failed->empty()) {
             $out->append("<span class=\"badge bad\">{$gatesFailed} failed</span>");
         }
         if ($flaky > 0) {
             $out->append("<span class=\"badge warn\">{$flaky} flaky</span>");
         }
-        if ($failed == 0 && $stopped == 0 && $failedGates->empty() && $flaky == 0) {
+        if ($failed == 0 && $stopped == 0 && $verdict->failed->empty() && $flaky == 0) {
             $out->append('<span class="badge good">all clear</span>');
         }
         $out->append('</div></div>');
@@ -200,7 +198,7 @@ public class HtmlReport
             string $listed = HtmlReport::listed($more);
             $lede->append(" {$listed}.");
         }
-        if (!$failedGates->empty()) {
+        if (!$verdict->failed->empty()) {
             $lede->append(" {$gatesFailed} failed.");
         }
         $out->append("<p class=\"lede\">{$lede}</p>");
@@ -223,8 +221,8 @@ public class HtmlReport
 
         if (!$totals->empty()) {
             $out->append('<div class="cov">');
-            $out->append(HtmlReport::total('Lines', $totals[0], $gates->minLines, 'Lines with code that ran'));
-            $out->append(HtmlReport::total('Branches', $totals[1], $gates->minBranches, 'Both sides of every condition'));
+            $out->append(HtmlReport::total('Lines', $totals[0], $verdict->gates->minLines, 'Lines with code that ran'));
+            $out->append(HtmlReport::total('Branches', $totals[1], $verdict->gates->minBranches, 'Both sides of every condition'));
             $out->append(HtmlReport::total('Functions', $totals[2], -1.0, 'Called at least once'));
             $out->append('</div>');
         }
@@ -232,7 +230,7 @@ public class HtmlReport
         if ($stopped > 0) {
             $out->append(HtmlReport::callout('Run stopped', "echoc stopped before the tests ran in {$stopped} of {$run->passes} passes."));
         }
-        foreach ($failedGates as const &$gate) {
+        foreach ($verdict->failed as const &$gate) {
             $out->append(HtmlReport::callout('Gate failed', Escape::markup($gate)));
         }
 
@@ -307,13 +305,11 @@ public class HtmlReport
             $bad = 'bad';
         }
 
-        usize $sep = $test->id->find('::');
-        string $suite = '';
-        string $name = Escape::markup($test->id);
-        if ($sep < $test->id->size()) {
-            $suite = Escape::markup($test->id->sub(0, $sep + 2));
-            $name = Escape::markup($test->id->sub($sep + 2, $test->id->size() - $sep - 2));
+        string $suite = $test->suite();
+        if (!$suite->empty()) {
+            $suite = Escape::markup("{$suite}::");
         }
+        string $name = Escape::markup($test->label());
 
         string $ms = '—';
         if ($test->outcome != Outcome::skip) {
@@ -457,7 +453,7 @@ public class HtmlReport
      */
     private static function low(const Ratio& $r, float64 $min) : string
     {
-        if ($min >= 0.0 && $r->percent() < $min) {
+        if (Gates::below($r, $min)) {
             return 'low';
         }
         return '';

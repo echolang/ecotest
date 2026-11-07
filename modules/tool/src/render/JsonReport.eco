@@ -8,14 +8,14 @@ public class JsonReport
     /**
      * The JSON document for `$run`.
      */
-    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates) : string
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict) : string
     {
         json::Value $doc = json::object();
         $doc['v'] = json::int(1);
         $doc['echoc'] = json::str($run->version);
         $doc['ms'] = json::int($run->wallMs);
         $doc['passes'] = json::int($run->passes as int64);
-        $doc['green'] = json::bool($run->green() && $failedGates->empty());
+        $doc['green'] = json::bool($verdict->green);
 
         json::Value $counts = json::object();
         $counts['pass'] = json::int($run->count(Outcome::pass) as int64);
@@ -115,7 +115,7 @@ public class JsonReport
         }
 
         json::Value $gates = json::arr();
-        foreach ($failedGates as const &$gate) {
+        foreach ($verdict->failed as const &$gate) {
             $gates[] = json::str($gate);
         }
         $doc['failedGates'] = $gates;

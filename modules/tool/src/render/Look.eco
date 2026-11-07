@@ -121,25 +121,17 @@ public struct Look
     }
 
     /**
-     * A test id as people read it: the module dropped, the file and the name apart, as in
-     * `tests/a.eco › adds`. Uncoloured, so it can be muted whole.
+     * A test as people read it: the file and the name apart, as in `tests/a.eco › adds`.
+     * Uncoloured, so it can be muted whole.
      */
-    public const function title(const string& $id, const string& $module) : string
+    public const function title(const TestRecord& $test) : string
     {
-        string $rest = $id;
-        string $prefix = "{$module}/";
-        if (!$module->empty() && $id->starts($prefix)) {
-            $rest = $id->sub($prefix->size(), $id->size() - $prefix->size());
+        string $suite = $test->suite();
+        string $label = $test->label();
+        if ($suite->empty()) {
+            return $label;
         }
-
-        usize $at = $rest->find('::');
-        if ($at == $rest->size()) {
-            return $rest;
-        }
-
-        string $file = $rest->sub(0, $at);
-        string $name = $rest->sub($at + 2, $rest->size() - $at - 2);
-        return "{$file} {$this->sep} {$name}";
+        return "{$suite} {$this->sep} {$label}";
     }
 
     /**
