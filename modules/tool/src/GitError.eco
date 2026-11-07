@@ -1,0 +1,42 @@
+namespace ecotest::cli;
+
+/**
+ * Why `git diff` gave no diff.
+ */
+public enum GitError
+{
+    /**
+     * The program `$git` could not be started.
+     */
+    case cannotRun(string $git, std::io::ioerror $cause);
+
+    /**
+     * git ran and refused the diff against `$ref`, ending with `$status`. `$said` is the first line
+     * it wrote to stderr, or empty.
+     */
+    case refused(string $ref, std::process::exit_status $status, string $said);
+}
+
+namespace str;
+
+/**
+ * The reason in words, as `ecotest` prints it after `ecotest: `.
+ */
+public function from(const ecotest::cli::GitError& $e) : string
+{
+    return match ($e) {
+        .cannotRun($git, $cause) => "cannot run {$git}: {$cause}",
+        .refused($ref, $status, $said) => refusal($ref, $status, $said),
+    };
+}
+
+/**
+ * `git diff <ref> failed (<status>)`, then what git said, when it said something.
+ */
+private function refusal(const string& $ref, const std::process::exit_status& $status, const string& $said) : string
+{
+    if ($said->empty()) {
+        return "git diff {$ref} failed ({$status})";
+    }
+    return "git diff {$ref} failed ({$status}): {$said}";
+}

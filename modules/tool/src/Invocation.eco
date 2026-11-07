@@ -1,0 +1,47 @@
+namespace ecotest::cli;
+
+/**
+ * How echoc is run on the module under test: which compiler, in which project, with which build
+ * directory, and what every pass of `echoc test` asks for. Built once from the command line; every
+ * echoc the tool starts comes from `command`.
+ */
+public struct Invocation
+{
+    /**
+     * The module to test. Every path and every program the tool starts is relative to it.
+     */
+    public string $project = '.';
+
+    /**
+     * The echoc to run.
+     */
+    public string $program = 'echoc';
+    public string $buildDir = 'ecobuild';
+    public bool $coverage = false;
+
+    /**
+     * How many passes `run` makes over the tests, to find the flaky ones.
+     */
+    public usize $repeat = 1;
+
+    /**
+     * The words handed on to `echoc test`: filters, defines, the target and the timeout.
+     */
+    public array<string> $forwarded = [];
+
+    /**
+     * echoc with `$args`, run in the project, with the build directory named when it is not
+     * echoc's own default.
+     */
+    public const function command(array<string> $args) : std::process::command
+    {
+        if ($this->buildDir != 'ecobuild') {
+            $args[] = '--build-dir';
+            $args[] = $this->buildDir;
+        }
+
+        $echoc = std::process::command($this->program, $args);
+        $echoc->dir($this->project);
+        return $echoc;
+    }
+}

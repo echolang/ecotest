@@ -5,28 +5,28 @@ namespace ecotest;
  * smallest one that still fails, and the failure names it with the seed to replay the run.
  */
 #[caller]
-public function forAll<T>(Gen<T> $gen, function<bool(const T&)> $holds, usize $runs = 200) : void
+public function forAll<T>(const Gen<T>& $gen, function<bool(const T&)> $holds, usize $runs = 200) : void
 {
-    std::src::location $at = std::src::caller();
+    $at = std::src::caller();
     Session::checked();
 
-    uint64 $seed = Seed::pick();
-    Random $random = Random($seed);
+    uint64 $seed = seed();
+    $random = Random($seed);
 
     for (usize $i = 0; $i < $runs; $i++) {
-        T $value = $gen->make($random);
+        $value = $gen->make($random);
         if ($holds($value)) {
             continue;
         }
 
-        string $original = $gen->show($value);
-        T $smallest = $value;
+        $original = $gen->show($value);
+        $smallest = mv $value;
         usize $steps = 0;
         bool $moved = true;
 
         while ($moved && $steps < 1000) {
             $moved = false;
-            array<T> $candidates = $gen->shrink($smallest);
+            $candidates = $gen->shrink($smallest);
 
             foreach ($candidates as const &$candidate) {
                 if (!$holds($candidate)) {
@@ -39,10 +39,10 @@ public function forAll<T>(Gen<T> $gen, function<bool(const T&)> $holds, usize $r
         }
 
         usize $run = $i + 1;
-        string $shown = $gen->show($smallest);
-        string $detail = "smallest failing value: {$shown}\nfirst failing value: {$original}\nshrunk {$steps} times; replay with ECOTEST_SEED={$seed}";
+        $shown = $gen->show($smallest);
+        $detail = "smallest failing value: {$shown}\nfirst failing value: {$original}\nshrunk {$steps} times; replay with ECOTEST_SEED={$seed}";
 
-        Failure("property failed on run {$run} of {$runs}", $at, $actual: $shown, $detail: $detail)->raise();
+        fail("property failed on run {$run} of {$runs}", $at, $actual: $shown, $detail: $detail);
         return;
     }
 }

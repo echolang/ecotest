@@ -16,7 +16,7 @@ test ints_shrink_towards_the_nearest_end_of_their_range
 test floats_shrink_towards_zero_and_whole_numbers
 {
     $r = Random(3);
-    float64 $made = gen::floats(2.0, 10.0)->make($r);
+    $made = gen::floats(2.0, 10.0)->make($r);
     expect($made)->between(2.0, 10.0);
 
     expect(gen::floats(2.0, 10.0)->shrink(2.0))->empty();
@@ -60,7 +60,7 @@ test lists_shrink_by_dropping_and_shrinking_items
     array<int64> $settled = [0];
     expect($g->shrink($settled)->count())->is(2);
 
-    array<array<int64>> $smaller = $g->shrink($one);
+    $smaller = $g->shrink($one);
     expect($smaller->count())->is(3);
     expect($smaller[2])->is([0]);
 
@@ -101,7 +101,7 @@ test mapped_values_are_made_and_shown_but_not_shrunk
     $g = gen::map(gen::ints(0, 9), (const int64& $n) : string => "n{$n}");
     $r = Random(9);
 
-    expect($g->make($r))->startsWith('n');
+    expect($g->make($r))->starts('n');
     expect($g->shrink('n3'))->empty();
     expect($g->show('n3'))->is('n3');
 }
@@ -113,6 +113,6 @@ test a_failing_property_reports_its_smallest_value
     });
 
     expect($failures->count())->is(1);
-    expect($failures[0]->summary)->startsWith('property failed on run ');
+    expect($failures[0]->summary)->starts('property failed on run ');
     expect($failures[0]->actual)->is('10');
 }

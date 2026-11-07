@@ -11,10 +11,18 @@ public class TempDir
      */
     internal static usize $made = 0;
 
-    public string $path;
+    /**
+     * The path of the directory.
+     */
+    public const string $path;
 
+    /**
+     * Makes the directory. One that cannot be made stops the test at the line that asked for it.
+     */
+    #[caller]
     public constructor()
     {
+        $at = std::src::caller();
         TempDir::$made = TempDir::$made + 1;
 
         int32 $pid = std::env::pid();
@@ -22,8 +30,8 @@ public class TempDir
         int64 $stamp = std::time::timestamp::now()->unix_nanos();
 
         $this->path = std::env::join(std::env::tmp(), "ecotest-{$pid}-{$n}-{$stamp}");
-        bool $made = guard std::io::mkdir($this->path) else ($e) {
-            die("ecotest: cannot create {$this->path}: {$e}");
+        guard std::io::mkdir($this->path) else ($e) {
+            die(Session::report(Failure("cannot create temp directory {$this->path}: {$e}", $at)), $at);
         };
     }
 
@@ -36,28 +44,26 @@ public class TempDir
     }
 
     /**
-     * Writes `$text` to `$name` inside the directory and returns its path.
+     * Writes `$text` to `$name` inside the directory and returns its path. A file that cannot be
+     * written stops the test at the line that asked for it.
      */
-    public function write(const string& $name, const string& $text) : string
+    #[caller]
+    public const function write(const string& $name, const string& $text) : string
     {
-        string $to = $this->file($name);
-        usize $wrote = guard std::io::writefile($to, $text) else ($e) {
-            die("ecotest: cannot write {$to}: {$e}");
+        $at = std::src::caller();
+        $to = $this->file($name);
+        guard std::io::writefile($to, $text) else ($e) {
+            die(Session::report(Failure("cannot write temp file {$to}: {$e}", $at)), $at);
         };
         return $to;
     }
 
     /**
-     * The contents of `$name` inside the directory, or null when it cannot be read.
+     * The contents of `$name` inside the directory, or the error that kept it from being read.
      */
-    public const function read(const string& $name) : string?
+    public const function read(const string& $name) : result<string, std::io::ioerror>
     {
-        result<string, std::io::ioerror> $text = std::io::readfile($this->file($name));
-        if ($text->failed()) {
-            return null;
-        }
-
-        return $text->unwrap();
+        return std::io::readfile($this->file($name));
     }
 
     destructor()
@@ -71,7 +77,7 @@ public class TempDir
      */
     private static function remove(const string& $path) : void
     {
-        std::io::dir $listing = guard std::io::opendir($path) else {
+        $listing = guard std::io::opendir($path) else {
             return;
         };
 
@@ -79,11 +85,11 @@ public class TempDir
             if ($entry->is_directory()) {
                 TempDir::remove($entry->path());
             } else {
-                result<bool, std::io::ioerror> $gone = std::io::remove($entry->path());
+                $gone = std::io::remove($entry->path());
             }
         }
 
         $listing->close();
-        result<bool, std::io::ioerror> $removed = std::io::rmdir($path);
+        $removed = std::io::rmdir($path);
     }
 }

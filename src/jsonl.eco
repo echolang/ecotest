@@ -1,0 +1,44 @@
+/**
+ * The few bits of JSON an event line needs. Writing only, and only strings and integers, so the
+ * library stays on the standard library.
+ */
+
+namespace ecotest::jsonl;
+
+/**
+ * `$text` as a JSON string literal, quotes included. Control bytes become `\u00XX`, so a line of
+ * events never breaks on a newline the test printed.
+ */
+internal function quote(const string& $text) : string
+{
+    string $out = '"';
+    string $digits = '0123456789abcdef';
+
+    for (usize $i = 0; $i < $text->size(); $i++) {
+        uint8 $b = $text->byte($i);
+
+        if ($b == 34 || $b == 92) {
+            $out->push(92);
+            $out->push($b);
+        } else if ($b == 10) {
+            $out->push(92);
+            $out->push(110);
+        } else if ($b == 9) {
+            $out->push(92);
+            $out->push(116);
+        } else if ($b < 32) {
+            // \u00 spelled as bytes: a quoted backslash is read as an escape
+            $out->push(92);
+            $out->push(117);
+            $out->push(48);
+            $out->push(48);
+            $out->push($digits->byte(($b / 16) as usize));
+            $out->push($digits->byte(($b % 16) as usize));
+        } else {
+            $out->push($b);
+        }
+    }
+
+    $out->push(34);
+    return $out;
+}

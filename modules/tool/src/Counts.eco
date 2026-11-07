@@ -1,0 +1,18 @@
+namespace ecotest::cli;
+
+/**
+ * How a run's tests ended, counted once for every report that shows the tally.
+ */
+public struct Counts
+{
+    public usize $pass = 0;
+
+    /**
+     * The tests that failed, timed out or were killed.
+     */
+    public usize $fail = 0;
+
+    public usize $skip = 0;
+    public usize $flaky = 0;
+    public usize $total = 0;
+}

@@ -7,8 +7,7 @@ public struct Request
 {
     public Verb $verb;
     public string $url;
-    public array<string> $headerNames = [];
-    public array<string> $headerValues = [];
+    public array<Header> $headers = [];
     public string $body = '';
 
     public constructor(Verb $verb, const string& $url)
@@ -18,12 +17,11 @@ public struct Request
     }
 
     /**
-     * Adds a header.
+     * Adds header `$name: $value` after the ones already there.
      */
     public function header(const string& $name, const string& $value) : void
     {
-        $this->headerNames[] = $name;
-        $this->headerValues[] = $value;
+        $this->headers[] = Header($name, $value);
     }
 
     /**
@@ -31,7 +29,7 @@ public struct Request
      */
     public const function line() : string
     {
-        string $verb = $this->verb->word();
+        $verb = $this->verb->word();
         return "{$verb} {$this->url}";
     }
 }

@@ -4,37 +4,37 @@
  */
 
 use ecotest::{expect, TempDir};
-use ecotest::cli::{Tool, Files, Doc};
+use ecotest::cli::doc;
 
 test a_green_run_with_coverage_writes_every_report
 {
     $sample = Sample();
-    Tool $tool = $sample->tool();
-    $tool->coverage = true;
+    $tool = $sample->tool();
+    $tool->echoc->coverage = true;
     $tool->html = true;
 
     expect($tool->run())->is(0);
 
-    string $dir = $sample->latest();
+    $dir = $sample->latest();
     expect($dir)->has('run-');
     foreach (['run.json', 'junit.xml', 'report.html'] as const &$name) {
-        expect(Doc::read(std::env::join($dir, $name)))->has('halves');
+        expect(expect(doc::read(std::env::join($dir, $name)))->some())->has('halves');
     }
-    expect(Doc::read(std::env::join($dir, 'summary.md')))->has('## Tests passed');
-    expect(Doc::read(std::env::join($dir, 'lcov.info')))->has('SF:')->has('math.eco');
-    array<json::Value> $history = Doc::lines(Doc::read($sample->dir->file('.ecotest/history.jsonl')));
+    expect(expect(doc::read(std::env::join($dir, 'summary.md')))->some())->has('## Tests passed');
+    expect(expect(doc::read(std::env::join($dir, 'lcov.info')))->some())->has('SF:')->has('math.eco');
+    $history = doc::lines(expect(doc::read($sample->dir->file('.ecotest/history.jsonl')))->some());
     expect($history->count())->is(1);
-    expect(Doc::number($history[0], 'pass'))->is(4);
-    expect(Doc::list($history[0], 'tests')->count())->is(5);
+    expect(doc::number($history[0], 'pass'))->is(4);
+    expect(doc::list($history[0], 'tests')->count())->is(5);
 
-    json::Value $counts = Doc::object($sample->runJson(), 'counts');
-    expect(Doc::number($counts, 'pass'))->is(4);
-    expect(Doc::number($counts, 'skip'))->is(1);
-    expect(Doc::text($sample->result('needs_a_database'), 'skip'))->is('SAMPLE_NEVER_SET is not set');
-    expect(Doc::list($sample->result('adds'), 'notes')->count())->is(1);
+    $counts = doc::object($sample->runJson(), 'counts');
+    expect(doc::number($counts, 'pass'))->is(4);
+    expect(doc::number($counts, 'skip'))->is(1);
+    expect(doc::text($sample->result('needs_a_database'), 'skip'))->is('SAMPLE_NEVER_SET is not set');
+    expect(doc::list($sample->result('adds'), 'notes')->count())->is(1);
 
     foreach (['', 'md', 'junit', 'lcov', 'html', 'json'] as const &$format) {
-        Tool $report = $sample->tool();
+        $report = $sample->tool();
         $report->format = $format;
         expect($report->report(''))->is(0);
     }
@@ -49,40 +49,40 @@ test a_green_run_with_coverage_writes_every_report
 test a_red_run_fails_and_names_the_failures
 {
     $sample = Sample();
-    Tool $tool = $sample->tool();
-    $tool->forwarded = ['--define', 'BROKEN'];
+    $tool = $sample->tool();
+    $tool->echoc->forwarded = ['--define', 'BROKEN'];
 
     expect($tool->run())->is(1);
     expect(std::io::exists(std::env::join($sample->latest(), 'report.html'))->or(true))->no();
 
-    json::Value $wrong = Doc::object($sample->result('halves_wrongly'), 'failure');
-    expect(Doc::text($wrong, 'summary'))->is('expected 2, got 1');
-    expect(Doc::number($wrong, 'line'))->is(36);
-    expect(Doc::list($wrong, 'context')->count())->is(1);
+    $wrong = doc::object($sample->result('halves_wrongly'), 'failure');
+    expect(doc::text($wrong, 'summary'))->is('expected 2, got 1');
+    expect(doc::number($wrong, 'line'))->is(36);
+    expect(doc::list($wrong, 'context')->count())->is(1);
 
-    json::Value $crash = Doc::object($sample->result('crashes'), 'failure');
-    expect(Doc::text($crash, 'summary'))->has('plain stop');
+    $crash = doc::object($sample->result('crashes'), 'failure');
+    expect(doc::text($crash, 'summary'))->has('plain stop');
 }
 
 test a_flaky_test_is_found_by_repeating
 {
     $sample = Sample();
-    Tool $tool = $sample->tool();
-    $tool->forwarded = ['--define', 'FLAKY'];
-    $tool->repeat = 2;
+    $tool = $sample->tool();
+    $tool->echoc->forwarded = ['--define', 'FLAKY'];
+    $tool->echoc->repeat = 2;
     $tool->gates->maxFlaky = 0;
 
     expect($tool->run())->is(1);
-    expect(Doc::number(Doc::object($sample->runJson(), 'counts'), 'flaky'))->is(1);
-    expect(Doc::list($sample->result('adds'), 'notes')->count())->is(1);
+    expect(doc::number(doc::object($sample->runJson(), 'counts'), 'flaky'))->is(1);
+    expect(doc::list($sample->result('adds'), 'notes')->count())->is(1);
 }
 
 test coverage_gates_fail_a_green_run
 {
     $sample = Sample();
-    Tool $tool = $sample->tool();
-    $tool->coverage = true;
-    $tool->repeat = 2;
+    $tool = $sample->tool();
+    $tool->echoc->coverage = true;
+    $tool->echoc->repeat = 2;
     $tool->gates->minLines = 100.0;
     $tool->gates->minBranches = 100.0;
 
@@ -94,13 +94,13 @@ test ecotest_json_sets_excludes_modules_and_the_line_gate
     $sample = Sample();
     $sample->dir->write('ecotest.json', '{"coverage": {"exclude": ["src/never/**"], "modules": ["sample"], "min": 99}}');
 
-    Tool $tool = $sample->tool();
-    $tool->coverage = true;
+    $tool = $sample->tool();
+    $tool->echoc->coverage = true;
 
     expect($tool->run())->is(1);
     expect($tool->exclude)->is(['src/never/**']);
     expect($tool->modules)->is(['sample']);
-    expect($tool->gates->minLines)->near(99.0);
+    expect(expect($tool->gates->minLines)->some())->near(99.0);
 }
 
 test flags_win_over_ecotest_json_and_odd_values_read_as_empty
@@ -108,20 +108,46 @@ test flags_win_over_ecotest_json_and_odd_values_read_as_empty
     $sample = Sample();
     $sample->dir->write('ecotest.json', '{"coverage": {"exclude": [1], "modules": ["sample"], "min": 99}}');
 
-    Tool $tool = $sample->tool();
+    $tool = $sample->tool();
     $tool->modules = ['other'];
     $tool->gates->minLines = 10.0;
     $tool->configure();
 
     expect($tool->exclude)->is(['']);
     expect($tool->modules)->is(['other']);
-    expect($tool->gates->minLines)->near(10.0);
+    expect(expect($tool->gates->minLines)->some())->near(10.0);
 
     $sample->dir->write('ecotest.json', '{"coverage": {"modules": [2]}}');
-    Tool $odd = $sample->tool();
+    $odd = $sample->tool();
     $odd->configure();
     expect($odd->modules)->is(['']);
-    expect($odd->gates->minLines)->near(-1.0);
+    expect($odd->gates->minLines)->none();
+}
+
+test who_reads_ecotest_json_once_however_often_it_is_asked
+{
+    $sample = Sample();
+    $sample->dir->write('ecotest.json', '{"coverage": {"exclude": ["src/never/**"]}}');
+
+    $tool = $sample->tool();
+    // no run with coverage yet, but the excludes are read before that is found out
+    expect($tool->who('src/math.eco:3'))->is(1);
+    expect($tool->exclude)->is(['src/never/**']);
+
+    $tool->configure();
+    expect($tool->exclude)->is(['src/never/**']);
+}
+
+test an_empty_ecotest_json_configures_nothing
+{
+    $sample = Sample();
+    $sample->dir->write('ecotest.json', '');
+
+    $tool = $sample->tool();
+    $tool->configure();
+
+    expect($tool->exclude)->empty();
+    expect($tool->gates->minLines)->none();
 }
 
 test a_broken_ecotest_json_is_reported_and_ignored
@@ -129,7 +155,7 @@ test a_broken_ecotest_json_is_reported_and_ignored
     $sample = Sample();
     $sample->dir->write('ecotest.json', '{"coverage": ');
 
-    Tool $tool = $sample->tool();
+    $tool = $sample->tool();
     $tool->configure();
 
     expect($tool->exclude)->empty();
@@ -138,8 +164,8 @@ test a_broken_ecotest_json_is_reported_and_ignored
 test a_compiler_that_cannot_start_fails_the_run
 {
     $sample = Sample();
-    Tool $tool = $sample->tool();
-    $tool->echoc = '/nonexistent/echoc';
+    $tool = $sample->tool();
+    $tool->echoc->program = '/nonexistent/echoc';
 
     expect($tool->run())->is(1);
 }
@@ -153,34 +179,36 @@ test commands_without_a_run_say_so
     expect($sample->tool()->who('src/math.eco:3'))->is(1);
     expect($sample->tool()->affected())->is(1);
     expect($sample->tool()->who('no line here'))->is(2);
-    expect($sample->tool()->who('src/math.eco:x'))->is(1);
+    // a line that is not a number is refused before the coverage is looked for
+    expect($sample->tool()->who('src/math.eco:x'))->is(2);
+    expect($sample->tool()->who('src/math.eco:'))->is(2);
 }
 
 test affected_runs_the_tests_on_changed_lines
 {
     $sample = Sample();
-    Tool $first = $sample->tool();
-    $first->coverage = true;
+    $first = $sample->tool();
+    $first->echoc->coverage = true;
     expect($first->run())->is(0);
 
     $fake = TempDir();
     $sample->dir->write('changes.diff', 'diff --git a/src/math.eco b/src/math.eco\n--- a/src/math.eco\n+++ b/src/math.eco\n@@ -3 +3 @@\n-    return $a + $b;\n+    return $a + $b;\n');
-    string $git = $fake->write('git', "#!/bin/sh\ncat changes.diff\n");
+    $git = $fake->write('git', '#!/bin/sh\ncat changes.diff\n');
     expect(ecotest::run('chmod', ['+x', $git]))->succeeds();
 
-    Tool $tool = $sample->tool();
+    $tool = $sample->tool();
     $tool->git = $git;
     $tool->since = 'main';
-    $tool->coverage = true;
+    $tool->echoc->coverage = true;
     expect($tool->affected())->is(0);
 
-    $sample->dir->write('changes.diff', "diff --git a/README b/README\n+++ b/README\n@@ -1 +1 @@\n+x\n");
-    Tool $none = $sample->tool();
+    $sample->dir->write('changes.diff', 'diff --git a/README b/README\n+++ b/README\n@@ -1 +1 @@\n+x\n');
+    $none = $sample->tool();
     $none->git = $git;
     $none->since = 'main';
     expect($none->affected())->is(0);
 
-    Tool $refused = $sample->tool();
+    $refused = $sample->tool();
     $refused->git = 'false';
     $refused->since = 'main';
     expect($refused->affected())->is(1);
@@ -190,20 +218,20 @@ test diff_coverage_is_measured_and_gated
 {
     $sample = Sample();
     $fake = TempDir();
-    $sample->dir->write('changes.diff', "+++ b/src/math.eco\n@@ -17 +17 @@\n+    return 7;\n");
-    string $git = $fake->write('git', "#!/bin/sh\ncat changes.diff\n");
+    $sample->dir->write('changes.diff', '+++ b/src/math.eco\n@@ -17 +17 @@\n+    return 7;\n');
+    $git = $fake->write('git', '#!/bin/sh\ncat changes.diff\n');
     expect(ecotest::run('chmod', ['+x', $git]))->succeeds();
 
-    Tool $tool = $sample->tool();
-    $tool->coverage = true;
+    $tool = $sample->tool();
+    $tool->echoc->coverage = true;
     $tool->git = $git;
     $tool->since = 'main';
     $tool->gates->minDiff = 50.0;
 
     expect($tool->run())->is(1);
 
-    Tool $refused = $sample->tool();
-    $refused->coverage = true;
+    $refused = $sample->tool();
+    $refused->echoc->coverage = true;
     $refused->git = 'false';
     $refused->since = 'main';
     $refused->gates->minDiff = 50.0;

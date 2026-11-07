@@ -1,0 +1,22 @@
+namespace ecotest::cli;
+
+/**
+ * Where and why a test stopped in its last pass: the first failed check, or the crash when no
+ * check failed first. The file is empty when nothing named one.
+ */
+public struct Fault
+{
+    public string $summary = '';
+    public string $file = '';
+    public int64 $line = 0;
+
+    /**
+     * What the check compared and every later check that failed, one per line.
+     */
+    public string $detail = '';
+
+    /**
+     * The `ecotest::context` scopes the first failure happened in, outermost first.
+     */
+    public array<string> $context = [];
+}

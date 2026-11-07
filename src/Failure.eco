@@ -7,11 +7,34 @@ namespace ecotest;
  */
 public struct Failure
 {
+    /**
+     * The one-line headline of the report.
+     */
     public string $summary;
+
+    /**
+     * What the check wanted, as printed. Empty when the check names none.
+     */
     public string $expected;
+
+    /**
+     * What the check got instead, as printed. Empty when the check names none.
+     */
     public string $actual;
+
+    /**
+     * Extra lines under the values, such as a diff or a replay hint.
+     */
     public string $detail;
+
+    /**
+     * The `context()` scopes open when the check failed, outermost first.
+     */
     public array<string> $context;
+
+    /**
+     * The test line that made the check.
+     */
     public std::src::location $at;
 
     public constructor(
@@ -27,34 +50,6 @@ public struct Failure
         $this->actual = $actual;
         $this->detail = $detail;
         $this->context = [];
-    }
-
-    /**
-     * The report printed when the test stops: the summary, then the expected and actual values,
-     * the detail and the context, each indented under it.
-     */
-    public const function render() : string
-    {
-        string $out = $this->summary;
-
-        // a summary that already quotes both values says it once
-        bool $quoted = $this->summary->contains($this->expected) && $this->summary->contains($this->actual);
-
-        if ((!$this->expected->empty() || !$this->actual->empty()) && !$quoted) {
-            $out->append("\n  expected: {$this->expected}");
-            $out->append("\n       got: {$this->actual}");
-        }
-
-        if (!$this->detail->empty()) {
-            $out->append("\n");
-            $out->append(Show::indent(str::rtrim($this->detail), 2));
-        }
-
-        foreach ($this->context as const &$scope) {
-            $out->append("\n  in {$scope}");
-        }
-
-        return $out;
     }
 
     /**
@@ -75,7 +70,7 @@ public struct Failure
      * Records the failure with the session: it stops the test, or is held until the enclosing
      * `soft()` scope ends.
      */
-    public function raise() : void
+    public const function raise() : void
     {
         Session::fail($this);
     }
@@ -84,8 +79,17 @@ public struct Failure
      * Records the failure and stops the test even inside `soft()`. For checks that return a value,
      * where there is nothing to go on with.
      */
-    public function stop() : void
+    public const function stop() : void
     {
         Session::stop($this);
     }
+}
+
+/**
+ * Builds a failure from the constructor arguments and raises it: it stops the test, or is held
+ * until the enclosing `soft()` scope ends. `fail("...", std::src::caller())` in a check.
+ */
+internal function fail(construct Failure $failure) : void
+{
+    Session::fail($failure);
 }

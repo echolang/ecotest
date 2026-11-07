@@ -26,8 +26,8 @@ test ci_refuses_to_write_a_new_snapshot
     });
 
     expect($got->count())->is(1);
-    expect($got[0])->endsWith('does not exist, and ECOTEST_CI forbids writing it');
-    expect($dir->read('__snapshots__/case/ci_refuses_to_write_a_new_snapshot.1.snap'))->none();
+    expect($got[0])->ends('does not exist, and ECOTEST_CI forbids writing it');
+    expect($dir->read('__snapshots__/case/ci_refuses_to_write_a_new_snapshot.1.snap'))->fails();
 }
 
 test a_snapshot_is_new_then_matched_then_changed_then_updated
@@ -38,7 +38,7 @@ test a_snapshot_is_new_then_matched_then_changed_then_updated
     string $stored = '__snapshots__/case/shows.1.snap';
 
     expect('one')->snapshot();
-    expect($dir->read($stored))->some('one');
+    expect($dir->read($stored))->ok('one');
 
     Snapshot::$taken = 0;
     expect('one')->snapshot();
@@ -55,7 +55,7 @@ test a_snapshot_is_new_then_matched_then_changed_then_updated
     Snapshot::$taken = 0;
     setVar('ECOTEST_UPDATE', '1');
     expect('two')->snapshot();
-    expect($dir->read($stored))->some('two');
+    expect($dir->read($stored))->ok('two');
 }
 
 test a_file_without_an_extension_names_its_folder_whole
@@ -65,7 +65,7 @@ test a_file_without_an_extension_names_its_folder_whole
     setVar('ECHO_TEST_NAME', 'n');
 
     expect('v')->snapshot();
-    expect($dir->read('__snapshots__/plain/n.1.snap'))->some('v');
+    expect($dir->read('__snapshots__/plain/n.1.snap'))->ok('v');
 }
 
 test a_snapshot_that_cannot_be_written_fails
@@ -78,7 +78,7 @@ test a_snapshot_that_cannot_be_written_fails
     });
 
     expect($got->count())->is(1);
-    expect($got[0])->startsWith('cannot write snapshot /dev/null/__snapshots__/case/x.1.snap');
+    expect($got[0])->starts('cannot write snapshot /dev/null/__snapshots__/case/x.1.snap');
 }
 
 test a_bare_file_name_sits_in_the_current_directory
@@ -91,7 +91,7 @@ test a_bare_file_name_sits_in_the_current_directory
         expect('v')->snapshot();
     });
 
-    expect($got[0])->startsWith('snapshot ./__snapshots__/bare/x.1.snap does not exist');
+    expect($got[0])->starts('snapshot ./__snapshots__/bare/x.1.snap does not exist');
 }
 
 test an_update_that_cannot_be_written_fails
@@ -110,13 +110,13 @@ test an_update_that_cannot_be_written_fails
     });
 
     expect($got->count())->is(1);
-    expect($got[0])->startsWith('cannot write snapshot ');
+    expect($got[0])->starts('cannot write snapshot ');
 }
 
 test a_bench_stops_growing_its_batch_at_the_ceiling
 {
     Batch::$ceiling = 4;
     ecotest::bench('nothing', function() : void {
-    }, budget: std::time::duration::millis(1));
+    }, budget: .millis(1));
     expect(Batch::$ceiling)->is(4);
 }

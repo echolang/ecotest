@@ -1,0 +1,43 @@
+namespace ecotest::cli;
+
+/**
+ * Why the services of a run could not all be started.
+ */
+public enum ServiceError
+{
+    /**
+     * The service has an empty `run` list in `ecotest.json`, so there is nothing to start.
+     */
+    case noCommand(string $service);
+
+    /**
+     * The log the service writes into could not be created at `$path`.
+     */
+    case cannotWrite(string $path, std::io::ioerror $cause);
+
+    /**
+     * The service's program could not be started: missing, not executable, or refused.
+     */
+    case cannotStart(string $service, std::io::ioerror $cause);
+
+    /**
+     * The service started but its ready check did not pass within `$ms` milliseconds. What it
+     * said meanwhile is in `$log`.
+     */
+    case notReady(string $service, int64 $ms, string $log);
+}
+
+namespace str;
+
+/**
+ * The reason in words, as `ecotest` prints it after `ecotest: `.
+ */
+public function from(const ecotest::cli::ServiceError& $e) : string
+{
+    return match ($e) {
+        .noCommand($service) => "service {$service} has no `run` command",
+        .cannotWrite($path, $cause) => "cannot write {$path}: {$cause}",
+        .cannotStart($service, $cause) => "cannot start service {$service}: {$cause}",
+        .notReady($service, $ms, $log) => "service {$service} was not ready within {$ms} ms; see {$log}",
+    };
+}

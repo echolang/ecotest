@@ -7,9 +7,8 @@ public function from(const Point& $p) : string
 
 public function from(Fault $f) : string
 {
-    if ($f == Fault::empty) {
-        return 'empty';
-    }
-
-    return 'bad';
+    return match ($f) {
+        .empty => 'empty',
+        .bad => 'bad',
+    };
 }

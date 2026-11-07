@@ -7,8 +7,8 @@ test a_temp_dir_holds_files_and_goes_away
     {
         $dir = TempDir();
         $where = $dir->path;
-        string $file = $dir->write('a.txt', 'hello');
-        expect($dir->read('a.txt'))->some('hello');
+        $file = $dir->write('a.txt', 'hello');
+        expect($dir->read('a.txt'))->ok('hello');
         expect(std::io::exists($file))->ok(true);
     }
 
@@ -37,7 +37,7 @@ test eventually_waits_for_a_condition
 #[tests: expects death]
 test eventually_gives_up
 {
-    ecotest::eventually(() : bool => false, within: std::time::duration::millis(30));
+    ecotest::eventually(() : bool => false, within: .millis(30));
 }
 
 test a_program_runs_and_is_checked
@@ -45,6 +45,7 @@ test a_program_runs_and_is_checked
     $ran = ecotest::run('echo', ['hello']);
     expect($ran)->succeeds()->stdout()->is("hello\n");
     expect($ran)->stderr()->empty();
+    expect($ran->code)->some(0);
 }
 
 #[tests: expects death]
@@ -62,10 +63,13 @@ test notes_and_metrics_are_recorded
 
 test a_bench_records_its_numbers
 {
-    int64 $sum = 0;
+    // the sum is the closure's own: a captured local would only change the closure's copy
     ecotest::bench('add', function() : void {
-        $sum = $sum + 1;
-    }, budget: std::time::duration::millis(20));
+        int64 $sum = 0;
+        for (int64 $i = 0; $i < 100; $i++) {
+            $sum = $sum + $i;
+        }
+    }, budget: .millis(20));
 }
 
 test a_snapshot_is_written_then_matched

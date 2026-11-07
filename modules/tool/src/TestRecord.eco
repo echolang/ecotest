@@ -6,8 +6,13 @@ namespace ecotest::cli;
  */
 public class TestRecord
 {
-    public string $id;
-    public string $key;
+    public const string $id;
+
+    /**
+     * The id in file-name form, as `slug` writes it. echoc names the test's coverage file this way
+     * and ecotest its event file, so all three join on it.
+     */
+    public const string $key;
     public string $module = '';
     public string $file = '';
     public string $name = '';
@@ -18,54 +23,26 @@ public class TestRecord
      */
     public usize $pass = 0;
 
-    public Outcome $outcome = Outcome::pass;
-    public array<Outcome> $attempts = [];
-    public array<int64> $durations = [];
-    public string $output = '';
-
-    public string $failure = '';
-    public string $failureFile = '';
-    public int64 $failureLine = 0;
-    public string $failureDetail = '';
-    public array<string> $context = [];
-
-    public string $skipReason = '';
-    public bool $usedEcotest = false;
-    public int64 $checks = 0;
-    public array<string> $notes = [];
-    public array<string> $metricNames = [];
-    public array<int64> $metricValues = [];
-    public array<BenchResult> $benches = [];
-
-    public constructor(const string& $id, const string& $key)
-    {
-        $this->id = $id;
-        $this->key = $key;
-    }
+    public Outcome $outcome = .pass;
 
     /**
-     * The file-name form of a test id: every byte outside `[A-Za-z0-9_.-]` becomes `_`. echoc names
-     * a test's coverage file this way and ecotest its event file, so all three join on it.
+     * How each pass went, in order.
      */
-    public static function key(const string& $id) : string
+    public array<Attempt> $attempts = [];
+    public string $output = '';
+
+    /**
+     * What the test wrote through ecotest in the pass it was last folded in.
+     */
+    public Events $events = Events();
+
+    /**
+     * The record of the test `$id`, keyed by its file-name form.
+     */
+    public constructor(const string& $id)
     {
-        string $out = '';
-
-        for (usize $i = 0; $i < $id->size(); $i++) {
-            uint8 $b = $id->byte($i);
-            bool $plain = ($b >= 97 && $b <= 122)
-                || ($b >= 65 && $b <= 90)
-                || ($b >= 48 && $b <= 57)
-                || $b == 95 || $b == 45 || $b == 46;
-
-            if ($plain) {
-                $out->push($b);
-            } else {
-                $out->push(95);
-            }
-        }
-
-        return $out;
+        $this->id = $id;
+        $this->key = slug($id);
     }
 
     /**
@@ -77,7 +54,7 @@ public class TestRecord
     public const function title(bool $keepModule) : TestTitle
     {
         usize $from = 0;
-        string $prefix = "{$this->module}/";
+        $prefix = "{$this->module}/";
         if (!$keepModule && !$this->module->empty() && $this->id->starts($prefix)) {
             $from = $prefix->size();
         }
@@ -98,7 +75,7 @@ public class TestRecord
             return $this->outcome;
         }
 
-        return $this->attempts[$this->attempts->count() - 1];
+        return $this->attempts[$this->attempts->count() - 1]->outcome;
     }
 
     /**
@@ -106,11 +83,11 @@ public class TestRecord
      */
     public const function ms() : int64
     {
-        if ($this->durations->empty()) {
+        if ($this->attempts->empty()) {
             return 0;
         }
 
-        return $this->durations[$this->durations->count() - 1];
+        return $this->attempts[$this->attempts->count() - 1]->ms;
     }
 
     /**
@@ -118,11 +95,31 @@ public class TestRecord
      */
     public const function attemptWords() : string
     {
-        array<string> $words = [];
+        $words = arr::room<string>($this->attempts->count());
         foreach ($this->attempts as const &$attempt) {
-            $words[] = $attempt->word();
+            $words[] = $attempt->outcome->value();
         }
         return str::join($words, ' ');
+    }
+
+    /**
+     * Why a listed test is listed: how its passes went when it is flaky, otherwise the reason it
+     * skipped, which is empty for any other test.
+     */
+    public const function why() : string
+    {
+        if ($this->outcome == Outcome::flaky) {
+            return $this->attemptWords();
+        }
+        return $this->events->skipReason;
+    }
+
+    /**
+     * True for a passing test that used ecotest and checked nothing through it.
+     */
+    public const function silent() : bool
+    {
+        return $this->outcome == Outcome::pass && $this->events->usedEcotest && $this->events->checks == 0;
     }
 
     /**
@@ -131,8 +128,8 @@ public class TestRecord
      */
     public function settle() : void
     {
-        if (!$this->skipReason->empty()) {
-            $this->outcome = Outcome::skip;
+        if (!$this->events->skipReason->empty()) {
+            $this->outcome = .skip;
             return;
         }
 
@@ -140,22 +137,47 @@ public class TestRecord
             return;
         }
 
-        bool $passed = false;
-        bool $broke = false;
+        $passed = false;
+        $broke = false;
         foreach ($this->attempts as const &$attempt) {
-            if ($attempt == Outcome::pass) {
+            if ($attempt->outcome == Outcome::pass) {
                 $passed = true;
             }
-            if ($attempt->broken()) {
+            if ($attempt->outcome->broken()) {
                 $broke = true;
             }
         }
 
         if ($passed && $broke) {
-            $this->outcome = Outcome::flaky;
+            $this->outcome = .flaky;
             return;
         }
 
-        $this->outcome = $this->attempts[$this->attempts->count() - 1];
+        $this->outcome = $this->attempts[$this->attempts->count() - 1]->outcome;
     }
+}
+
+/**
+ * `$text` safe as a file name: every byte outside `[A-Za-z0-9_.-]` becomes `_`. A test's key, and
+ * the anchor of a file in the HTML report.
+ */
+public function slug(const string& $text) : string
+{
+    $out = '';
+
+    for (usize $i = 0; $i < $text->size(); $i++) {
+        uint8 $b = $text->byte($i);
+        $plain = ($b >= 97 && $b <= 122)
+            || ($b >= 65 && $b <= 90)
+            || ($b >= 48 && $b <= 57)
+            || $b == 95 || $b == 45 || $b == 46;
+
+        if ($plain) {
+            $out->push($b);
+        } else {
+            $out->push(95);
+        }
+    }
+
+    return $out;
 }

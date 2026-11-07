@@ -10,7 +10,7 @@ test random_is_reproducible_from_its_seed
     expect($a->unit())->above(-0.0000001)->below(1.0);
 }
 
-test probe_local_gen
+test a_property_takes_a_generator_held_in_a_local
 {
     $g = gen::ints(-100, 100);
     ecotest::forAll($g, (const int64& $n) => $n + 0 == $n);
@@ -36,7 +36,7 @@ test list_shrinking_offers_smaller_lists
 {
     $g = gen::lists(gen::ints(0, 9));
     array<int64> $v = [5, 6, 7];
-    array<array<int64>> $smaller = $g->shrink($v);
+    $smaller = $g->shrink($v);
     expect($smaller->count())->above(3);
     expect($smaller[0]->count())->is(0);
 }

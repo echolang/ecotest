@@ -8,12 +8,17 @@ public struct ServiceSpec
 {
     public string $name;
     public array<string> $command;
-    public string $readyUrl;
-    public int64 $readyMs;
-    public int64 $timeoutMs;
+    public Readiness $ready;
+
+    /**
+     * The URL tests reach the service at, empty when they are not handed one.
+     */
     public string $url;
-    public array<string> $envNames;
-    public array<string> $envValues;
+
+    /**
+     * The extra environment the service starts with, by variable name, in the order given.
+     */
+    public ordered_map<string, string> $env;
 
     /**
      * The variable tests read the URL from: `ECOTEST_<NAME>_URL`, upper case, non-alphanumerics
@@ -21,7 +26,7 @@ public struct ServiceSpec
      */
     public const function variable() : string
     {
-        string $out = 'ECOTEST_';
+        $out = 'ECOTEST_';
         for (usize $i = 0; $i < $this->name->size(); $i++) {
             uint8 $b = $this->name->byte($i);
             if ($b >= 97 && $b <= 122) {

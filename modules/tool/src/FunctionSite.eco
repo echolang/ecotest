@@ -1,0 +1,12 @@
+namespace ecotest::cli;
+
+/**
+ * One function of a source file, by name and the line it starts on, with how often it was called
+ * over every test of the run.
+ */
+public struct FunctionSite
+{
+    public string $name;
+    public int64 $line;
+    public uint64 $hits;
+}

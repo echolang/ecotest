@@ -1,214 +1,184 @@
-namespace ecotest::cli;
-
 /**
  * The summary printed after echoc's own listing: outcomes, time, checks, the slowest tests,
  * skips with their reasons, failures at their lines, coverage per file and the gates.
  */
-public class TerminalReport
+
+namespace ecotest::cli::terminal;
+
+use ecotest::cli::text;
+
+/**
+ * How many slow tests and uncovered files are listed.
+ */
+internal const usize TOP = 5;
+
+/**
+ * The summary of `$run`. `$diff` is the diff coverage sentence and `$report` the HTML report's
+ * path; either may be empty.
+ */
+public function render(const Run& $run, const array<FileCoverage>& $files, Totals? $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
 {
-    /**
-     * How many slow tests and uncovered files are listed.
-     */
-    public static usize $top = 5;
+    $out = '\n';
 
-    /**
-     * The summary of `$run`. `$diff` is the diff coverage sentence and `$report` the HTML report's
-     * path; either may be empty.
-     */
-    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
-    {
-        string $out = "\n";
+    $c = $run->counts();
+    $secs = $run->seconds();
 
-        usize $passed = $run->count(Outcome::pass);
-        usize $failed = $run->broken();
-        usize $skipped = $run->count(Outcome::skip);
-        usize $flaky = $run->count(Outcome::flaky);
-        usize $all = $run->tests->count();
-        float64 $secs = ($run->wallMs as float64) / 1000.0;
+    $out->append("ecotest   {$c->total} tests: {$c->pass} passed, {$c->fail} failed, {$c->skip} skipped, {$c->flaky} flaky in {$secs:.2f} s");
+    if ($run->passes > 1) {
+        $out->append(" over {$run->passes} passes");
+    }
+    $out->append('\n');
 
-        $out->append("ecotest   {$all} tests: {$passed} passed, {$failed} failed, {$skipped} skipped, {$flaky} flaky in {$secs:.2f} s");
-        if ($run->passes > 1) {
-            $out->append(" over {$run->passes} passes");
-        }
-        $out->append("\n");
-
-        usize $stopped = $run->stopped();
-        if ($stopped > 0) {
-            $out->append("stopped   echoc did not reach the tests in {$stopped} of {$run->passes} passes\n");
-        }
-
-        $out->append(TerminalReport::timing($run));
-        $out->append(TerminalReport::checks($run));
-        $out->append(TerminalReport::listed($run, Outcome::skip, 'skipped'));
-        $out->append(TerminalReport::listed($run, Outcome::flaky, 'flaky'));
-        $out->append(TerminalReport::failures($run));
-        $out->append(TerminalReport::extras($run));
-
-        if (!$totals->empty()) {
-            $out->append(TerminalReport::coverage($files, $totals));
-        }
-
-        foreach ($verdict->failed as const &$gate) {
-            $out->append("gate      FAIL {$gate}\n");
-        }
-
-        if (!$diff->empty()) {
-            $out->append("diff      {$diff}\n");
-        }
-        if (!$report->empty()) {
-            $out->append("report    {$report}\n");
-        }
-
-        return $out;
+    usize $stopped = $run->stopped();
+    if ($stopped > 0) {
+        $out->append("stopped   echoc did not reach the tests in {$stopped} of {$run->passes} passes\n");
     }
 
-    /**
-     * Median and 95th percentile duration, and the slowest tests.
-     */
-    private static function timing(const Run& $run) : string
-    {
-        if ($run->tests->empty()) {
-            return '';
-        }
+    timing($out, $run);
+    checks($out, $run);
+    listed($out, $run, .skip, 'skipped');
+    listed($out, $run, .flaky, 'flaky');
+    failures($out, $run);
+    extras($out, $run);
+    coverage($out, $files, $totals);
 
-        int64 $median = $run->percentile(50);
-        int64 $slow = $run->percentile(95);
-
-        string $out = "time      p50 {$median} ms, p95 {$slow} ms\n";
-
-        foreach ($run->slowest(TerminalReport::$top) as const &$test) {
-            int64 $took = $test->ms();
-            $out->append("          {$took:>6} ms  {$test->id}\n");
-        }
-
-        return $out;
+    foreach ($verdict->failed as const &$gate) {
+        $out->append("gate      FAIL {$gate}\n");
     }
 
-    /**
-     * Checks per test, and the tests that checked nothing ecotest could see.
-     */
-    private static function checks(const Run& $run) : string
-    {
-        usize $counted = $run->asserting();
-        if ($counted == 0) {
-            return '';
-        }
-
-        int64 $total = $run->assertions();
-        array<string> $silent = [];
-        foreach ($run->tests as const &$test) {
-            if ($test->outcome == Outcome::pass && $test->usedEcotest && $test->checks == 0) {
-                $silent[] = $test->id;
-            }
-        }
-
-        float64 $per = ($total as float64) / ($counted as float64);
-        string $out = "checks    {$total} in {$counted} tests using ecotest ({$per:.1f} per test)\n";
-        foreach ($silent as const &$id) {
-            $out->append("          checks nothing: {$id}\n");
-        }
-        return $out;
+    if (!$diff->empty()) {
+        $out->append("diff      {$diff}\n");
+    }
+    if (!$report->empty()) {
+        $out->append("report    {$report}\n");
     }
 
-    /**
-     * The tests with `$outcome`, under `$label`, with skip reasons.
-     */
-    private static function listed(const Run& $run, Outcome $outcome, const string& $label) : string
-    {
-        string $out = '';
+    return $out;
+}
 
-        foreach ($run->tests as const &$test) {
-            if ($test->outcome != $outcome) {
-                continue;
-            }
-
-            string $why = '';
-            if (!$test->skipReason->empty()) {
-                $why = ": {$test->skipReason}";
-            }
-            if ($outcome == Outcome::flaky) {
-                string $seq = $test->attemptWords();
-                $why = ": {$seq}";
-            }
-
-            $out->append("{$label:<9} {$test->id}{$why}\n");
-        }
-
-        return $out;
+/**
+ * Median and 95th percentile duration, and the slowest tests.
+ */
+private function timing(string& $out, const Run& $run) : void
+{
+    if ($run->tests->empty()) {
+        return;
     }
 
-    /**
-     * Each failure with its line, summary, detail and context.
-     */
-    private static function failures(const Run& $run) : string
-    {
-        string $out = '';
+    int64 $median = $run->percentile(50);
+    int64 $slow = $run->percentile(95);
 
-        foreach ($run->tests as const &$test) {
-            if (!$test->outcome->broken()) {
-                continue;
-            }
+    $out->append("time      p50 {$median} ms, p95 {$slow} ms\n");
 
-            string $word = $test->outcome->word();
-            $out->append("{$word:<9} {$test->id}\n");
+    foreach ($run->slowest(TOP) as const &$test) {
+        int64 $took = $test->ms();
+        $out->append("          {$took:>6} ms  {$test->id}\n");
+    }
+}
 
-            if (!$test->failureFile->empty()) {
-                $out->append("          at {$test->failureFile}:{$test->failureLine}\n");
-            }
-            if (!$test->failure->empty()) {
-                $out->append(Text::indent($test->failure, 12));
-                $out->append("\n");
-            }
-            if (!$test->failureDetail->empty()) {
-                $out->append(Text::indent($test->failureDetail, 12));
-                $out->append("\n");
-            }
-            foreach ($test->context as const &$scope) {
-                $out->append("            in {$scope}\n");
-            }
-        }
-
-        return $out;
+/**
+ * Checks per test, and the tests that checked nothing ecotest could see.
+ */
+private function checks(string& $out, const Run& $run) : void
+{
+    usize $counted = $run->asserting();
+    if ($counted == 0) {
+        return;
     }
 
-    /**
-     * Notes, metrics and benches the tests recorded.
-     */
-    private static function extras(const Run& $run) : string
-    {
-        string $out = '';
-
-        foreach ($run->tests as const &$test) {
-            foreach ($test->notes as const &$note) {
-                $out->append("note      {$test->id}: {$note}\n");
-            }
-            for (usize $i = 0; $i < $test->metricNames->count(); $i++) {
-                $out->append("metric    {$test->id}: {$test->metricNames[$i]} = {$test->metricValues[$i]}\n");
-            }
-            foreach ($test->benches as const &$b) {
-                $out->append("bench     {$b->label}: {$b->p50} ns/op, p95 {$b->p95} ns ({$test->id})\n");
-            }
+    int64 $total = $run->assertions();
+    $per = ($total as float64) / ($counted as float64);
+    $out->append("checks    {$total} in {$counted} tests using ecotest ({$per:.1f} per test)\n");
+    foreach ($run->tests as const &$test) {
+        if ($test->silent()) {
+            $out->append("          checks nothing: {$test->id}\n");
         }
-
-        return $out;
     }
+}
 
-    /**
-     * Totals, then the least covered files with their missed lines.
-     */
-    private static function coverage(const array<FileCoverage>& $files, const array<Ratio>& $totals) : string
-    {
-        string $lines = $totals[0]->shown();
-        string $branches = $totals[1]->shown();
-        string $functions = $totals[2]->shown();
-        string $out = "coverage  {$lines} lines, {$branches} branches, {$functions} functions\n";
-
-        foreach (FileCoverage::worst($files, TerminalReport::$top) as const &$file) {
-            string $pct = $file->lineTotals()->shown();
-            string $missed = Text::cut($file->missedRanges());
-            $out->append("          {$pct:>6}  {$file->file}  missing {$missed}\n");
+/**
+ * The tests with `$outcome`, under `$label`, with why: the skip reason or how the passes went.
+ */
+private function listed(string& $out, const Run& $run, Outcome $outcome, const string& $label) : void
+{
+    foreach ($run->tests as const &$test) {
+        if ($test->outcome != $outcome) {
+            continue;
         }
 
-        return $out;
+        $why = $test->why();
+        if (!$why->empty()) {
+            $why = ": {$why}";
+        }
+
+        $out->append("{$label:<9} {$test->id}{$why}\n");
+    }
+}
+
+/**
+ * Each failure with its line, summary, detail and context.
+ */
+private function failures(string& $out, const Run& $run) : void
+{
+    foreach ($run->tests as const &$test) {
+        if (!$test->outcome->broken()) {
+            continue;
+        }
+
+        $out->append("{$test->outcome:<9} {$test->id}\n");
+
+        $fault = guard $test->events->fault else {
+            continue;
+        };
+        if (!$fault->file->empty()) {
+            $out->append("          at {$fault->file}:{$fault->line}\n");
+        }
+        if (!$fault->summary->empty()) {
+            $out->append(text::indent($fault->summary, 12));
+            $out->append('\n');
+        }
+        if (!$fault->detail->empty()) {
+            $out->append(text::indent($fault->detail, 12));
+            $out->append('\n');
+        }
+        foreach ($fault->context as const &$scope) {
+            $out->append("            in {$scope}\n");
+        }
+    }
+}
+
+/**
+ * Notes, metrics and benches the tests recorded.
+ */
+private function extras(string& $out, const Run& $run) : void
+{
+    foreach ($run->tests as const &$test) {
+        foreach ($test->events->notes as const &$note) {
+            $out->append("note      {$test->id}: {$note}\n");
+        }
+        foreach ($test->events->metrics as const &$metric) {
+            $out->append("metric    {$test->id}: {$metric->name} = {$metric->value}\n");
+        }
+        foreach ($test->events->benches as const &$b) {
+            $out->append("bench     {$b->label}: {$b->p50} ns/op, p95 {$b->p95} ns ({$test->id})\n");
+        }
+    }
+}
+
+/**
+ * Totals, then the least covered files with their missed lines. Nothing without coverage.
+ */
+private function coverage(string& $out, const array<FileCoverage>& $files, Totals? $totals) : void
+{
+    $t = guard $totals else {
+        return;
+    };
+
+    $out->append("coverage  {$t->lines} lines, {$t->branches} branches, {$t->functions} functions\n");
+
+    foreach (FileCoverage::worst($files, TOP) as const &$file) {
+        $r = $file->lineTotals();
+        $missed = text::cut($file->missedRanges());
+        $out->append("          {$r:>6}  {$file->file}  missing {$missed}\n");
     }
 }

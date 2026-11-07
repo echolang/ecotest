@@ -6,10 +6,9 @@ namespace ecotest::http;
  */
 public class Api
 {
-    public string $base;
+    public const string $base;
     public Transport $transport;
-    public array<string> $headerNames = [];
-    public array<string> $headerValues = [];
+    private array<Header> $headers = [];
 
     /**
      * A service at `$base`, such as `http://127.0.0.1:8080`, reached over sockets.
@@ -27,8 +26,8 @@ public class Api
     #[caller]
     public constructor(service: const string& $name)
     {
-        string $variable = Api::variable($name);
-        string $url = ecotest::needs(env: $variable);
+        $variable = Api::variable($name);
+        $url = ecotest::needs(env: $variable);
         $this->base = Api::trimmed($url);
         $this->transport = CurlTransport();
     }
@@ -47,8 +46,7 @@ public class Api
      */
     public function with(const string& $name, const string& $value) : Api
     {
-        $this->headerNames[] = $name;
-        $this->headerValues[] = $value;
+        $this->headers[] = Header($name, $value);
         return $this;
     }
 
@@ -65,7 +63,7 @@ public class Api
      */
     public function get(const string& $path) : Reply
     {
-        return $this->send(Verb::get, $path, '', '');
+        return $this->send(.get, $path);
     }
 
     /**
@@ -73,7 +71,7 @@ public class Api
      */
     public function head(const string& $path) : Reply
     {
-        return $this->send(Verb::head, $path, '', '');
+        return $this->send(.head, $path);
     }
 
     /**
@@ -81,88 +79,51 @@ public class Api
      */
     public function delete(const string& $path) : Reply
     {
-        return $this->send(Verb::delete, $path, '', '');
+        return $this->send(.delete, $path);
     }
 
     /**
-     * POST JSON text to `$path`.
+     * POST `$body` to `$path`: `json:` text or a document, `form:` fields, or `body:` with `type:`.
      */
-    public function post(const string& $path, json: const string& $text) : Reply
+    public function post(const string& $path, construct Body $body) : Reply
     {
-        return $this->send(Verb::post, $path, $text, 'application/json');
+        return $this->send(.post, $path, $body);
     }
 
     /**
-     * POST a JSON document to `$path`.
+     * PUT `$body` to `$path`: `json:` text or a document, `form:` fields, or `body:` with `type:`.
      */
-    public function post(const string& $path, json: const json::Value& $doc) : Reply
+    public function put(const string& $path, construct Body $body) : Reply
     {
-        return $this->send(Verb::post, $path, json::dump($doc->clone()), 'application/json');
+        return $this->send(.put, $path, $body);
     }
 
     /**
-     * POST a body of `$type` to `$path`.
+     * PATCH `$body` to `$path`: `json:` text or a document, `form:` fields, or `body:` with `type:`.
      */
-    public function post(const string& $path, body: const string& $body, type: const string& $type) : Reply
+    public function patch(const string& $path, construct Body $body) : Reply
     {
-        return $this->send(Verb::post, $path, $body, $type);
+        return $this->send(.patch, $path, $body);
     }
 
     /**
-     * POST form fields to `$path`, URL-encoded.
+     * Sends a request built here, with `$body` and its Content-Type when there is one, and returns
+     * what came back. A transport failure is kept on the reply, so the first check on it fails at
+     * the test's line.
      */
-    public function post(const string& $path, form: const map<string, string>& $fields) : Reply
+    public function send(Verb $verb, const string& $path, const Body? $body = null) : Reply
     {
-        return $this->send(Verb::post, $path, Api::encode($fields), 'application/x-www-form-urlencoded');
-    }
+        $request = Request($verb, Api::join($this->base, $path));
+        $request->headers = $this->headers;
 
-    /**
-     * PUT JSON text to `$path`.
-     */
-    public function put(const string& $path, json: const string& $text) : Reply
-    {
-        return $this->send(Verb::put, $path, $text, 'application/json');
-    }
-
-    /**
-     * PUT a body of `$type` to `$path`.
-     */
-    public function put(const string& $path, body: const string& $body, type: const string& $type) : Reply
-    {
-        return $this->send(Verb::put, $path, $body, $type);
-    }
-
-    /**
-     * PATCH JSON text to `$path`.
-     */
-    public function patch(const string& $path, json: const string& $text) : Reply
-    {
-        return $this->send(Verb::patch, $path, $text, 'application/json');
-    }
-
-    /**
-     * Sends a request built here and returns what came back. A transport failure is kept on the
-     * reply, so the first check on it fails at the test's line.
-     */
-    public function send(Verb $verb, const string& $path, const string& $body, const string& $type) : Reply
-    {
-        Request $request = Request($verb, Api::join($this->base, $path));
-        $request->body = $body;
-
-        for (usize $i = 0; $i < $this->headerNames->count(); $i++) {
-            $request->header($this->headerNames[$i], $this->headerValues[$i]);
-        }
-        if (!$type->empty()) {
-            $request->header('Content-Type', $type);
+        if ($body != null) {
+            $b = guard $body;
+            $request->body = $b->text;
+            $request->header('Content-Type', $b->type);
         }
 
-        result<Response, TransportError> $sent = $this->transport->send($request);
-        if ($sent->failed()) {
-            string $why = $sent->failure()->message();
-            return Reply($request, Response(0), $why);
-        }
-
-        return Reply($request, $sent->unwrap(), '');
+        $response = $this->transport->send($request);
+        return Reply(mv $request, mv $response);
     }
 
     /**
@@ -208,37 +169,5 @@ public class Api
             return "{$base}{$path}";
         }
         return "{$base}/{$path}";
-    }
-
-    /**
-     * Form fields as `a=1&b=two`, with everything but unreserved bytes percent-encoded.
-     */
-    private static function encode(const map<string, string>& $fields) : string
-    {
-        string $out = '';
-        string $hex = '0123456789ABCDEF';
-
-        foreach ($fields as $key => const &$value) {
-            if (!$out->empty()) {
-                $out->append('&');
-            }
-
-            string $pair = "{$key}={$value}";
-            usize $eq = $key->size();
-            for (usize $i = 0; $i < $pair->size(); $i++) {
-                uint8 $b = $pair->byte($i);
-                bool $plain = ($b >= 97 && $b <= 122) || ($b >= 65 && $b <= 90) || ($b >= 48 && $b <= 57)
-                    || $b == 45 || $b == 46 || $b == 95 || $b == 126 || $i == $eq;
-                if ($plain) {
-                    $out->push($b);
-                } else {
-                    $out->push(37);
-                    $out->push($hex->byte(($b / 16) as usize));
-                    $out->push($hex->byte(($b % 16) as usize));
-                }
-            }
-        }
-
-        return $out;
     }
 }

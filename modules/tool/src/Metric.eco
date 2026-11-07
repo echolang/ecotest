@@ -1,0 +1,10 @@
+namespace ecotest::cli;
+
+/**
+ * One `ecotest::metric` a test recorded: its name and its value.
+ */
+public struct Metric
+{
+    public string $name;
+    public int64 $value;
+}

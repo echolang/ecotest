@@ -5,10 +5,24 @@ namespace ecotest;
  */
 public struct Ran
 {
+    /**
+     * The program and its arguments, joined with spaces, for failure messages.
+     */
     public string $command;
-    public int32 $code;
-    public bool $signalled;
+
+    /**
+     * The exit code, or null when a signal ended the program.
+     */
+    public int32? $code;
+
+    /**
+     * Everything the program wrote to stdout.
+     */
     public string $stdout;
+
+    /**
+     * Everything the program wrote to stderr.
+     */
     public string $stderr;
 }
 
@@ -17,24 +31,18 @@ public struct Ran
  * cannot be started stops the test.
  */
 #[caller]
-public function run(const string& $program, array<string> $arguments = []) : Ran
+public function run(const string& $program, const array<string>& $arguments = []) : Ran
 {
-    std::src::location $at = std::src::caller();
+    $at = std::src::caller();
     string $command = $program;
     foreach ($arguments as const &$argument) {
         $command->append(' ');
         $command->append($argument);
     }
 
-    result<std::process::output, std::io::ioerror> $done = std::process::command($program, $arguments)->output();
-    if ($done->failed()) {
-        $e = $done->failure();
-        Failure("cannot run {$command}: {$e}", $at)->stop();
-    }
+    $o = guard std::process::command($program, $arguments)->output() else ($e) {
+        die(Session::report(Failure("cannot run {$command}: {$e}", $at)), $at);
+    };
 
-    std::process::output $o = $done->unwrap();
-    int32 $code = $o->status->code() ?? -1;
-    bool $signalled = $o->status->signal() != null;
-
-    return Ran($command, $code, $signalled, $o->stdout, $o->stderr);
+    return Ran(mv $command, $o->status->code(), mv $o->stdout, mv $o->stderr);
 }

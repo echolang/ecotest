@@ -1,5 +1,6 @@
 namespace ecotest::cli;
 
+use ecotest::cli::doc;
 use command::element;
 
 /**
@@ -12,7 +13,7 @@ use command::element;
 public class LiveView
 {
     public command::CLIContext $ctx;
-    private Look $look;
+    private const Look $look;
 
     private element::LogStream $window;
     private element::Spinner? $spin = null;
@@ -21,13 +22,19 @@ public class LiveView
     private usize $failed = 0;
     private std::time::instant $since = std::time::instant::now();
 
-    // the last test finished since the bar was drawn; the bar moves once per batch of rows
+    /**
+     * The last test finished since the bar was drawn. The bar moves once per batch of rows.
+     */
     private string $latest = '';
 
-    // which pass this is, when there are several, for the rows that settle
+    /**
+     * Which pass this is, when there are several, for the rows that settle.
+     */
     private string $pass = '';
 
-    // the pass being watched, where its tests left their events; empty until one begins
+    /**
+     * The pass being watched, where its tests left their events. Empty until one begins.
+     */
     private string $passDir = '';
 
     /**
@@ -48,7 +55,7 @@ public class LiveView
      */
     public function begin(usize $pass, usize $passes, const string& $passDir) : void
     {
-        $this->run->passes++;
+        $this->run->begin();
         $this->passDir = $passDir;
         $this->passed = 0;
         $this->failed = 0;
@@ -58,12 +65,12 @@ public class LiveView
         if ($passes > 1) {
             $this->pass = " {$this->look->dot} pass {$pass} of {$passes}";
         }
-        string $what = "compiling tests{$this->pass}";
+        $what = "compiling tests{$this->pass}";
 
         $this->window = element::LogStream($this->ctx, 6);
-        element::Spinner $spin = $this->window->spinner();
+        $spin = $this->window->spinner();
         $spin->start($what);
-        $this->spin = $spin;
+        $this->spin = mv $spin;
     }
 
     /**
@@ -117,11 +124,11 @@ public class LiveView
         }
 
         // a test's row comes once it has exited, so its events are all written
-        TestRecord? $folded = $this->run->fold($row, $this->passDir);
-        string $type = Doc::text($row, 'type');
+        $folded = $this->run->fold($row, $this->passDir);
+        $type = doc::text($row, 'type');
 
         if ($type == 'run') {
-            $this->started(Doc::number($row, 'selected'));
+            $this->started(doc::number($row, 'selected'));
             return;
         }
 
@@ -130,7 +137,7 @@ public class LiveView
             return;
         }
 
-        TestRecord $test = guard $folded else {
+        $test = guard $folded else {
             return;
         };
         $this->finished($test);
@@ -152,7 +159,7 @@ public class LiveView
         $spin->fail('echoc stopped before any test ran');
         $this->spin = null;
 
-        foreach (str::lines(Doc::read($logPath)) as const &$line) {
+        foreach (str::lines(doc::read($logPath) ?? '') as const &$line) {
             $this->ctx->line(string($line));
         }
     }
@@ -167,7 +174,7 @@ public class LiveView
             return;
         };
 
-        float64 $secs = $this->elapsed();
+        $secs = $this->elapsed();
         $spin->succeed("compiled in {$secs:.1f} s{$this->pass}");
         $this->spin = null;
         $this->since = std::time::instant::now();
@@ -175,9 +182,9 @@ public class LiveView
         $this->window = element::LogStream($this->ctx, 4);
         // the rows printed above the window keep their colour; nothing echoc wrote is pushed here
         $this->window->strip = false;
-        element::Progress $bar = $this->window->progress();
+        $bar = $this->window->progress();
         $bar->start('tests', $total as int32);
-        $this->bar = $bar;
+        $this->bar = mv $bar;
     }
 
     /**
@@ -190,38 +197,47 @@ public class LiveView
             return;
         }
 
-        Outcome $outcome = $test->latest();
-        string $title = $this->look->title($test);
+        $outcome = $test->latest();
+        $title = $this->look->title($test);
 
         if ($outcome->broken()) {
             $this->failed++;
 
-            string $lines = $this->look->headline($outcome, $title);
-
-            if (!$test->failure->empty()) {
-                // the summary shows the rest; one row keeps the window's height honest
-                usize $cut = $test->failure->find("\n");
-                string $message = $test->failure->sub(0, $cut);
-                string $where = $this->look->mute("  {$this->look->rail} {$test->failureFile}:{$test->failureLine}  {$message}");
-                $lines->append("\n{$where}");
-            }
-
+            $lines = $this->look->headline($outcome, $title);
+            $lines->append($this->stop($test->events));
             $this->window->print($lines);
         } else {
             $this->passed++;
 
             int64 $ms = $test->ms();
             // drawn muted behind the window's rail, so the mark carries no colour
-            string $mark = $this->look->glyph($outcome);
-            string $pushed = "{$mark} {$title}  {$ms} ms";
-            if ($test->usedEcotest) {
-                string $asserted = $this->look->many($test->checks, 'assertion');
+            $mark = $this->look->glyph($outcome);
+            $pushed = "{$mark} {$title}  {$ms} ms";
+            if ($test->events->usedEcotest) {
+                $asserted = $this->look->many($test->events->checks, 'assertion');
                 $pushed->append(" {$this->look->dot} {$asserted}");
             }
             $this->window->push($pushed);
         }
 
         $this->latest = $title;
+    }
+
+    /**
+     * The row under a broken test's headline: where `$events` failed and the first line of what
+     * they said. Nothing when they did not fail.
+     */
+    private const function stop(const Events& $events) : string
+    {
+        $fault = guard $events->fault else {
+            return '';
+        };
+
+        // the summary shows the rest; one row keeps the window's height honest
+        usize $cut = $fault->summary->find('\n');
+        $message = $fault->summary->sub(0, $cut);
+        $where = $this->look->mute("  {$this->look->rail} {$fault->file}:{$fault->line}  {$message}");
+        return "\n{$where}";
     }
 
     /**
@@ -252,15 +268,15 @@ public class LiveView
         $this->bar = null;
         $this->latest = '';
 
-        float64 $secs = $this->elapsed();
-        string $summary = "{$this->passed} passed";
+        $secs = $this->elapsed();
+        $summary = "{$this->passed} passed";
         if ($this->failed > 0) {
             $summary->append(" {$this->look->dot} {$this->failed} failed");
         }
         // the run counts this pass's assertions, every row folded in, before the bar or not
         usize $pass = $this->run->passes;
         if ($this->run->asserting(inPass: $pass) > 0) {
-            string $asserted = $this->look->many($this->run->assertions(inPass: $pass), 'assertion');
+            $asserted = $this->look->many($this->run->assertions(inPass: $pass), 'assertion');
             $summary->append(" {$this->look->dot} {$asserted}");
         }
         $summary->append(" in {$secs:.1f} s{$this->pass}");

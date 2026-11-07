@@ -39,3 +39,15 @@ test a_missing_variable_skips
     $url = ecotest::needs(env: 'ECOTEST_NEVER_SET_ANYWHERE');
     expect($url)->is('unreachable');
 }
+
+test caught_leaves_an_enclosing_scopes_failures_alone
+{
+    $outer = ecotest::caught(function() : void {
+        expect(1)->is(2);
+        $inner = ecotest::caught(function() : void { expect('a')->is('b'); });
+        expect($inner->count())->is(1);
+    });
+
+    expect($outer->count())->is(1);
+    expect($outer[0]->summary)->is('expected 2, got 1');
+}

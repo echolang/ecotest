@@ -1,23 +1,22 @@
+use ecotest::{expect, TempDir};
+use ecotest::cli::{Tool, doc, files};
+
 /**
  * A small module the tool is run against, written into a temp directory per test so runs never
  * share a build. Green by default; `--define BROKEN` adds a failing check and a plain crash,
  * `--define FLAKY` a test that fails on the second pass only.
  */
-
-use ecotest::{expect, TempDir};
-use ecotest::cli::{Tool};
-
 internal class Sample
 {
     public TempDir $dir = TempDir();
 
     public constructor()
     {
-        string $root = Sample::ecotestRoot();
+        $root = Sample::ecotestRoot();
 
         $this->dir->write('module.eco', "#[module: \"sample\"]\n#[sources: \"src/*.eco\"]\n\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[depends: \"{$root}\"]\n}\n");
-        bool $src = std::io::mkdir($this->dir->file('src'))->or(false);
-        bool $tests = std::io::mkdir($this->dir->file('tests'))->or(false);
+        guard std::io::mkdir($this->dir->file('src'));
+        guard std::io::mkdir($this->dir->file('tests'));
 
         $this->dir->write('src/math.eco', 'public function add(int64 $a, int64 $b) : int64
 {
@@ -97,43 +96,43 @@ test flips
     /**
      * A tool pointed at this module, with its own build directory and the compiler under test.
      */
-    public function tool() : Tool
+    public const function tool() : Tool
     {
-        Tool $tool = Tool();
-        $tool->project = $this->dir->path;
-        $tool->echoc = Sample::compiler();
+        $tool = Tool();
+        $tool->echoc->project = $this->dir->path;
+        $tool->echoc->program = Sample::compiler();
         return $tool;
     }
 
     /**
-     * The newest run directory of this module.
+     * The newest run directory of this module. The test fails when there is none.
      */
-    public function latest() : string
+    public const function latest() : string
     {
-        return ecotest::cli::Files::latest($this->dir->file('.ecotest'));
+        return expect(files::latest($this->dir->file('.ecotest')))->some();
     }
 
     /**
      * The newest run's `run.json`, parsed.
      */
-    public function runJson() : json::Value
+    public const function runJson() : json::Value
     {
-        string $text = ecotest::cli::Doc::read(std::env::join($this->latest(), 'run.json'));
-        return expect(json::parse($text))->ok();
+        $parsed = guard json::parse(expect(doc::read(std::env::join($this->latest(), 'run.json')))->some());
+        return $parsed;
     }
 
     /**
-     * The test called `$name` in the newest run's `run.json`.
+     * The test called `$name` in the newest run's `run.json`, or JSON null.
      */
-    public function result(const string& $name) : json::Value
+    public const function result(const string& $name) : json::Value
     {
-        foreach (ecotest::cli::Doc::list($this->runJson(), 'tests') as const &$test) {
-            if (ecotest::cli::Doc::text($test, 'name') == $name) {
+        foreach (doc::list($this->runJson(), 'tests') as const &$test) {
+            if (doc::text($test, 'name') == $name) {
                 return $test;
             }
         }
 
-        return expect(json::parse('null'))->ok();
+        return json::nil();
     }
 
     /**
@@ -149,7 +148,7 @@ test flips
      */
     public static function ecotestRoot() : string
     {
-        string $here = std::env::cwd();
+        $here = std::env::cwd();
         return std::env::join(std::env::join($here, '..'), '..');
     }
 }

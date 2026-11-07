@@ -5,24 +5,22 @@ namespace ecotest;
  */
 public class CallsExpect<T>
 {
+    /**
+     * The recorder under test.
+     */
     public Calls<T> $calls;
-
-    public constructor(Calls<T> $calls)
-    {
-        $this->calls = $calls;
-    }
 
     /**
      * Exactly `$count` calls were recorded.
      */
     #[caller]
-    public function times(usize $count) : CallsExpect<T>
+    public const function times(usize $count) : CallsExpect<T>
     {
         Session::checked();
 
         usize $got = $this->calls->count();
         if ($got != $count) {
-            Failure("expected {$count} calls, got {$got}", std::src::caller())->raise();
+            fail("expected {$count} calls, got {$got}", std::src::caller());
         }
 
         return $this;
@@ -32,13 +30,13 @@ public class CallsExpect<T>
      * No call was recorded.
      */
     #[caller]
-    public function never() : CallsExpect<T>
+    public const function never() : CallsExpect<T>
     {
         Session::checked();
 
         usize $got = $this->calls->count();
         if ($got != 0) {
-            Failure("expected no calls, got {$got}", std::src::caller())->raise();
+            fail("expected no calls, got {$got}", std::src::caller());
         }
 
         return $this;
@@ -48,19 +46,19 @@ public class CallsExpect<T>
      * Call number `$index`, counting from 0, was made with `$want`.
      */
     #[caller]
-    public function nth(usize $index, const T& $want) : CallsExpect<T>
+    public const function nth(usize $index, const T& $want) : CallsExpect<T>
     {
         Session::checked();
 
         usize $got = $this->calls->count();
         if ($index >= $got) {
-            Failure("expected a call number {$index}, only {$got} were made", std::src::caller())->raise();
+            fail("expected a call number {$index}, only {$got} were made", std::src::caller());
             return $this;
         }
 
         $made = $this->calls->seen[$index];
         if (!($made == $want)) {
-            Failure("call {$index}: expected {$want}, got {$made}", std::src::caller(), $expected: "{$want}", $actual: "{$made}")->raise();
+            fail("call {$index}: expected {$want}, got {$made}", std::src::caller(), $expected: "{$want}", $actual: "{$made}");
         }
 
         return $this;
@@ -70,7 +68,7 @@ public class CallsExpect<T>
      * Some call was made with `$want`.
      */
     #[caller]
-    public function with(const T& $want) : CallsExpect<T>
+    public const function with(const T& $want) : CallsExpect<T>
     {
         Session::checked();
 
@@ -81,7 +79,7 @@ public class CallsExpect<T>
         }
 
         usize $got = $this->calls->count();
-        Failure("expected a call with {$want} among {$got} calls", std::src::caller())->raise();
+        fail("expected a call with {$want} among {$got} calls", std::src::caller());
         return $this;
     }
 }

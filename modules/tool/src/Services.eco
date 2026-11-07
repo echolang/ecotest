@@ -1,5 +1,7 @@
 namespace ecotest::cli;
 
+use ecotest::cli::{doc, files};
+
 /**
  * The services a run needs, started before echoc and stopped after it. Each one's output goes to
  * `<run>/services/<name>.log`, and its URL reaches the tests as `ECOTEST_<NAME>_URL`.
@@ -8,8 +10,11 @@ public class Services
 {
     public array<ServiceSpec> $specs = [];
     public array<std::process::child> $running = [];
-    public array<string> $envNames = [];
-    public array<string> $envValues = [];
+
+    /**
+     * What the tests are handed: each started service's URL by its variable, in start order.
+     */
+    public ordered_map<string, string> $env = [];
 
     /**
      * Reads the `services` list of `ecotest.json`.
@@ -18,98 +23,93 @@ public class Services
     {
         foreach ($list as const &$entry) {
             array<string> $command = [];
-            foreach (Doc::list($entry, 'run') as const &$word) {
+            foreach (doc::list($entry, 'run') as const &$word) {
                 $command[] = $word->asStr() ?? '';
             }
 
-            json::Value $ready = Doc::object($entry, 'ready');
-            string $readyUrl = '';
-            int64 $readyMs = 0;
-            int64 $timeoutMs = 10000;
-            if ($ready->isObject()) {
-                $readyUrl = Doc::text($ready, 'http');
-                $readyMs = Doc::number($ready, 'ms');
-                int64 $within = Doc::number($ready, 'timeout_ms');
-                if ($within > 0) {
-                    $timeoutMs = $within;
+            // an object that is not there reads every field as empty, so no check is a delay of 0
+            $ready = doc::object($entry, 'ready');
+            $probe = doc::text($ready, 'http');
+            Readiness $readiness = .delay(doc::number($ready, 'ms'));
+            if (!$probe->empty()) {
+                int64 $timeoutMs = doc::number($ready, 'timeout_ms');
+                if ($timeoutMs <= 0) {
+                    $timeoutMs = 10000;
                 }
+                $readiness = .http($probe, $timeoutMs);
             }
 
-            string $url = Doc::text($entry, 'url');
+            $url = doc::text($entry, 'url');
             if ($url->empty()) {
-                $url = Services::origin($readyUrl);
+                // no URL is the empty one: the service is not handed to the tests
+                $url = Services::origin($probe) ?? '';
             }
 
-            array<string> $names = [];
-            array<string> $values = [];
-            ordered_map<string, json::Value> $fields = Doc::object($entry, 'env')->asObject() ?? ordered_map<string, json::Value>();
+            ordered_map<string, string> $env = [];
+            $fields = doc::object($entry, 'env')->asObject() ?? ordered_map<string, json::Value>();
             foreach ($fields as $key => const &$value) {
-                $names[] = $key;
-                $values[] = $value->asStr() ?? '';
+                $env->set($key, $value->asStr() ?? '');
             }
 
-            $this->specs[] = ServiceSpec(Doc::text($entry, 'name'), $command, $readyUrl, $readyMs, $timeoutMs, $url, $names, $values);
+            $this->specs[] = ServiceSpec(doc::text($entry, 'name'), mv $command, mv $readiness, mv $url, mv $env);
         }
     }
 
     /**
-     * Starts every service in `$project` and waits until each is ready. False, with the reason
-     * printed, when one cannot start or never becomes ready.
+     * Starts every service in `$project` and waits until each is ready, or answers why one cannot
+     * start or never became ready. The services started before it keep running until `stop`.
      */
-    public function start(const string& $runDir, const string& $project) : bool
+    public function start(const string& $runDir, const string& $project) : status<ServiceError>
     {
         if ($this->specs->empty()) {
-            return true;
+            return .ok;
         }
 
-        string $logs = std::env::join($runDir, 'services');
-        Files::mkdirs($logs);
+        $logs = std::env::join($runDir, 'services');
+        guard files::mkdirs($logs) else ($e) {
+            return .error(.cannotWrite($logs, $e));
+        };
 
         foreach ($this->specs as const &$spec) {
             if ($spec->command->empty()) {
-                std::io::println("ecotest: service {$spec->name} has no `run` command");
-                return false;
+                return .error(.noCommand($spec->name));
             }
 
-            array<string> $args = [];
+            $args = arr::room<string>($spec->command->count() - 1);
             for (usize $i = 1; $i < $spec->command->count(); $i++) {
                 $args[] = $spec->command[$i];
             }
 
-            string $logPath = std::env::join($logs, "{$spec->name}.log");
-            std::io::file $log = guard std::io::create($logPath) else ($e) {
-                std::io::println("ecotest: cannot write {$logPath}: {$e}");
-                return false;
+            $logPath = std::env::join($logs, "{$spec->name}.log");
+            $log = guard std::io::create($logPath) else ($e) {
+                return .error(.cannotWrite($logPath, $e));
             };
 
-            std::process::command $cmd = std::process::command($spec->command[0], $args);
+            $cmd = std::process::command($spec->command[0], $args);
             $cmd->dir($project);
-            for (usize $i = 0; $i < $spec->envNames->count(); $i++) {
-                $cmd->env($spec->envNames[$i], $spec->envValues[$i]);
+            foreach ($spec->env as $name => const &$value) {
+                $cmd->env($name, $value);
             }
             $cmd->stdout(.file($log));
             $cmd->stderr(.merge);
 
-            std::process::child $child = guard $cmd->spawn() else ($e) {
-                std::io::println("ecotest: cannot start service {$spec->name}: {$e}");
-                return false;
+            $child = guard $cmd->spawn() else ($e) {
+                return .error(.cannotStart($spec->name, $e));
             };
-            $this->running[] = $child;
+            $this->running[] = mv $child;
 
-            if (!Services::ready($spec)) {
-                std::io::println("ecotest: service {$spec->name} was not ready within {$spec->timeoutMs} ms; see {$logPath}");
-                return false;
+            if (!Services::ready($spec->ready)) {
+                return .error(.notReady($spec->name, $spec->ready->limit(), $logPath));
             }
 
             if (!$spec->url->empty()) {
-                $this->envNames[] = $spec->variable();
-                $this->envValues[] = $spec->url;
+                $this->env->set($spec->variable(), $spec->url);
             }
 
             std::io::println("ecotest: service {$spec->name} ready at {$spec->url}");
         }
 
-        return true;
+        return .ok;
     }
 
     /**
@@ -117,9 +117,11 @@ public class Services
      */
     public function stop() : void
     {
+        // best effort: killing a service that already ended fails, and the wait only reaps it;
+        // neither failure leaves anything to do
         foreach ($this->running as &$child) {
-            status<std::io::ioerror> $killed = $child->kill();
-            result<std::process::exit_status, std::io::ioerror> $waited = $child->wait();
+            $killed = $child->kill();
+            $waited = $child->wait();
         }
 
         $this->running->clear();
@@ -131,11 +133,14 @@ public class Services
      */
     public const function tails(const string& $dir, usize $lines) : string
     {
-        string $out = '';
+        $out = '';
 
         foreach ($this->specs as const &$spec) {
-            string $path = std::env::join(std::env::join($dir, 'services'), "{$spec->name}.log");
-            array<string> $all = str::lines(Doc::read($path))->owned();
+            $path = std::env::join(std::env::join($dir, 'services'), "{$spec->name}.log");
+            $text = guard doc::read($path) else {
+                continue;
+            };
+            $all = str::lines($text)->owned();
             if ($all->empty()) {
                 continue;
             }
@@ -147,7 +152,7 @@ public class Services
 
             $out->append("service   {$spec->name}, last lines of {$path}\n");
             for (usize $i = $from; $i < $all->count(); $i++) {
-                string $line = $all[$i];
+                const string& $line = $all[$i];
                 $out->append("          {$line}\n");
             }
         }
@@ -156,31 +161,39 @@ public class Services
     }
 
     /**
-     * Waits for `$spec` to answer: a 2xx or 3xx from its ready URL, or just its fixed delay.
+     * Waits until a service is `$ready`: its fixed delay, or a 2xx or 3xx from its ready URL in
+     * time. False when the URL never answered.
      */
-    private static function ready(const ServiceSpec& $spec) : bool
+    private static function ready(const Readiness& $ready) : bool
     {
-        if ($spec->readyUrl->empty()) {
-            if ($spec->readyMs > 0) {
-                std::time::sleep(std::time::duration::millis($spec->readyMs));
-            }
-            return true;
+        return match ($ready) {
+            .delay($ms) => Services::pause($ms),
+            .http($url, $timeoutMs) => Services::poll($url, $timeoutMs),
+        };
+    }
+
+    /**
+     * Sleeps `$ms` milliseconds, none for 0. Always true: a delay cannot fail.
+     */
+    private static function pause(int64 $ms) : bool
+    {
+        if ($ms > 0) {
+            std::time::sleep(std::time::duration::millis($ms));
         }
+        return true;
+    }
 
-        std::time::instant $started = std::time::instant::now();
+    /**
+     * True once `$url` answers with a 2xx or 3xx, asked every 50 ms for up to `$timeoutMs`.
+     */
+    private static function poll(const string& $url, int64 $timeoutMs) : bool
+    {
+        $started = std::time::instant::now();
 
-        while ($started->elapsed()->as_millis() < $spec->timeoutMs) {
-            curl::Request $probe = curl::Request::get($spec->readyUrl);
-            $probe->timeout(500);
-            result<curl::Response, curl::Error> $answer = curl::send($probe);
-
-            if (!$answer->failed()) {
-                curl::Response $res = $answer->unwrap();
-                if ($res->status >= 200 && $res->status < 400) {
-                    return true;
-                }
+        while ($started->elapsed()->as_millis() < $timeoutMs) {
+            if (Services::answers($url)) {
+                return true;
             }
-
             std::time::sleep(std::time::duration::millis(50));
         }
 
@@ -188,13 +201,26 @@ public class Services
     }
 
     /**
-     * `scheme://host:port` of `$url`, or empty.
+     * True when `$url` answers within half a second with a 2xx or 3xx.
      */
-    private static function origin(const string& $url) : string
+    private static function answers(const string& $url) : bool
+    {
+        $probe = curl::Request::get($url);
+        $probe->timeout(500);
+        $res = guard curl::send($probe) else {
+            return false;
+        };
+        return $res->status >= 200 && $res->status < 400;
+    }
+
+    /**
+     * `scheme://host:port` of `$url`, or null when it has no scheme.
+     */
+    private static function origin(const string& $url) : string?
     {
         usize $scheme = $url->find('://');
         if ($scheme >= $url->size()) {
-            return '';
+            return null;
         }
 
         usize $path = $url->find('/', $scheme + 3);

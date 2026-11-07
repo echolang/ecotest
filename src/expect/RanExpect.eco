@@ -1,33 +1,33 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
  * Checks on a finished program. `stdout()` and `stderr()` hand over to text checks, so
  * `expect($ran)->exits(0)->stdout()->has('done')` reads as one sentence.
  */
 public class RanExpect
 {
+    /**
+     * The finished program under test.
+     */
     public Ran $ran;
-
-    public constructor(Ran $ran)
-    {
-        $this->ran = $ran;
-    }
 
     /**
      * The program exited with `$code`.
      */
     #[caller]
-    public function exits(int32 $code) : RanExpect
+    public const function exits(int32 $code) : RanExpect
     {
         Session::checked();
 
-        if ($this->ran->signalled || $this->ran->code != $code) {
-            string $how = $this->describe();
-            Failure(
+        if (!$this->exited($code)) {
+            $how = $this->describe();
+            fail(
                 "expected {$this->ran->command} to exit {$code}, got {$how}",
                 std::src::caller(),
                 $detail: $this->streams()
-            )->raise();
+            );
         }
 
         return $this;
@@ -37,7 +37,7 @@ public class RanExpect
      * The program exited 0.
      */
     #[caller]
-    public function succeeds() : RanExpect
+    public const function succeeds() : RanExpect
     {
         return $this->exits(0);
     }
@@ -45,7 +45,7 @@ public class RanExpect
     /**
      * Text checks on what the program wrote to stdout.
      */
-    public function stdout() : TextExpect
+    public const function stdout() : TextExpect
     {
         return TextExpect($this->ran->stdout);
     }
@@ -53,9 +53,21 @@ public class RanExpect
     /**
      * Text checks on what the program wrote to stderr.
      */
-    public function stderr() : TextExpect
+    public const function stderr() : TextExpect
     {
         return TextExpect($this->ran->stderr);
+    }
+
+    /**
+     * True when the program exited on its own with `$code`.
+     */
+    private const function exited(int32 $code) : bool
+    {
+        $got = guard $this->ran->code else {
+            return false;
+        };
+
+        return $got == $code;
     }
 
     /**
@@ -63,11 +75,11 @@ public class RanExpect
      */
     private const function describe() : string
     {
-        if ($this->ran->signalled) {
+        $got = guard $this->ran->code else {
             return 'a signal';
-        }
+        };
 
-        return "exit {$this->ran->code}";
+        return "exit {$got}";
     }
 
     /**
@@ -79,7 +91,7 @@ public class RanExpect
 
         if (!$this->ran->stdout->empty()) {
             $out->append("stdout:\n");
-            $out->append(Show::indent(Show::cut($this->ran->stdout), 2));
+            $out->append(show::indent(show::cut($this->ran->stdout), 2));
         }
 
         if (!$this->ran->stderr->empty()) {
@@ -87,7 +99,7 @@ public class RanExpect
                 $out->append("\n");
             }
             $out->append("stderr:\n");
-            $out->append(Show::indent(Show::cut($this->ran->stderr), 2));
+            $out->append(show::indent(show::cut($this->ran->stderr), 2));
         }
 
         return $out;

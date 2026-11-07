@@ -3,33 +3,33 @@
  */
 
 use ecotest::expect;
-use ecotest::http::{JsonPath};
+use ecotest::http::jsonpath;
 
 test steps_read_every_spelling
 {
-    expect(JsonPath::steps('a.b'))->is(['a', 'b']);
-    expect(JsonPath::steps('$a[0]'))->is(['a', '[0]']);
-    expect(JsonPath::steps('$["k"][x]'))->is(['k', '[x]']);
-    expect(JsonPath::steps('$.a[0'))->is(['a']);
+    expect(jsonpath::steps('a.b'))->is(['a', 'b']);
+    expect(jsonpath::steps('$a[0]'))->is(['a', '[0]']);
+    expect(jsonpath::steps('$["k"][x]'))->is(['k', '[x]']);
+    expect(jsonpath::steps('$.a[0'))->is(['a']);
 }
 
 test steps_that_lead_nowhere_find_nothing
 {
-    json::Value $doc = expect(json::parse('{"o":{"k":1},"l":[1,2]}'))->ok();
+    $doc = guard json::parse('{"o":{"k":1},"l":[1,2]}');
 
-    expect(JsonPath::all($doc, '$.o[*]'))->empty();
-    expect(JsonPath::all($doc, '$.l[x]'))->empty();
-    expect(JsonPath::all($doc, '$.l[9]'))->empty();
+    expect(jsonpath::all($doc, '$.o[*]'))->empty();
+    expect(jsonpath::all($doc, '$.l[x]'))->empty();
+    expect(jsonpath::all($doc, '$.l[9]'))->empty();
 }
 
 test replace_follows_indexes_and_skips_what_is_not_there
 {
-    json::Value $doc = expect(json::parse('{"l":[1,2]}'))->ok();
+    $doc = guard json::parse('{"l":[1,2]}');
 
-    JsonPath::replace($doc, '$.l[0]', json::str('a'));
-    JsonPath::replace($doc, '$.l[x]', json::str('b'));
-    JsonPath::replace($doc, '$.l[9]', json::str('c'));
-    JsonPath::replace($doc, '$.gone', json::str('d'));
+    jsonpath::replace($doc, '$.l[0]', json::str('a'));
+    jsonpath::replace($doc, '$.l[x]', json::str('b'));
+    jsonpath::replace($doc, '$.l[9]', json::str('c'));
+    jsonpath::replace($doc, '$.gone', json::str('d'));
 
     expect(json::dump($doc->clone()))->is('{"l":["a",2]}');
 }

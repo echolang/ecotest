@@ -6,7 +6,7 @@ namespace ecotest::http;
  */
 public class Service
 {
-    public string $url;
+    public const string $url;
     private std::process::child $child;
 
     /**
@@ -16,37 +16,35 @@ public class Service
     #[caller]
     public constructor(
         const string& $program,
-        array<string> $arguments,
+        const array<string>& $arguments,
         ready: const string& $ready,
         url: const string& $url,
-        within: std::time::duration $limit = std::time::duration::secs(10)
+        within: std::time::duration $limit = .secs(10)
     ) {
-        std::src::location $at = std::src::caller();
+        $at = std::src::caller();
         $this->url = $url;
 
-        std::process::command $cmd = std::process::command($program, $arguments);
+        $cmd = std::process::command($program, $arguments);
         $cmd->stdout(.discard);
         $cmd->stderr(.discard);
 
-        result<std::process::child, std::io::ioerror> $spawned = $cmd->spawn();
-        if ($spawned->failed()) {
-            $e = $spawned->failure();
-            ecotest::Failure("cannot start {$program}: {$e}", $at)->stop();
-        }
-        $this->child = $spawned->unwrap();
+        $child = guard $cmd->spawn() else ($e) {
+            die(ecotest::Session::report(ecotest::Failure("cannot start {$program}: {$e}", $at)), $at);
+        };
+        $this->child = mv $child;
 
-        std::time::instant $started = std::time::instant::now();
+        $started = std::time::instant::now();
         while ($started->elapsed()->as_millis() < $limit->as_millis()) {
-            curl::Request $probe = curl::Request::get($ready);
+            $probe = curl::Request::get($ready);
             $probe->timeout(500);
-            result<curl::Response, curl::Error> $answer = curl::send($probe);
-            if (!$answer->failed()) {
-                int64 $status = $answer->unwrap()->status;
-                if ($status >= 200 && $status < 400) {
-                    return;
-                }
+            $answer = guard curl::send($probe) else {
+                std::time::sleep(.millis(50));
+                continue;
+            };
+            if ($answer->status >= 200 && $answer->status < 400) {
+                return;
             }
-            std::time::sleep(std::time::duration::millis(50));
+            std::time::sleep(.millis(50));
         }
 
         int64 $ms = $limit->as_millis();
@@ -56,14 +54,14 @@ public class Service
     /**
      * An `Api` for this service.
      */
-    public function api() : Api
+    public const function api() : Api
     {
         return Api($this->url);
     }
 
     destructor()
     {
-        status<std::io::ioerror> $killed = $this->child->kill();
-        result<std::process::exit_status, std::io::ioerror> $waited = $this->child->wait();
+        $killed = $this->child->kill();
+        $waited = $this->child->wait();
     }
 }

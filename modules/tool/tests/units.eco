@@ -1,22 +1,28 @@
+/**
+ * The small pieces on their own, with no run behind them: diffs, globs, paths, service variables,
+ * ratios, outcomes, events folded into a run, titles, styles, the look and the slowest tests.
+ */
+
 use ecotest::{expect, TempDir};
-use ecotest::cli::{GitDiff, Glob, Coverage, ServiceSpec, Ratio, Outcome, TestRecord, TestTitle, Run, FileCoverage, Style, Look};
+use ecotest::cli::{GitDiff, glob, Coverage, ServiceSpec, Readiness, Ratio, Outcome, Attempt, TestRecord, Run, FileCoverage, Style, Look};
 
 test git_diff_hunks_become_changed_lines
 {
-    string $text = "diff --git a/src/a.eco b/src/a.eco\n--- a/src/a.eco\n+++ b/src/a.eco\n@@ -3,0 +4,2 @@ fn\n+x\n+y\n@@ -10 +12 @@\n-a\n+b\n+++ /dev/null\n";
-    $diff = GitDiff::parse($text);
+    $text = 'diff --git a/src/a.eco b/src/a.eco\n--- a/src/a.eco\n+++ b/src/a.eco\n@@ -3,0 +4,2 @@ fn\n+x\n+y\n@@ -10 +12 @@\n-a\n+b\n+++ /dev/null\n';
+    $diff = GitDiff(parsing: $text);
 
-    expect($diff->files)->is(['src/a.eco']);
-    expect($diff->lines[0])->is([4, 5, 12]);
+    expect($diff->files->count())->is(1);
+    expect($diff->files[0]->path)->is('src/a.eco');
+    expect($diff->files[0]->lines)->is([4, 5, 12]);
 }
 
 test globs_match_inside_and_across_directories
 {
-    expect(Glob::matches('examples/**', 'examples/a/b.eco'))->yes();
-    expect(Glob::matches('src/*.eco', 'src/a.eco'))->yes();
-    expect(Glob::matches('src/*.eco', 'src/x/a.eco'))->no();
-    expect(Glob::matches('**/gen/*.eco', 'src/gen/a.eco'))->yes();
-    expect(Glob::matches('**/gen/*.eco', 'gen/a.eco'))->yes();
+    expect(glob::matches('examples/**', 'examples/a/b.eco'))->yes();
+    expect(glob::matches('src/*.eco', 'src/a.eco'))->yes();
+    expect(glob::matches('src/*.eco', 'src/x/a.eco'))->no();
+    expect(glob::matches('**/gen/*.eco', 'src/gen/a.eco'))->yes();
+    expect(glob::matches('**/gen/*.eco', 'gen/a.eco'))->yes();
 }
 
 test paths_match_by_their_tail
@@ -28,27 +34,34 @@ test paths_match_by_their_tail
 
 test a_service_url_variable_is_upper_case
 {
-    array<string> $none = [];
-    $spec = ServiceSpec('my-api', $none, '', 0, 0, '', $none, $none);
+    $spec = ServiceSpec('my-api', [], .delay(0), '', []);
     expect($spec->variable())->is('ECOTEST_MY_API_URL');
+}
+
+test a_service_waits_at_most_its_delay_or_its_probe_timeout
+{
+    expect(Readiness::delay(20)->limit())->is(20);
+    expect(Readiness::http('http://h:1', 500)->limit())->is(500);
 }
 
 test ratios_print_one_decimal
 {
-    expect(Ratio(1, 3)->shown())->is('33.3%');
-    expect(Ratio(0, 0)->percent())->is(100.0);
+    $third = Ratio(1, 3);
+    expect("{$third}")->is('33.3%');
+    expect(Ratio()->percent())->is(100.0);
 }
 
 test passes_that_disagree_are_flaky
 {
-    $t = TestRecord('m/a.eco::t', 'm_a.eco__t');
-    $t->attempts = [Outcome::pass, Outcome::fail];
+    $t = TestRecord('m/a.eco::t');
+    expect($t->key)->is('m_a.eco__t');
+    $t->attempts = [Attempt(.pass, 0), Attempt(.fail, 0)];
     $t->settle();
     expect($t->outcome == Outcome::flaky)->yes();
 
-    $s = TestRecord('m/a.eco::s', 'm_a.eco__s');
-    $s->attempts = [Outcome::pass];
-    $s->skipReason = 'no db';
+    $s = TestRecord('m/a.eco::s');
+    $s->attempts = [Attempt(.pass, 0)];
+    $s->events->skipReason = 'no db';
     $s->settle();
     expect($s->outcome == Outcome::skip)->yes();
 }
@@ -69,43 +82,43 @@ test a_run_folds_events_into_its_tests
     $run = Run('nowhere');
     $t = $run->find('m/a.eco::t');
     $doc = guard json::parse('{"type":"fail","summary":"expected 1, got 2","expected":"1","actual":"2","detail":"","context":["row 3"],"file":"tests/a.eco","line":7}');
-    $run->apply($t, $doc);
+    $t->events->apply($doc);
 
-    expect($t->failure)->is('expected 1, got 2');
-    expect($t->failureLine)->is(7);
-    expect($t->context)->is(['row 3']);
+    $fault = expect($t->events->fault)->some();
+    expect($fault->summary)->is('expected 1, got 2');
+    expect($fault->line)->is(7);
+    expect($fault->context)->is(['row 3']);
 }
 
 test a_later_pass_starts_from_a_clean_record
 {
     $dir = TempDir();
     $run = Run($dir->path);
-    bool $one = std::io::mkdir($dir->file('one'))->or(false);
-    bool $oneEvents = std::io::mkdir($dir->file('one/events'))->or(false);
-    bool $two = std::io::mkdir($dir->file('two'))->or(false);
-    $dir->write('one/events/m_a.eco__t.jsonl', "{\"type\":\"checks\",\"count\":5}\n{\"type\":\"skip\",\"reason\":\"no db\"}\n{\"type\":\"fail\",\"summary\":\"no\",\"file\":\"tests/a.eco\",\"line\":9}\n");
+    guard std::io::mkdir($dir->file('one'));
+    guard std::io::mkdir($dir->file('one/events'));
+    guard std::io::mkdir($dir->file('two'));
+    $dir->write('one/events/m_a.eco__t.jsonl', '{"type":"checks","count":5}\n{"type":"skip","reason":"no db"}\n{"type":"fail","summary":"no","file":"tests/a.eco","line":9}\n');
 
-    $run->passes++;
-    json::Value $row = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"pass"}');
+    $run->begin();
+    $row = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"pass"}');
     $run->fold($row, $dir->file('one'));
     expect($run->asserting(inPass: 1))->is(1);
     expect($run->assertions(inPass: 1))->is(5);
 
-    $run->passes++;
-    json::Value $timeout = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"timeout"}');
-    TestRecord $t = guard $run->fold($timeout, $dir->file('two'));
+    $run->begin();
+    $timeout = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"timeout"}');
+    $t = guard $run->fold($timeout, $dir->file('two'));
     expect($t->pass)->is(2);
     expect($run->asserting(inPass: 1))->is(0);
     expect($run->asserting(inPass: 2))->is(0);
+    expect($run->assertions(inPass: 1))->is(0);
     expect($run->assertions())->is(0);
 
     // nothing the first pass wrote describes the second
-    expect($t->skipReason)->is('');
-    expect($t->failure)->is('');
-    expect($t->failureFile)->is('');
-    expect($t->failureLine)->is(0);
-    expect($t->checks)->is(0);
-    expect($t->usedEcotest)->no();
+    expect($t->events->skipReason)->is('');
+    expect($t->events->fault)->none();
+    expect($t->events->checks)->is(0);
+    expect($t->events->usedEcotest)->no();
     expect($t->attemptWords())->is('skip timeout');
 
     $run->settle();
@@ -115,24 +128,24 @@ test a_later_pass_starts_from_a_clean_record
 
 test a_title_drops_the_module_unless_kept
 {
-    TestTitle $short = titled('m/tests/a.eco::adds', 'm')->title(false);
+    $short = titled('m/tests/a.eco::adds', 'm')->title(false);
     expect($short->suite)->is('tests/a.eco');
     expect($short->label)->is('adds');
 
-    TestTitle $kept = titled('m/tests/a.eco::adds', 'm')->title(true);
+    $kept = titled('m/tests/a.eco::adds', 'm')->title(true);
     expect($kept->suite)->is('m/tests/a.eco');
     expect($kept->label)->is('adds');
 
-    TestTitle $loose = titled('m/loose', 'm')->title(false);
+    $loose = titled('m/loose', 'm')->title(false);
     expect($loose->suite)->is('');
     expect($loose->label)->is('loose');
 }
 
 test styles_are_named_and_follow_the_stream_on_auto
 {
-    command::TerminalCapabilities $tty = command::TerminalCapabilities(false, true, 80, true);
-    command::TerminalCapabilities $pipe = command::plain();
-    command::TerminalCapabilities $forced = command::TerminalCapabilities(true, false, 0, false);
+    $tty = command::TerminalCapabilities(false, true, 80, true);
+    $pipe = command::plain();
+    $forced = command::TerminalCapabilities(true, false, 0, false);
 
     expect(Style::of('auto') == Style::auto)->yes();
     expect(Style::of('pretty') == Style::pretty)->yes();
@@ -152,39 +165,39 @@ test styles_are_named_and_follow_the_stream_on_auto
 
 internal function titled(const string& $id, const string& $module) : TestRecord
 {
-    TestRecord $t = TestRecord($id, TestRecord::key($id));
+    $t = TestRecord($id);
     $t->module = $module;
     return $t;
 }
 
 test a_look_titles_ids_and_fills_meters
 {
-    Look $ascii = Look(command::plain());
+    $ascii = Look(command::plain());
     expect($ascii->title(titled('m/tests/a.eco::adds', 'm')))->is('tests/a.eco > adds');
     expect($ascii->title(titled('other/a.eco::adds', 'm')))->is('other/a.eco > adds');
     expect($ascii->title(titled('loose', '')))->is('loose');
     expect($ascii->meter(50.0, 4))->is('##..');
     expect($ascii->meter(120.0, 4))->is('####');
-    expect($ascii->mark(Outcome::timeout))->is('x');
+    expect($ascii->mark(.timeout))->is('x');
 
-    Look $tty = Look(command::TerminalCapabilities(true, true, 80, true));
-    expect($tty->meter(10.0, 10))->has("\x1b[31m━\x1b[39m");
-    expect($tty->mark(Outcome::flaky))->is("\x1b[33m~\x1b[39m");
+    $tty = Look(command::TerminalCapabilities(true, true, 80, true));
+    expect($tty->meter(10.0, 10))->has('\x1b[31m━\x1b[39m');
+    expect($tty->mark(.flaky))->is('\x1b[33m~\x1b[39m');
 }
 
 test a_run_knows_its_slowest_tests_and_percentiles
 {
-    Run $run = Run('nowhere');
+    $run = Run('nowhere');
     expect($run->percentile(50))->is(0);
 
     foreach ([5, 1, 9] as const &$ms) {
-        TestRecord $t = $run->find("m/a.eco::t{$ms}");
-        $t->durations = [$ms as int64];
+        $t = $run->find("m/a.eco::t{$ms}");
+        $t->attempts = [Attempt(.pass, $ms as int64)];
     }
 
     expect($run->percentile(50))->is(5);
     expect($run->percentile(95))->is(9);
-    array<TestRecord> $top = $run->slowest(2);
+    $top = $run->slowest(2);
     expect($top->count())->is(2);
     expect($top[0]->id)->is('m/a.eco::t9');
 }

@@ -11,9 +11,9 @@ test a_temp_dir_removes_what_is_nested_in_it
     {
         $dir = TempDir();
         $path = $dir->path;
-        result<bool, std::io::ioerror> $made = std::io::mkdir($dir->file('sub'));
+        $made = std::io::mkdir($dir->file('sub'));
         $dir->write('sub/inner.txt', 'x');
-        expect($dir->read('missing.txt'))->none();
+        expect($dir->read('missing.txt'))->fails();
     }
 
     expect(std::io::exists($path)->or(false))->no();
@@ -22,7 +22,7 @@ test a_temp_dir_removes_what_is_nested_in_it
 test a_temp_dir_already_gone_is_fine
 {
     $dir = TempDir();
-    result<bool, std::io::ioerror> $gone = std::io::rmdir($dir->path);
+    $gone = std::io::rmdir($dir->path);
 }
 
 #[tests: expects death]
@@ -49,8 +49,7 @@ test a_signalled_program_has_no_exit_code
 {
     $ran = ecotest::run('sh', ['-c', 'kill -9 $$']);
 
-    expect($ran->signalled)->yes();
-    expect($ran->code)->is(-1);
+    expect($ran->code)->none();
 }
 
 test eventually_on_its_defaults
@@ -61,9 +60,9 @@ test eventually_on_its_defaults
 test eventually_reports_when_it_gives_up
 {
     $got = summaries(function() : void {
-        ecotest::eventually(() : bool => false, within: std::time::duration::millis(20));
+        ecotest::eventually(() : bool => false, within: .millis(20));
     });
 
     expect($got->count())->is(1);
-    expect($got[0])->startsWith('not ready after 20 ms');
+    expect($got[0])->starts('not ready after 20 ms');
 }

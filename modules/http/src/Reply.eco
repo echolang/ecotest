@@ -1,5 +1,7 @@
 namespace ecotest::http;
 
+use ecotest::http::jsonpath;
+
 /**
  * One exchange and the checks on it. Each check names the test line that made it and, on failure,
  * shows the request line, the status, the headers and the start of the body. A request that got no
@@ -7,29 +9,28 @@ namespace ecotest::http;
  */
 public class Reply
 {
-    public Request $request;
-    public Response $response;
-    public string $error = '';
+    /**
+     * The request as it was sent.
+     */
+    public const Request $request;
 
-    public constructor(Request $request, Response $response, const string& $error)
-    {
-        $this->request = $request;
-        $this->response = $response;
-        $this->error = $error;
-    }
+    /**
+     * What came back, or why nothing did.
+     */
+    public const result<Response, TransportError> $response;
 
     /**
      * The status is `$code`.
      */
     #[caller]
-    public function status(int64 $code) : Reply
+    public const function status(int64 $code) : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        if ($this->response->status != $code) {
-            $this->fail("expected status {$code}, got {$this->response->status}", std::src::caller());
+        if ($res->status != $code) {
+            $this->fail("expected status {$code}, got {$res->status}", std::src::caller());
         }
         return $this;
     }
@@ -38,14 +39,14 @@ public class Reply
      * The status is 2xx.
      */
     #[caller]
-    public function ok() : Reply
+    public const function ok() : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        if ($this->response->status < 200 || $this->response->status > 299) {
-            $this->fail("expected a 2xx status, got {$this->response->status}", std::src::caller());
+        if ($res->status < 200 || $res->status > 299) {
+            $this->fail("expected a 2xx status, got {$res->status}", std::src::caller());
         }
         return $this;
     }
@@ -54,13 +55,13 @@ public class Reply
      * Header `$name` is `$value`.
      */
     #[caller]
-    public function header(const string& $name, const string& $value) : Reply
+    public const function header(const string& $name, const string& $value) : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        string $actual = guard $this->response->header($name) else {
+        $actual = guard $res->header($name) else {
             $this->fail("expected header {$name}: {$value}, it is missing", std::src::caller());
             return $this;
         };
@@ -75,13 +76,13 @@ public class Reply
      * The Content-Type starts with `$type`, so `application/json` matches one with a charset.
      */
     #[caller]
-    public function type(const string& $type) : Reply
+    public const function type(const string& $type) : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        string $got = $this->response->header('Content-Type') ?? '';
+        $got = $res->header('Content-Type') ?? '';
         if (!$got->starts($type)) {
             $this->fail("expected Content-Type {$type}, got '{$got}'", std::src::caller());
         }
@@ -92,13 +93,13 @@ public class Reply
      * The body is exactly `$text`.
      */
     #[caller]
-    public function body(const string& $text) : Reply
+    public const function body(const string& $text) : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        if ($this->response->body != $text) {
+        if ($res->body != $text) {
             $this->fail('the body differs', std::src::caller());
         }
         return $this;
@@ -108,13 +109,13 @@ public class Reply
      * The body contains `$part`.
      */
     #[caller]
-    public function has(const string& $part) : Reply
+    public const function has(const string& $part) : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        if (!$this->response->body->contains($part)) {
+        if (!$res->body->contains($part)) {
             $this->fail("expected the body to contain '{$part}'", std::src::caller());
         }
         return $this;
@@ -124,7 +125,7 @@ public class Reply
      * The string at `$path` in the JSON body is `$want`.
      */
     #[caller]
-    public function json(const string& $path, const string& $want) : Reply
+    public const function json(const string& $path, const string& $want) : Reply
     {
         $this->jsonIs($path, json::str($want), std::src::caller());
         return $this;
@@ -134,7 +135,7 @@ public class Reply
      * The integer at `$path` in the JSON body is `$want`.
      */
     #[caller]
-    public function json(const string& $path, int64 $want) : Reply
+    public const function json(const string& $path, int64 $want) : Reply
     {
         $this->jsonIs($path, json::int($want), std::src::caller());
         return $this;
@@ -144,7 +145,7 @@ public class Reply
      * The number at `$path` in the JSON body is `$want`.
      */
     #[caller]
-    public function json(const string& $path, float64 $want) : Reply
+    public const function json(const string& $path, float64 $want) : Reply
     {
         $this->jsonIs($path, json::float($want), std::src::caller());
         return $this;
@@ -154,7 +155,7 @@ public class Reply
      * The boolean at `$path` in the JSON body is `$want`.
      */
     #[caller]
-    public function json(const string& $path, bool $want) : Reply
+    public const function json(const string& $path, bool $want) : Reply
     {
         $this->jsonIs($path, json::bool($want), std::src::caller());
         return $this;
@@ -164,7 +165,7 @@ public class Reply
      * The value at `$path` in the JSON body is JSON `null`.
      */
     #[caller]
-    public function isNull(const string& $path) : Reply
+    public const function isNull(const string& $path) : Reply
     {
         $this->jsonIs($path, json::nil(), std::src::caller());
         return $this;
@@ -174,13 +175,13 @@ public class Reply
      * Something exists at `$path` in the JSON body.
      */
     #[caller]
-    public function present(const string& $path) : Reply
+    public const function present(const string& $path) : Reply
     {
-        json::Value $d = guard $this->document(std::src::caller()) else {
+        $d = guard $this->document(std::src::caller()) else {
             return $this;
         };
 
-        if (JsonPath::all($d, $path)->empty()) {
+        if (jsonpath::all($d, $path)->empty()) {
             $this->fail("expected a value at {$path}", std::src::caller());
         }
         return $this;
@@ -190,13 +191,13 @@ public class Reply
      * The array at `$path` in the JSON body holds `$count` items.
      */
     #[caller]
-    public function count(const string& $path, usize $count) : Reply
+    public const function count(const string& $path, usize $count) : Reply
     {
-        json::Value $d = guard $this->document(std::src::caller()) else {
+        $d = guard $this->document(std::src::caller()) else {
             return $this;
         };
 
-        json::Value $v = guard JsonPath::one($d, $path) else {
+        $v = guard jsonpath::one($d, $path) else {
             $this->fail("expected {$count} items at {$path}, found nothing there", std::src::caller());
             return $this;
         };
@@ -212,13 +213,13 @@ public class Reply
      * Every value at `$path` passes `$test`. `says:` names what they should be.
      */
     #[caller]
-    public function matches(const string& $path, function<bool(const json::Value&)> $test, says: string $what = '') : Reply
+    public const function matches(const string& $path, function<bool(const json::Value&)> $test, says: const string? $what = null) : Reply
     {
-        json::Value $d = guard $this->document(std::src::caller()) else {
+        $d = guard $this->document(std::src::caller()) else {
             return $this;
         };
 
-        array<json::Value> $found = JsonPath::all($d, $path);
+        $found = jsonpath::all($d, $path);
         if ($found->empty()) {
             $this->fail("expected a value at {$path}", std::src::caller());
             return $this;
@@ -226,10 +227,11 @@ public class Reply
 
         foreach ($found as const &$value) {
             if (!$test($value)) {
-                string $shown = JsonPath::show($value);
-                string $summary = "{$path} = {$shown} failed the test";
-                if (!$what->empty()) {
-                    $summary = "expected {$path} to be {$what}, got {$shown}";
+                $shown = "{$value}";
+                $summary = "{$path} = {$shown} failed the test";
+                if ($what != null) {
+                    $w = guard $what;
+                    $summary = "expected {$path} to be {$w}, got {$shown}";
                 }
                 $this->fail($summary, std::src::caller());
                 return $this;
@@ -243,33 +245,35 @@ public class Reply
      * its JSON. Stops the test when nothing is there.
      */
     #[caller]
-    public function capture(const string& $path) : string
+    public const function capture(const string& $path) : string
     {
-        std::src::location $at = std::src::caller();
+        $at = std::src::caller();
 
-        json::Value $d = guard $this->document($at) else {
-            die($this->stopped("cannot capture {$path}: the body is not JSON", $at), $at);
+        $d = guard $this->document($at) else {
+            $failure = ecotest::Failure("cannot capture {$path}: the body is not JSON", $at, $detail: $this->exchange());
+            die(ecotest::Session::report(mv $failure), $at);
         };
 
-        json::Value $v = guard JsonPath::one($d, $path) else {
-            die($this->stopped("cannot capture {$path}: nothing there", $at), $at);
+        $v = guard jsonpath::one($d, $path) else {
+            $failure = ecotest::Failure("cannot capture {$path}: nothing there", $at, $detail: $this->exchange());
+            die(ecotest::Session::report(mv $failure), $at);
         };
 
-        return $v->asStr() ?? JsonPath::show($v);
+        return $v->asStr() ?? "{$v}";
     }
 
     /**
      * The exchange took less than `$ms` milliseconds.
      */
     #[caller]
-    public function faster(than: int64 $ms) : Reply
+    public const function faster(than: int64 $ms) : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        if ($this->response->ms >= $ms) {
-            $this->fail("expected an answer within {$ms} ms, took {$this->response->ms} ms", std::src::caller());
+        if ($res->ms >= $ms) {
+            $this->fail("expected an answer within {$ms} ms, took {$res->ms} ms", std::src::caller());
         }
         return $this;
     }
@@ -279,77 +283,94 @@ public class Reply
      * path in `$redact` replaced first, so ids and timestamps do not break it.
      */
     #[caller]
-    public function snapshot(array<string> $redact = []) : Reply
+    public const function snapshot(const array<string>& $redact = []) : Reply
     {
-        if (!$this->answered(std::src::caller())) {
+        $res = guard $this->answered(std::src::caller()) else {
             return $this;
-        }
+        };
 
-        string $text = $this->response->body;
-        result<json::Value, json::Error> $parsed = json::parse($text);
-        if (!$parsed->failed()) {
-            json::Value $doc = $parsed->unwrap();
-            foreach ($redact as const &$path) {
-                JsonPath::replace($doc, $path, json::str('[redacted]'));
-            }
-            $text = json::pretty($doc);
-        }
-
-        ecotest::expect($text)->snapshot();
+        ecotest::expect(Reply::stored($res->body, $redact))->snapshot();
         return $this;
     }
 
     /**
-     * True when there was a response. Otherwise the check fails with the transport's reason.
+     * The text a snapshot of `$body` keeps: JSON pretty-printed with each path in `$redact`
+     * replaced, anything else as it is.
      */
-    private function answered(std::src::location $at) : bool
+    private static function stored(const string& $body, const array<string>& $redact) : string
+    {
+        $doc = guard json::parse($body) else {
+            return $body;
+        };
+
+        foreach ($redact as const &$path) {
+            jsonpath::replace($doc, $path, json::str('[redacted]'));
+        }
+        return json::pretty($doc);
+    }
+
+    /**
+     * The response, or null after failing the check with the transport's reason when there is none.
+     */
+    private const function answered(std::src::location $at) : Response?
     {
         ecotest::Session::checked();
 
-        if ($this->error->empty()) {
-            return true;
-        }
+        match ($this->response) {
+            .ok($res) => {
+                return $res;
+            },
+            .error($e) => {
+                $line = $this->request->line();
+                ecotest::Failure("no response to {$line}: {$e}", $at)->raise();
+                return null;
+            },
+        };
+    }
 
-        string $line = $this->request->line();
-        ecotest::Failure("no response to {$line}: {$this->error}", $at)->raise();
-        return false;
+    /**
+     * The response, or null when nothing came back.
+     */
+    private const function received() : Response?
+    {
+        return match ($this->response) {
+            .ok($res) => $res,
+            .error($e) => null,
+        };
     }
 
     /**
      * The body as JSON, or null after failing the check because it is not.
      */
-    private function document(std::src::location $at) : json::Value?
+    private const function document(std::src::location $at) : json::Value?
     {
-        if (!$this->answered($at)) {
+        $res = guard $this->answered($at) else {
             return null;
-        }
+        };
 
-        result<json::Value, json::Error> $parsed = json::parse($this->response->body);
-        if ($parsed->failed()) {
-            string $why = $parsed->failure()->message();
-            $this->fail("expected a JSON body ({$why})", $at);
+        $doc = guard json::parse($res->body) else ($e) {
+            $this->fail("expected a JSON body ({$e})", $at);
             return null;
-        }
-
-        return $parsed->unwrap();
+        };
+        return $doc;
     }
 
     /**
      * Compares the value at `$path` with `$want`.
      */
-    private function jsonIs(const string& $path, const json::Value& $want, std::src::location $at) : void
+    private const function jsonIs(const string& $path, const json::Value& $want, std::src::location $at) : void
     {
-        json::Value $d = guard $this->document($at) else {
+        $d = guard $this->document($at) else {
             return;
         };
 
-        string $expected = JsonPath::show($want);
-        json::Value $v = guard JsonPath::one($d, $path) else {
+        $expected = "{$want}";
+        $v = guard jsonpath::one($d, $path) else {
             $this->fail("expected {$path} = {$expected}, found nothing there", $at);
             return;
         };
 
-        string $actual = JsonPath::show($v);
+        $actual = "{$v}";
         if ($actual != $expected) {
             $this->fail("expected {$path} = {$expected}, got {$actual}", $at);
         }
@@ -358,44 +379,34 @@ public class Reply
     /**
      * Fails the check with the exchange as the detail.
      */
-    private function fail(const string& $summary, std::src::location $at) : void
+    private const function fail(const string& $summary, std::src::location $at) : void
     {
         ecotest::Failure($summary, $at, $detail: $this->exchange())->raise();
     }
 
     /**
-     * Records a failure that stops the test, for checks that return a value, and answers the report
-     * to stop with.
-     */
-    private function stopped(const string& $summary, std::src::location $at) : string
-    {
-        return ecotest::Session::report(ecotest::Failure($summary, $at, $detail: $this->exchange()));
-    }
-
-    /**
-     * The request line, the status, the headers and the start of the body.
+     * The request line, the status, the headers and the start of the body. Only the request line
+     * when nothing came back.
      */
     private const function exchange() : string
     {
-        string $out = $this->request->line();
-        $out->append("\n-> {$this->response->status} in {$this->response->ms} ms");
+        $out = $this->request->line();
+        $res = guard $this->received() else {
+            return $out;
+        };
+        $out->append("\n-> {$res->status} in {$res->ms} ms");
 
-        for (usize $i = 0; $i < $this->response->headerNames->count(); $i++) {
-            string $name = $this->response->headerNames[$i];
-            string $value = $this->response->headerValues[$i];
-            $out->append("\n   {$name}: {$value}");
+        foreach ($res->headers as const &$h) {
+            $out->append("\n   {$h->name}: {$h->value}");
         }
 
-        string $body = $this->response->body;
+        const string& $body = $res->body;
         if ($body->size() > 1200) {
-            string $cut = $body->sub(0, 1200);
-            $cut->append("\n   ... ");
             usize $more = $body->size() - 1200;
-            $cut->append("{$more} more bytes");
-            $body = $cut;
-        }
-
-        if (!$body->empty()) {
+            $out->append("\n\n");
+            $out->append($body->sub(0, 1200));
+            $out->append("\n   ... {$more} more bytes");
+        } else if (!$body->empty()) {
             $out->append("\n\n");
             $out->append($body);
         }

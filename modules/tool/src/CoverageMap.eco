@@ -1,48 +1,49 @@
 namespace ecotest::cli;
 
+use ecotest::cli::doc;
+
 /**
  * echoc's `coverage/map.json`: every counter of every covered module.
  */
-public class CoverageMap
+public struct CoverageMap
 {
     public string $hash = '';
     public array<ModuleSites> $modules = [];
 
     /**
-     * The map at `$path`, or null when there is none or it does not parse.
+     * The map at `$path`, or why there is none: missing, unreadable, or not JSON.
      */
-    public static function load(const string& $path) : CoverageMap?
+    public static function load(const string& $path) : result<CoverageMap, CoverageMapError>
     {
-        string $text = Doc::read($path);
-        if ($text->empty()) {
-            return null;
-        }
-
-        json::Value $doc = guard json::parse($text) else {
-            return null;
+        $text = guard std::io::readfile($path) else ($e) {
+            return .error(.unreadable($path, $e));
         };
 
-        CoverageMap $map = CoverageMap();
-        $map->hash = Doc::text($doc, 'hash');
+        $doc = guard json::parse($text) else ($e) {
+            return .error(.malformed($path, $e));
+        };
 
-        foreach (Doc::list($doc, 'modules') as const &$module) {
-            ModuleSites $sites = ModuleSites(Doc::text($module, 'name'), Doc::text($module, 'dir'));
+        $map = CoverageMap();
+        $map->hash = doc::text($doc, 'hash');
 
-            foreach (Doc::list($module, 'counters') as const &$counter) {
+        foreach (doc::list($doc, 'modules') as const &$module) {
+            $sites = ModuleSites(doc::text($module, 'name'), doc::text($module, 'dir'));
+
+            foreach (doc::list($module, 'counters') as const &$counter) {
                 $sites->sites[] = CoverageSite(
-                    Doc::text($counter, 'file'),
-                    Doc::number($counter, 'line'),
-                    Doc::number($counter, 'column'),
-                    Doc::text($counter, 'kind'),
-                    Doc::text($counter, 'edge'),
-                    Doc::text($counter, 'function')
+                    doc::text($counter, 'file'),
+                    doc::number($counter, 'line'),
+                    doc::number($counter, 'column'),
+                    doc::text($counter, 'kind'),
+                    doc::text($counter, 'edge'),
+                    doc::text($counter, 'function')
                 );
             }
 
-            $map->modules[] = $sites;
+            $map->modules[] = mv $sites;
         }
 
-        return $map;
+        return .ok(mv $map);
     }
 
     /**

@@ -6,12 +6,12 @@ test result_status_and_nullable_checks_pass
     expect($n)->is(7);
     expect(parse('8'))->ok(8);
 
-    Fault $e = expect(parse(''))->fails();
-    expect($e == Fault::empty)->yes();
-    expect(parse('x'))->fails(Fault::bad);
+    $e = expect(parse(''))->fails();
+    expect(value: $e)->is(.empty);
+    expect(parse('x'))->fails(.bad);
 
     expect(check(true))->fine();
-    expect(check(false))->fails(Fault::bad);
+    expect(check(false))->fails(.bad);
 
     int32 $three = expect(find(true))->some();
     expect($three)->is(3);
@@ -28,7 +28,7 @@ test result_ok_fails_on_an_error
 #[tests: expects death]
 test result_fails_fails_on_ok
 {
-    expect(parse('1'))->fails(Fault::bad);
+    expect(parse('1'))->fails(.bad);
 }
 
 #[tests: expects death]

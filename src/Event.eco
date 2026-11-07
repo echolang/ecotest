@@ -1,17 +1,22 @@
 namespace ecotest;
 
+use ecotest::jsonl;
+
 /**
  * One line of the test's event file, built field by field. `emit()` hands it to the session, which
  * drops it when the run has no event file.
  */
 public class Event
 {
-    private string $line = '';
+    /**
+     * The line so far, without its closing brace.
+     */
+    internal string $line = '';
 
     public constructor(const string& $type)
     {
         $this->line = '{"type":';
-        $this->line->append(Json::quote($type));
+        $this->line->append(jsonl::quote($type));
     }
 
     /**
@@ -20,7 +25,7 @@ public class Event
     public function text(const string& $key, const string& $value) : Event
     {
         $this->key($key);
-        $this->line->append(Json::quote($value));
+        $this->line->append(jsonl::quote($value));
         return $this;
     }
 
@@ -46,7 +51,7 @@ public class Event
             if ($i > 0) {
                 $this->line->append(',');
             }
-            $this->line->append(Json::quote($values[$i]));
+            $this->line->append(jsonl::quote($values[$i]));
         }
 
         $this->line->append(']');
@@ -65,30 +70,20 @@ public class Event
     }
 
     /**
-     * The finished line, without a trailing newline.
-     */
-    public const function render() : string
-    {
-        string $out = $this->line;
-        $out->append('}');
-        return $out;
-    }
-
-    /**
      * Writes the separator and the quoted key of the next field.
      */
     private function key(const string& $key) : void
     {
         $this->line->append(',');
-        $this->line->append(Json::quote($key));
+        $this->line->append(jsonl::quote($key));
         $this->line->append(':');
     }
 
     /**
      * Appends the line to the test's event file, if the run has one.
      */
-    public function emit() : void
+    public const function emit() : void
     {
-        Session::write($this->render());
+        Session::write("{$this}");
     }
 }

@@ -1,513 +1,573 @@
-namespace ecotest::cli;
-
 /**
  * The run as one self-contained HTML page: the verdict, every test with its failure, and per-file
  * coverage with the source shaded by what ran. Dark by default, light when the viewer prefers it or
  * picks it; a small script filters the tests by outcome. Without the script everything still shows.
  */
-public class HtmlReport
+
+namespace ecotest::cli::html;
+
+use ecotest::cli::{doc, escape, highlight, text};
+
+/**
+ * The page for `$run`. The verdict's gates mark the line and branch thresholds on the coverage
+ * bars and shade what falls short of them; with no gate set nothing counts as short.
+ */
+public function render(const Run& $run, const array<FileCoverage>& $files, Totals? $totals, const Verdict& $verdict) : string
 {
-    /**
-     * The page for `$run`. The verdict's gates mark the line and branch thresholds on the coverage
-     * bars and shade what falls short of them; with no gate set nothing counts as short.
-     */
-    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict) : string
-    {
-        usize $total = $run->tests->count();
-        usize $count = $files->count();
-        string $status = 'Red';
-        string $statusTone = '';
-        if ($verdict->green) {
-            $status = 'Green';
-            $statusTone = 'good';
-        }
-
-        string $out = '<!doctype html><html lang="en"><head><meta charset="utf-8">';
-        $out->append('<meta name="viewport" content="width=device-width, initial-scale=1"><title>ecotest report</title>');
-        $out->append(HtmlReport::style());
-        $out->append('</head><body><div class="app theme-dark" id="top">');
-        $out->append(HtmlReport::script());
-
-        $out->append('<header class="hdr"><a class="brand" href="#top"><span class="brand-tile" aria-hidden="true">');
-        $out->append(HtmlReport::mark('width="22" height="22"', '7', true));
-        $out->append('</span><span class="brand-text"><span class="brand-name">ecotest</span><span class="brand-sub">Run report</span></span></a>');
-        $out->append("<span class=\"mono verchip\">{$total} tests · {$count} files</span>");
-        $out->append('<nav class="nav" aria-label="Report sections"><a href="#summary" aria-current="page">Summary</a><a href="#tests">Tests</a>');
-        if (!$files->empty()) {
-            $out->append('<a href="#coverage">Coverage</a>');
-        }
-        $out->append('</nav><div class="grow"></div>');
-        $out->append("<span class=\"status {$statusTone}\"><span class=\"lamp\"></span>{$status}</span>");
-        $out->append('<button type="button" class="themebtn" id="themebtn" aria-label="Toggle light and dark theme" title="Toggle theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"></path></svg></button></header>');
-
-        $out->append('<div class="body">');
-        $out->append(HtmlReport::side($run, $files, $totals, $verdict->gates));
-        $out->append('<main class="main">');
-        $out->append(HtmlReport::hero($run, $totals, $verdict));
-        $out->append(HtmlReport::tests($run));
-        if (!$files->empty()) {
-            $out->append(HtmlReport::coverage($files, $verdict->gates));
-        }
-        $out->append('</main></div>');
-
-        $out->append('<footer class="ftr"><div class="ftr-inner"><span class="ftr-title">ecotest</span><span class="ftr-message">One self-contained page: the verdict, every test with its failure, and coverage by file.</span><div class="grow"></div><a class="ftr-echo" href="https://echoc.dev" target="_blank" rel="noreferrer">');
-        $out->append(HtmlReport::mark('width="16" height="16"', '7', false));
-        $out->append('Written in Echo</a></div></footer>');
-
-        $out->append('</div></body></html>');
-        return $out;
+    usize $total = $run->tests->count();
+    usize $count = $files->count();
+    $status = 'Red';
+    $statusTone = '';
+    if ($verdict->green) {
+        $status = 'Green';
+        $statusTone = 'good';
     }
 
-    /**
-     * The sidebar: the sections, the outcome filters and every file with its line coverage.
-     */
-    private static function side(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Gates& $gates) : string
-    {
-        usize $total = $run->tests->count();
+    $out = '<!doctype html><html lang="en"><head><meta charset="utf-8">';
+    $out->append('<meta name="viewport" content="width=device-width, initial-scale=1"><title>ecotest report</title>');
+    $out->append(style());
+    $out->append('</head><body><div class="app theme-dark" id="top">');
+    $out->append(script());
 
-        string $out = '<aside class="side" aria-label="Report navigation"><div class="side-group"><div class="eyebrow side-title">Report</div>';
-        $out->append('<a class="side-link" href="#summary" aria-current="page"><span>Summary</span></a>');
-        $out->append("<a class=\"side-link\" href=\"#tests\"><span>Tests</span><span class=\"count\">{$total}</span></a>");
-        if (!$totals->empty()) {
-            string $lines = $totals[0]->shown();
-            $out->append("<a class=\"side-link\" href=\"#coverage\"><span>Coverage</span><span class=\"count\">{$lines}</span></a>");
-        }
-        $out->append('</div>');
-
-        $out->append('<div class="side-group"><div class="eyebrow side-title">Outcomes</div>');
-        $out->append(HtmlReport::filters($run, 'side-link'));
-        $out->append('</div>');
-
-        if (!$files->empty()) {
-            $out->append('<div class="side-group"><div class="eyebrow side-title">Files</div>');
-            foreach ($files as const &$file) {
-                Ratio $r = $file->lineTotals();
-                string $low = HtmlReport::low($r, $gates->minLines);
-                string $tone = '';
-                if (!$low->empty()) {
-                    $tone = 'bad';
-                }
-                string $id = HtmlReport::anchor($file);
-                string $base = Escape::markup(Text::base($file->file));
-                string $pct = $r->shown();
-                $out->append("<a class=\"side-link\" href=\"#{$id}\"><span class=\"fname\"><span class=\"dot {$low}\"></span>{$base}</span><span class=\"count {$tone}\">{$pct}</span></a>");
-            }
-            $out->append('</div>');
-        }
-
-        $out->append('</aside>');
-        return $out;
+    $out->append('<header class="hdr"><a class="brand" href="#top"><span class="brand-tile" aria-hidden="true">');
+    $out->append(mark('width="22" height="22"', '7', true));
+    $out->append('</span><span class="brand-text"><span class="brand-name">ecotest</span><span class="brand-sub">Run report</span></span></a>');
+    $out->append("<span class=\"mono verchip\">{$total} tests · {$count} files</span>");
+    $out->append('<nav class="nav" aria-label="Report sections"><a href="#summary" aria-current="page">Summary</a><a href="#tests">Tests</a>');
+    if (!$files->empty()) {
+        $out->append('<a href="#coverage">Coverage</a>');
     }
+    $out->append('</nav><div class="grow"></div>');
+    $out->append("<span class=\"status {$statusTone}\"><span class=\"lamp\"></span>{$status}</span>");
+    $out->append('<button type="button" class="themebtn" id="themebtn" aria-label="Toggle light and dark theme" title="Toggle theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"></path></svg></button></header>');
 
-    /**
-     * One button per outcome filter, all first, each with its count. `$cls` is the button's look:
-     * a sidebar link or a chip.
-     */
-    private static function filters(const Run& $run, const string& $cls) : string
-    {
-        usize $failed = $run->broken();
-        usize $flaky = $run->count(Outcome::flaky);
-
-        array<string> $keys = ['all', 'failed', 'flaky', 'skip', 'pass'];
-        array<string> $words = ['All', 'Failed', 'Flaky', 'Skipped', 'Passed'];
-        array<usize> $counts = [$run->tests->count(), $failed, $flaky, $run->count(Outcome::skip), $run->count(Outcome::pass)];
-        array<string> $tones = ['', 'bad', 'warn', '', ''];
-
-        string $out = '';
-        for (usize $i = 0; $i < $keys->count(); $i++) {
-            string $on = '';
-            string $pressed = 'false';
-            if ($i == 0) {
-                $on = 'on';
-                $pressed = 'true';
-            }
-            string $tone = '';
-            if ($counts[$i] > 0) {
-                $tone = $tones[$i];
-            }
-
-            string $key = $keys[$i];
-            string $word = $words[$i];
-            string $label = "{$word} tests";
-            usize $n = $counts[$i];
-            if ($cls == 'chip') {
-                $out->append("<button type=\"button\" class=\"chip {$on}\" aria-pressed=\"{$pressed}\" data-filter=\"{$key}\" data-label=\"{$label}\">{$word} <b>{$n}</b></button>");
-            } else {
-                $out->append("<button type=\"button\" class=\"side-link {$on}\" data-filter=\"{$key}\" data-label=\"{$label}\"><span>{$word}</span><span class=\"count {$tone}\">{$n}</span></button>");
-            }
-        }
-        return $out;
+    $out->append('<div class="body">');
+    side($out, $run, $files, $totals, $verdict->gates);
+    $out->append('<main class="main">');
+    hero($out, $run, $totals, $verdict);
+    tests($out, $run);
+    if (!$files->empty()) {
+        coverage($out, $files, $verdict->gates);
     }
+    $out->append('</main></div>');
 
-    /**
-     * The verdict, the counts, the coverage totals and every failed gate.
-     */
-    private static function hero(const Run& $run, const array<Ratio>& $totals, const Verdict& $verdict) : string
-    {
-        usize $total = $run->tests->count();
-        usize $passed = $run->count(Outcome::pass);
-        usize $failed = $run->broken();
-        usize $skipped = $run->count(Outcome::skip);
-        usize $flaky = $run->count(Outcome::flaky);
-        usize $stopped = $run->stopped();
-        float64 $secs = ($run->wallMs as float64) / 1000.0;
+    $out->append('<footer class="ftr"><div class="ftr-inner"><span class="ftr-title">ecotest</span><span class="ftr-message">One self-contained page: the verdict, every test with its failure, and coverage by file.</span><div class="grow"></div><a class="ftr-echo" href="https://echoc.dev" target="_blank" rel="noreferrer">');
+    $out->append(mark('width="16" height="16"', '7', false));
+    $out->append('Written in Echo</a></div></footer>');
 
-        string $word = 'failed';
-        string $tone = '';
-        if ($verdict->green) {
-            $word = 'passed';
-            $tone = 'good';
-        }
+    $out->append('</div></body></html>');
+    return $out;
+}
 
-        string $out = '<section class="hero" id="summary">';
-        $out->append(HtmlReport::mark('class="wave" width="620" height="620"', '2.4', true));
-        $out->append('<div class="crumbs"><span>ecotest</span><span>/</span><span class="here">Run report</span></div>');
-        $out->append("<div class=\"titlerow\"><h1 class=\"h1\">Tests <span class=\"gen {$tone}\">{$word}</span></h1><div class=\"badges\">");
+/**
+ * The sidebar: the sections, the outcome filters and every file with its line coverage.
+ */
+private function side(string& $out, const Run& $run, const array<FileCoverage>& $files, Totals? $totals, const Gates& $gates) : void
+{
+    usize $total = $run->tests->count();
 
-        string $gatesFailed = Text::plural($verdict->failed->count(), 'gate', 'gates');
-        if ($failed > 0) {
-            string $b = Text::plural($failed, 'failure', 'failures');
-            $out->append("<span class=\"badge bad\">{$b}</span>");
-        }
-        if ($stopped > 0) {
-            $out->append('<span class="badge bad">echoc stopped</span>');
-        }
-        if (!$verdict->failed->empty()) {
-            $out->append("<span class=\"badge bad\">{$gatesFailed} failed</span>");
-        }
-        if ($flaky > 0) {
-            $out->append("<span class=\"badge warn\">{$flaky} flaky</span>");
-        }
-        if ($failed == 0 && $stopped == 0 && $verdict->failed->empty() && $flaky == 0) {
-            $out->append('<span class="badge good">all clear</span>');
-        }
-        $out->append('</div></div>');
+    $out->append('<aside class="side" aria-label="Report navigation"><div class="side-group"><div class="eyebrow side-title">Report</div>');
+    $out->append('<a class="side-link" href="#summary" aria-current="page"><span>Summary</span></a>');
+    $out->append("<a class=\"side-link\" href=\"#tests\"><span>Tests</span><span class=\"count\">{$total}</span></a>");
+    $out->append(covered($totals));
+    $out->append('</div>');
 
-        string $lede = "{$passed} of {$total} tests passed in {$secs:.2f} s.";
-        array<string> $more = [];
-        if ($failed > 0) {
-            $more[] = "{$failed} failed";
-        }
-        if ($flaky > 0) {
-            $more[] = Text::plural($flaky, 'was flaky', 'were flaky');
-        }
-        if ($skipped > 0) {
-            $more[] = Text::plural($skipped, 'was skipped', 'were skipped');
-        }
-        if (!$more->empty()) {
-            string $listed = HtmlReport::listed($more);
-            $lede->append(" {$listed}.");
-        }
-        if (!$verdict->failed->empty()) {
-            $lede->append(" {$gatesFailed} failed.");
-        }
-        $out->append("<p class=\"lede\">{$lede}</p>");
+    $out->append('<div class="side-group"><div class="eyebrow side-title">Outcomes</div>');
+    $out->append(filters($run, 'side-link'));
+    $out->append('</div>');
 
-        string $failedTone = '';
-        if ($failed > 0) {
-            $failedTone = 'bad';
-        }
-        string $flakyTone = '';
-        if ($flaky > 0) {
-            $flakyTone = 'warn';
-        }
-        $out->append('<div class="meta">');
-        $out->append(HtmlReport::cell('Passed', "{$passed}", '', 'good'));
-        $out->append(HtmlReport::cell('Failed', "{$failed}", '', $failedTone));
-        $out->append(HtmlReport::cell('Skipped', "{$skipped}", '', ''));
-        $out->append(HtmlReport::cell('Flaky', "{$flaky}", '', $flakyTone));
-        $out->append(HtmlReport::cell('Wall time', "{$secs:.2f}", 's', ''));
-        $out->append('</div>');
-
-        if (!$totals->empty()) {
-            $out->append('<div class="cov">');
-            $out->append(HtmlReport::total('Lines', $totals[0], $verdict->gates->minLines, 'Lines with code that ran'));
-            $out->append(HtmlReport::total('Branches', $totals[1], $verdict->gates->minBranches, 'Both sides of every condition'));
-            $out->append(HtmlReport::total('Functions', $totals[2], -1.0, 'Called at least once'));
-            $out->append('</div>');
-        }
-
-        if ($stopped > 0) {
-            $out->append(HtmlReport::callout('Run stopped', "echoc stopped before the tests ran in {$stopped} of {$run->passes} passes."));
-        }
-        foreach ($verdict->failed as const &$gate) {
-            $out->append(HtmlReport::callout('Gate failed', Escape::markup($gate)));
-        }
-
-        $out->append('</section>');
-        return $out;
-    }
-
-    /**
-     * One labelled number of the meta strip, `$unit` set small after it.
-     */
-    private static function cell(const string& $label, const string& $value, const string& $unit, const string& $tone) : string
-    {
-        return "<div><div class=\"eyebrow\">{$label}</div><div class=\"meta-value {$tone}\">{$value}<small>{$unit}</small></div></div>";
-    }
-
-    /**
-     * One coverage total as a card with its bar, the gate `$min` marked on it when one is set.
-     */
-    private static function total(const string& $label, const Ratio& $r, float64 $min, const string& $note) : string
-    {
-        string $low = HtmlReport::low($r, $min);
-        string $pct = $r->shown();
-        string $bar = HtmlReport::bar('bar', $r, $low, $min);
-        string $says = $note;
-        if ($min >= 0.0) {
-            $says = "Gate {$min:.1f}%, marked on the bar";
-        }
-
-        return "<div class=\"cov-card\"><div class=\"eyebrow\">{$label}</div><div class=\"cov-top\"><div class=\"cov-pct {$low}\">{$pct}</div><div class=\"cov-frac\">{$r->hit} / {$r->total}</div></div>{$bar}<div class=\"cov-note\">{$says}</div></div>";
-    }
-
-    /**
-     * A warning box with a title, `$html` already escaped.
-     */
-    private static function callout(const string& $title, const string& $html) : string
-    {
-        return "<div class=\"callout\" role=\"note\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3l9.5 17h-19z\"></path><path d=\"M12 10v4\"></path><path d=\"M12 17.2v.1\"></path></svg><div><p class=\"callout-title\">{$title}</p><div>{$html}</div></div></div>";
-    }
-
-    /**
-     * Every test, broken ones first, then flaky, skipped and passed, each group in run order.
-     */
-    private static function tests(const Run& $run) : string
-    {
-        string $out = '<section class="sec" id="tests"><div class="divider"><span class="divider-num">01</span><h2>Tests</h2><span class="divider-line"></span></div>';
-        $out->append('<div class="sec-head"><h3 id="tests-heading">All tests</h3><div class="chips" role="group" aria-label="Filter by outcome">');
-        $out->append(HtmlReport::filters($run, 'chip'));
-        $out->append('</div></div>');
-        $out->append('<div class="table-wrap"><table class="tbl" id="tests-table" data-filter="all"><thead><tr><th style="width: 120px">Outcome</th><th>Test</th><th class="num" style="width: 96px">ms</th><th class="num" style="width: 96px">Checks</th></tr></thead><tbody>');
-
-        foreach (['failed', 'flaky', 'skip', 'pass'] as const &$group) {
-            foreach ($run->tests as const &$test) {
-                if ($test->outcome->group() == $group) {
-                    $out->append(HtmlReport::row($test));
-                }
-            }
-        }
-
-        $out->append('</tbody></table></div></section>');
-        return $out;
-    }
-
-    /**
-     * One test's row: its outcome, its id, what it failed on and why it was skipped or noted.
-     */
-    private static function row(const TestRecord& $test) : string
-    {
-        string $group = $test->outcome->group();
-        string $word = $test->outcome->word();
-        string $bad = '';
-        if ($test->outcome->broken()) {
-            $bad = 'bad';
-        }
-
-        // the module stays: the page lists every module's tests together
-        TestTitle $t = $test->title(true);
-        string $suite = '';
-        if (!$t->suite->empty()) {
-            $suite = Escape::markup("{$t->suite}::");
-        }
-        string $name = Escape::markup($t->label);
-
-        string $ms = '—';
-        if ($test->outcome != Outcome::skip) {
-            int64 $took = $test->ms();
-            $ms = "{$took}";
-        }
-        string $checks = '—';
-        if ($test->usedEcotest) {
-            $checks = "{$test->checks}";
-        }
-
-        string $out = "<tr class=\"{$bad}\" data-group=\"{$group}\"><td><span class=\"oc {$word}\"><i></i>{$word}</span></td><td><div class=\"tid\"><span>{$suite}</span>{$name}</div>";
-
-        if (!$test->failure->empty() && $test->outcome != Outcome::pass) {
-            string $where = Escape::markup("{$test->failureFile}:{$test->failureLine}");
-            string $what = Escape::markup($test->failure);
-            string $detail = Escape::markup($test->failureDetail);
-            $out->append("<div class=\"failure surface\"><div class=\"failure-head\"><span class=\"dot\"></span>{$where}</div><div class=\"failure-msg\">{$what}</div><div class=\"failure-detail\">{$detail}</div></div>");
-        }
-        if (!$test->skipReason->empty()) {
-            $out->append(HtmlReport::why($test->skipReason));
-        }
-        foreach ($test->notes as const &$note) {
-            $out->append(HtmlReport::why($note));
-        }
-
-        $out->append("</td><td class=\"num\">{$ms}</td><td class=\"num\">{$checks}</td></tr>");
-        return $out;
-    }
-
-    /**
-     * A muted line under a test, with the info mark.
-     */
-    private static function why(const string& $text) : string
-    {
-        string $t = Escape::markup($text);
-        return "<div class=\"why\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path d=\"M12 11v5\"></path><path d=\"M12 7.6v.1\"></path></svg>{$t}</div>";
-    }
-
-    /**
-     * Coverage by file, then each file's source.
-     */
-    private static function coverage(const array<FileCoverage>& $files, const Gates& $gates) : string
-    {
-        string $out = '<section class="sec" id="coverage"><div class="divider"><span class="divider-num">02</span><h2>Coverage</h2><span class="divider-line"></span></div>';
-        $out->append('<div class="sec-head"><h3>By file</h3>');
-        if ($gates->minLines >= 0.0) {
-            $out->append("<div class=\"sec-note\">Gate: lines at least <span>{$gates->minLines:.1f}%</span></div>");
-        }
-        $out->append('</div>');
-
-        $out->append('<div class="table-wrap"><table class="tbl"><thead><tr><th>File</th><th class="num">Lines</th><th class="num">Branches</th><th class="num">Functions</th></tr></thead><tbody>');
+    if (!$files->empty()) {
+        $out->append('<div class="side-group"><div class="eyebrow side-title">Files</div>');
         foreach ($files as const &$file) {
-            Ratio $lines = $file->lineTotals();
-            string $low = HtmlReport::low($lines, $gates->minLines);
-            string $id = HtmlReport::anchor($file);
-            string $name = Escape::markup($file->file);
-            string $l = HtmlReport::ratio($lines, $low);
-            Ratio $branches = $file->branchTotals();
-            string $b = HtmlReport::ratio($branches, HtmlReport::low($branches, $gates->minBranches));
-            string $f = HtmlReport::ratio($file->functionTotals(), '');
-            $out->append("<tr><td><a class=\"fileref\" href=\"#{$id}\"><span class=\"dot {$low}\"></span>{$name}</a></td><td class=\"num\">{$l}</td><td class=\"num\">{$b}</td><td class=\"num\">{$f}</td></tr>");
-        }
-        $out->append('</tbody></table></div>');
-
-        $out->append('<div class="sec-head"><h3>Source</h3><div class="legend"><span><i class="sw hit"></i>Ran, with hit count</span><span><i class="sw miss"></i>Never ran</span><span><i class="sw"></i>Not executable</span></div></div>');
-        foreach ($files as const &$file) {
-            $out->append(HtmlReport::source($file, HtmlReport::low($file->lineTotals(), $gates->minLines)));
-        }
-
-        $out->append('</section>');
-        return $out;
-    }
-
-    /**
-     * One percentage in the file table, with its fraction and a small bar.
-     */
-    private static function ratio(const Ratio& $r, const string& $low) : string
-    {
-        string $pct = $r->shown();
-        string $bar = HtmlReport::bar('mini', $r, $low, -1.0);
-        return "<div class=\"ratio\"><b class=\"{$low}\">{$pct}</b><span>{$r->hit} / {$r->total}</span></div>{$bar}";
-    }
-
-    /**
-     * A bar of kind `$kind` filled to the ratio, with the gate `$min` marked when one is set.
-     */
-    private static function bar(const string& $kind, const Ratio& $r, const string& $low, float64 $min) : string
-    {
-        float64 $p = $r->percent();
-        string $out = "<div class=\"{$kind} {$low}\"><i style=\"width: {$p:.1f}%\"></i>";
-        if ($min >= 0.0) {
-            $out->append("<span class=\"gate\" style=\"left: {$min:.1f}%\"></span>");
+            $r = $file->lineTotals();
+            $low = low($r, $gates->minLines);
+            $tone = '';
+            if (!$low->empty()) {
+                $tone = 'bad';
+            }
+            $id = anchor($file);
+            $base = escape::markup(text::base($file->file));
+            $out->append("<a class=\"side-link\" href=\"#{$id}\"><span class=\"fname\"><span class=\"dot {$low}\"></span>{$base}</span><span class=\"count {$tone}\">{$r}</span></a>");
         }
         $out->append('</div>');
-        return $out;
     }
 
-    /**
-     * The file's source, each line shaded by whether it ran, with its hit count, highlighted.
-     */
-    private static function source(const FileCoverage& $file, const string& $low) : string
-    {
-        string $id = HtmlReport::anchor($file);
-        string $name = Escape::markup($file->file);
-        string $pct = $file->lineTotals()->shown();
-        usize $missed = $file->missedLines()->count();
+    $out->append('</aside>');
+}
 
-        string $out = "<details class=\"code surface\" id=\"{$id}\"><summary class=\"code-head\"><span class=\"code-file\"><svg class=\"chev\" width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 6l6 6-6 6\"></path></svg><span class=\"dot {$low}\"></span>{$name}</span>";
-        $out->append("<span class=\"code-stats\"><span>lines <b class=\"{$low}\">{$pct}</b></span><span>{$missed} missed</span></span></summary><div class=\"rows\"><div class=\"rows-inner\">");
-
-        string $text = Doc::read($file->path);
-        int64 $number = 0;
-
-        foreach (str::split($text, "\n") as const &$line) {
-            $number++;
-            string $cls = '';
-            string $count = '';
-
-            if ($file->lines->has($number)) {
-                uint64 $hits = $file->lines->get($number);
-                $count = "{$hits}×";
-                $cls = 'hit';
-                if ($hits == 0) {
-                    $count = '0';
-                    $cls = 'miss';
-                }
-            }
-
-            $out->append("<div class=\"row {$cls}\"><span class=\"ln\">{$number}</span><span class=\"hits\">{$count}</span><code>");
-            $out->append(Highlight::line(string($line)));
-            $out->append('</code></div>');
-        }
-
-        $out->append('</div></div></details>');
-        return $out;
-    }
-
-    /**
-     * `low` when `$r` falls short of the gate `$min`, empty when it holds or no gate is set.
-     */
-    private static function low(const Ratio& $r, float64 $min) : string
-    {
-        if (Gates::below($r, $min)) {
-            return 'low';
-        }
+/**
+ * The sidebar's link to the coverage with the line total, or nothing without coverage.
+ */
+private function covered(Totals? $totals) : string
+{
+    $t = guard $totals else {
         return '';
+    };
+    return "<a class=\"side-link\" href=\"#coverage\"><span>Coverage</span><span class=\"count\">{$t->lines}</span></a>";
+}
+
+/**
+ * One button per outcome filter, all first, each with its count. `$cls` is the button's look:
+ * a sidebar link or a chip.
+ */
+private function filters(const Run& $run, const string& $cls) : string
+{
+    $c = $run->counts();
+    array<Filter> $filters = [
+        Filter('all', 'All', $c->total, ''),
+        Filter('failed', 'Failed', $c->fail, 'bad'),
+        Filter('flaky', 'Flaky', $c->flaky, 'warn'),
+        Filter('skip', 'Skipped', $c->skip, ''),
+        Filter('pass', 'Passed', $c->pass, ''),
+    ];
+
+    $out = '';
+    for (usize $i = 0; $i < $filters->count(); $i++) {
+        const Filter& $f = $filters[$i];
+        $on = '';
+        $pressed = 'false';
+        if ($i == 0) {
+            $on = 'on';
+            $pressed = 'true';
+        }
+        $tone = '';
+        if ($f->count > 0) {
+            $tone = $f->tone;
+        }
+
+        $label = "{$f->word} tests";
+        if ($cls == 'chip') {
+            $out->append("<button type=\"button\" class=\"chip {$on}\" aria-pressed=\"{$pressed}\" data-filter=\"{$f->key}\" data-label=\"{$label}\">{$f->word} <b>{$f->count}</b></button>");
+        } else {
+            $out->append("<button type=\"button\" class=\"side-link {$on}\" data-filter=\"{$f->key}\" data-label=\"{$label}\"><span>{$f->word}</span><span class=\"count {$tone}\">{$f->count}</span></button>");
+        }
+    }
+    return $out;
+}
+
+/**
+ * One outcome filter: the group it shows, its word, how many tests it holds and the tone its
+ * count takes when there are any.
+ */
+private struct Filter
+{
+    public string $key;
+    public string $word;
+    public usize $count;
+    public string $tone;
+}
+
+/**
+ * The verdict, the counts, the coverage totals and every failed gate.
+ */
+private function hero(string& $out, const Run& $run, Totals? $totals, const Verdict& $verdict) : void
+{
+    $c = $run->counts();
+    usize $total = $c->total;
+    usize $passed = $c->pass;
+    usize $failed = $c->fail;
+    usize $skipped = $c->skip;
+    usize $flaky = $c->flaky;
+    usize $stopped = $run->stopped();
+    $secs = $run->seconds();
+
+    $word = 'failed';
+    $tone = '';
+    if ($verdict->green) {
+        $word = 'passed';
+        $tone = 'good';
     }
 
-    /**
-     * The id a file's source view carries, safe in an attribute and a URL fragment.
-     */
-    private static function anchor(const FileCoverage& $file) : string
-    {
-        string $key = TestRecord::key($file->file);
-        return "file-{$key}";
+    $out->append('<section class="hero" id="summary">');
+    $out->append(mark('class="wave" width="620" height="620"', '2.4', true));
+    $out->append('<div class="crumbs"><span>ecotest</span><span>/</span><span class="here">Run report</span></div>');
+    $out->append("<div class=\"titlerow\"><h1 class=\"h1\">Tests <span class=\"gen {$tone}\">{$word}</span></h1><div class=\"badges\">");
+
+    $gatesFailed = text::plural($verdict->failed->count(), 'gate', 'gates');
+    if ($failed > 0) {
+        $b = text::plural($failed, 'failure', 'failures');
+        $out->append("<span class=\"badge bad\">{$b}</span>");
+    }
+    if ($stopped > 0) {
+        $out->append('<span class="badge bad">echoc stopped</span>');
+    }
+    if (!$verdict->failed->empty()) {
+        $out->append("<span class=\"badge bad\">{$gatesFailed} failed</span>");
+    }
+    if ($flaky > 0) {
+        $out->append("<span class=\"badge warn\">{$flaky} flaky</span>");
+    }
+    if ($failed == 0 && $stopped == 0 && $verdict->failed->empty() && $flaky == 0) {
+        $out->append('<span class="badge good">all clear</span>');
+    }
+    $out->append('</div></div>');
+
+    $lede = "{$passed} of {$total} tests passed in {$secs:.2f} s.";
+    array<string> $more = [];
+    if ($failed > 0) {
+        $more[] = "{$failed} failed";
+    }
+    if ($flaky > 0) {
+        $more[] = text::plural($flaky, 'was flaky', 'were flaky');
+    }
+    if ($skipped > 0) {
+        $more[] = text::plural($skipped, 'was skipped', 'were skipped');
+    }
+    if (!$more->empty()) {
+        $listed = listed($more);
+        $lede->append(" {$listed}.");
+    }
+    if (!$verdict->failed->empty()) {
+        $lede->append(" {$gatesFailed} failed.");
+    }
+    $out->append("<p class=\"lede\">{$lede}</p>");
+
+    $failedTone = '';
+    if ($failed > 0) {
+        $failedTone = 'bad';
+    }
+    $flakyTone = '';
+    if ($flaky > 0) {
+        $flakyTone = 'warn';
+    }
+    $out->append('<div class="meta">');
+    $out->append(cell('Passed', "{$passed}", '', 'good'));
+    $out->append(cell('Failed', "{$failed}", '', $failedTone));
+    $out->append(cell('Skipped', "{$skipped}", '', ''));
+    $out->append(cell('Flaky', "{$flaky}", '', $flakyTone));
+    $out->append(cell('Wall time', "{$secs:.2f}", 's', ''));
+    $out->append('</div>');
+
+    cards($out, $totals, $verdict->gates);
+
+    if ($stopped > 0) {
+        $out->append(callout('Run stopped', "echoc stopped before the tests ran in {$stopped} of {$run->passes} passes."));
+    }
+    foreach ($verdict->failed as const &$gate) {
+        $out->append(callout('Gate failed', escape::markup($gate)));
     }
 
-    /**
-     * `a`, `a and b`, `a, b and c`.
-     */
-    private static function listed(const array<string>& $parts) : string
-    {
-        string $out = '';
-        for (usize $i = 0; $i < $parts->count(); $i++) {
-            if ($i > 0 && $i + 1 == $parts->count()) {
-                $out->append(' and ');
-            } else if ($i > 0) {
-                $out->append(', ');
+    $out->append('</section>');
+}
+
+/**
+ * The coverage totals as cards, with the gates marked, or nothing without coverage.
+ */
+private function cards(string& $out, Totals? $totals, const Gates& $gates) : void
+{
+    $t = guard $totals else {
+        return;
+    };
+
+    $out->append('<div class="cov">');
+    $out->append(total('Lines', $t->lines, $gates->minLines, 'Lines with code that ran'));
+    $out->append(total('Branches', $t->branches, $gates->minBranches, 'Both sides of every condition'));
+    $out->append(total('Functions', $t->functions, null, 'Called at least once'));
+    $out->append('</div>');
+}
+
+/**
+ * One labelled number of the meta strip, `$unit` set small after it.
+ */
+private function cell(const string& $label, const string& $value, const string& $unit, const string& $tone) : string
+{
+    return "<div><div class=\"eyebrow\">{$label}</div><div class=\"meta-value {$tone}\">{$value}<small>{$unit}</small></div></div>";
+}
+
+/**
+ * One coverage total as a card with its bar, the gate `$min` marked on it when one is set.
+ */
+private function total(const string& $label, const Ratio& $r, float64? $min, const string& $note) : string
+{
+    $low = low($r, $min);
+    $bar = bar('bar', $r, $low, $min);
+    $says = says($min, $note);
+
+    return "<div class=\"cov-card\"><div class=\"eyebrow\">{$label}</div><div class=\"cov-top\"><div class=\"cov-pct {$low}\">{$r}</div><div class=\"cov-frac\">{$r->hit} / {$r->total}</div></div>{$bar}<div class=\"cov-note\">{$says}</div></div>";
+}
+
+/**
+ * A warning box with a title, `$html` already escaped.
+ */
+private function callout(const string& $title, const string& $html) : string
+{
+    return "<div class=\"callout\" role=\"note\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3l9.5 17h-19z\"></path><path d=\"M12 10v4\"></path><path d=\"M12 17.2v.1\"></path></svg><div><p class=\"callout-title\">{$title}</p><div>{$html}</div></div></div>";
+}
+
+/**
+ * Every test, broken ones first, then flaky, skipped and passed, each group in run order.
+ */
+private function tests(string& $out, const Run& $run) : void
+{
+    $out->append('<section class="sec" id="tests"><div class="divider"><span class="divider-num">01</span><h2>Tests</h2><span class="divider-line"></span></div>');
+    $out->append('<div class="sec-head"><h3 id="tests-heading">All tests</h3><div class="chips" role="group" aria-label="Filter by outcome">');
+    $out->append(filters($run, 'chip'));
+    $out->append('</div></div>');
+    $out->append('<div class="table-wrap"><table class="tbl" id="tests-table" data-filter="all"><thead><tr><th style="width: 120px">Outcome</th><th>Test</th><th class="num" style="width: 96px">ms</th><th class="num" style="width: 96px">Checks</th></tr></thead><tbody>');
+
+    foreach (['failed', 'flaky', 'skip', 'pass'] as const &$group) {
+        foreach ($run->tests as const &$test) {
+            if ($test->outcome->group() == $group) {
+                row($out, $test);
             }
-            $out->append($parts[$i]);
         }
-        return $out;
     }
 
-    /**
-     * The ecotest mark: a dot and the rings around it, the outer ring when `$outer` is set.
-     */
-    private static function mark(const string& $attrs, const string& $stroke, bool $outer) : string
-    {
-        string $out = "<svg {$attrs} viewBox=\"0 0 100 100\" fill=\"none\" aria-hidden=\"true\"><circle cx=\"35\" cy=\"50\" r=\"7.5\" fill=\"#008EFC\"></circle><path d=\"M 44 34.4 A 18 18 0 0 1 44 65.6\" stroke=\"#008EFC\" stroke-width=\"{$stroke}\" stroke-linecap=\"round\"></path><path d=\"M 50 24 A 30 30 0 0 1 50 76\" stroke=\"#008EFC\" stroke-width=\"{$stroke}\" stroke-linecap=\"round\" opacity=\"0.62\"></path>";
-        if ($outer) {
-            $out->append("<path d=\"M 56 13.6 A 42 42 0 0 1 56 86.4\" stroke=\"#008EFC\" stroke-width=\"{$stroke}\" stroke-linecap=\"round\" opacity=\"0.3\"></path>");
-        }
-        $out->append('</svg>');
-        return $out;
+    $out->append('</tbody></table></div></section>');
+}
+
+/**
+ * One test's row: its outcome, its id, what it failed on and why it was skipped or noted.
+ */
+private function row(string& $out, const TestRecord& $test) : void
+{
+    $group = $test->outcome->group();
+    $bad = '';
+    if ($test->outcome->broken()) {
+        $bad = 'bad';
     }
 
-    /**
-     * The theme, set before the page paints: a remembered pick, else the viewer's preference. Then,
-     * once the page is there, the theme button, the outcome filters and opening the source a link
-     * points at.
-     */
-    private static function script() : string
-    {
-        return '<script>
+    // the module stays: the page lists every module's tests together
+    $t = $test->title(true);
+    $suite = '';
+    if (!$t->suite->empty()) {
+        $suite = escape::markup("{$t->suite}::");
+    }
+    $name = escape::markup($t->label);
+
+    $ms = '—';
+    if ($test->outcome != Outcome::skip) {
+        int64 $took = $test->ms();
+        $ms = "{$took}";
+    }
+    $checks = '—';
+    if ($test->events->usedEcotest) {
+        $checks = "{$test->events->checks}";
+    }
+
+    $out->append("<tr class=\"{$bad}\" data-group=\"{$group}\"><td><span class=\"oc {$test->outcome}\"><i></i>{$test->outcome}</span></td><td><div class=\"tid\"><span>{$suite}</span>{$name}</div>");
+
+    if ($test->outcome != Outcome::pass) {
+        $out->append(fault($test->events));
+    }
+    if (!$test->events->skipReason->empty()) {
+        $out->append(why($test->events->skipReason));
+    }
+    foreach ($test->events->notes as const &$note) {
+        $out->append(why($note));
+    }
+
+    $out->append("</td><td class=\"num\">{$ms}</td><td class=\"num\">{$checks}</td></tr>");
+}
+
+/**
+ * Where `$events` failed and what they said, or nothing when they did not fail.
+ */
+private function fault(const Events& $events) : string
+{
+    $f = guard $events->fault else {
+        return '';
+    };
+
+    $where = escape::markup("{$f->file}:{$f->line}");
+    $what = escape::markup($f->summary);
+    $detail = escape::markup($f->detail);
+    return "<div class=\"failure surface\"><div class=\"failure-head\"><span class=\"dot\"></span>{$where}</div><div class=\"failure-msg\">{$what}</div><div class=\"failure-detail\">{$detail}</div></div>";
+}
+
+/**
+ * A muted line under a test, with the info mark.
+ */
+private function why(const string& $text) : string
+{
+    $t = escape::markup($text);
+    return "<div class=\"why\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path d=\"M12 11v5\"></path><path d=\"M12 7.6v.1\"></path></svg>{$t}</div>";
+}
+
+/**
+ * Coverage by file, then each file's source.
+ */
+private function coverage(string& $out, const array<FileCoverage>& $files, const Gates& $gates) : void
+{
+    $out->append('<section class="sec" id="coverage"><div class="divider"><span class="divider-num">02</span><h2>Coverage</h2><span class="divider-line"></span></div>');
+    $out->append('<div class="sec-head"><h3>By file</h3>');
+    $out->append(gateNote($gates->minLines));
+    $out->append('</div>');
+
+    $out->append('<div class="table-wrap"><table class="tbl"><thead><tr><th>File</th><th class="num">Lines</th><th class="num">Branches</th><th class="num">Functions</th></tr></thead><tbody>');
+    foreach ($files as const &$file) {
+        $lines = $file->lineTotals();
+        $low = low($lines, $gates->minLines);
+        $id = anchor($file);
+        $name = escape::markup($file->file);
+        $l = ratio($lines, $low);
+        $branches = $file->branchTotals();
+        $b = ratio($branches, low($branches, $gates->minBranches));
+        $f = ratio($file->functionTotals(), '');
+        $out->append("<tr><td><a class=\"fileref\" href=\"#{$id}\"><span class=\"dot {$low}\"></span>{$name}</a></td><td class=\"num\">{$l}</td><td class=\"num\">{$b}</td><td class=\"num\">{$f}</td></tr>");
+    }
+    $out->append('</tbody></table></div>');
+
+    $out->append('<div class="sec-head"><h3>Source</h3><div class="legend"><span><i class="sw hit"></i>Ran, with hit count</span><span><i class="sw miss"></i>Never ran</span><span><i class="sw"></i>Not executable</span></div></div>');
+    foreach ($files as const &$file) {
+        source($out, $file, low($file->lineTotals(), $gates->minLines));
+    }
+
+    $out->append('</section>');
+}
+
+/**
+ * One percentage in the file table, with its fraction and a small bar.
+ */
+private function ratio(const Ratio& $r, const string& $low) : string
+{
+    $bar = bar('mini', $r, $low, null);
+    return "<div class=\"ratio\"><b class=\"{$low}\">{$r}</b><span>{$r->hit} / {$r->total}</span></div>{$bar}";
+}
+
+/**
+ * A bar of kind `$kind` filled to the ratio, with the gate `$min` marked when one is set.
+ */
+private function bar(const string& $kind, const Ratio& $r, const string& $low, float64? $min) : string
+{
+    $p = $r->percent();
+    $out = "<div class=\"{$kind} {$low}\"><i style=\"width: {$p:.1f}%\"></i>";
+    $out->append(marker($min));
+    $out->append('</div>');
+    return $out;
+}
+
+/**
+ * The gate `$min` marked on a bar, or nothing without a gate.
+ */
+private function marker(float64? $min) : string
+{
+    $gate = guard $min else {
+        return '';
+    };
+    return "<span class=\"gate\" style=\"left: {$gate:.1f}%\"></span>";
+}
+
+/**
+ * What a coverage card says under its bar: the gate `$min` when one is set, `$note` otherwise.
+ */
+private function says(float64? $min, const string& $note) : string
+{
+    $gate = guard $min else {
+        return $note;
+    };
+    return "Gate {$gate:.1f}%, marked on the bar";
+}
+
+/**
+ * The note on the file table naming the line gate `$min`, or nothing without one.
+ */
+private function gateNote(float64? $min) : string
+{
+    $gate = guard $min else {
+        return '';
+    };
+    return "<div class=\"sec-note\">Gate: lines at least <span>{$gate:.1f}%</span></div>";
+}
+
+/**
+ * The file's source, each line shaded by whether it ran, with its hit count, highlighted.
+ */
+private function source(string& $out, const FileCoverage& $file, const string& $low) : void
+{
+    $id = anchor($file);
+    $name = escape::markup($file->file);
+    $lines = $file->lineTotals();
+    usize $missed = $file->missedLines()->count();
+
+    $out->append("<details class=\"code surface\" id=\"{$id}\"><summary class=\"code-head\"><span class=\"code-file\"><svg class=\"chev\" width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 6l6 6-6 6\"></path></svg><span class=\"dot {$low}\"></span>{$name}</span>");
+    $out->append("<span class=\"code-stats\"><span>lines <b class=\"{$low}\">{$lines}</b></span><span>{$missed} missed</span></span></summary><div class=\"rows\"><div class=\"rows-inner\">");
+
+    // a source gone since the run shows empty
+    $text = doc::read($file->path) ?? '';
+    int64 $number = 0;
+
+    foreach (str::split($text, '\n') as const &$line) {
+        $number++;
+        $cls = '';
+        $count = '';
+
+        if ($file->lines->has($number)) {
+            uint64 $hits = $file->lines->get($number);
+            $count = "{$hits}×";
+            $cls = 'hit';
+            if ($hits == 0) {
+                $count = '0';
+                $cls = 'miss';
+            }
+        }
+
+        $out->append("<div class=\"row {$cls}\"><span class=\"ln\">{$number}</span><span class=\"hits\">{$count}</span><code>");
+        highlight::line($out, string($line));
+        $out->append('</code></div>');
+    }
+
+    $out->append('</div></div></details>');
+}
+
+/**
+ * `low` when `$r` falls short of the gate `$min`, empty when it holds or no gate is set.
+ */
+private function low(const Ratio& $r, float64? $min) : string
+{
+    if (Gates::below($r, $min)) {
+        return 'low';
+    }
+    return '';
+}
+
+/**
+ * The id a file's source view carries, safe in an attribute and a URL fragment.
+ */
+private function anchor(const FileCoverage& $file) : string
+{
+    $key = slug($file->file);
+    return "file-{$key}";
+}
+
+/**
+ * `a`, `a and b`, `a, b and c`.
+ */
+private function listed(const array<string>& $parts) : string
+{
+    $out = '';
+    for (usize $i = 0; $i < $parts->count(); $i++) {
+        if ($i > 0 && $i + 1 == $parts->count()) {
+            $out->append(' and ');
+        } else if ($i > 0) {
+            $out->append(', ');
+        }
+        $out->append($parts[$i]);
+    }
+    return $out;
+}
+
+/**
+ * The ecotest mark: a dot and the rings around it, the outer ring when `$outer` is set.
+ */
+private function mark(const string& $attrs, const string& $stroke, bool $outer) : string
+{
+    $out = "<svg {$attrs} viewBox=\"0 0 100 100\" fill=\"none\" aria-hidden=\"true\"><circle cx=\"35\" cy=\"50\" r=\"7.5\" fill=\"#008EFC\"></circle><path d=\"M 44 34.4 A 18 18 0 0 1 44 65.6\" stroke=\"#008EFC\" stroke-width=\"{$stroke}\" stroke-linecap=\"round\"></path><path d=\"M 50 24 A 30 30 0 0 1 50 76\" stroke=\"#008EFC\" stroke-width=\"{$stroke}\" stroke-linecap=\"round\" opacity=\"0.62\"></path>";
+    if ($outer) {
+        $out->append("<path d=\"M 56 13.6 A 42 42 0 0 1 56 86.4\" stroke=\"#008EFC\" stroke-width=\"{$stroke}\" stroke-linecap=\"round\" opacity=\"0.3\"></path>");
+    }
+    $out->append('</svg>');
+    return $out;
+}
+
+/**
+ * The theme, set before the page paints: a remembered pick, else the viewer's preference. Then,
+ * once the page is there, the theme button, the outcome filters and opening the source a link
+ * points at.
+ */
+private function script() : string
+{
+    return '<script>
 (function(){
 var app=document.getElementById("top");
 function theme(t){app.classList.remove("theme-dark","theme-light");app.classList.add("theme-"+t);}
@@ -549,14 +609,14 @@ reveal();
 });
 })();
 </script>';
-    }
+}
 
-    /**
-     * The page's styles, dark and light.
-     */
-    private static function style() : string
-    {
-        return '<style>
+/**
+ * The page's styles, dark and light.
+ */
+private function style() : string
+{
+    return '<style>
 body{margin:0;background:#06080c}
 .app{--brand:#008efc;--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;flex-direction:column}
 .app *,.app *::before,.app *::after{box-sizing:border-box}
@@ -738,5 +798,4 @@ body{margin:0;background:#06080c}
 .ftr-inner{padding:24px 16px}
 }
 </style>';
-    }
 }

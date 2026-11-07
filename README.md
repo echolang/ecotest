@@ -18,7 +18,7 @@ Checks and test events for `echoc test`. Failures name the test's line, and the 
 From your project directory:
 
 ```bash
-epm add echolang/ecotest --git https://github.com/echolang/ecotest --range ^0.1
+epm add echolang/ecotest --git https://github.com/echolang/ecotest --range ^0.2
 ```
 
 The require belongs on the test target. The library is standard library only, so any module can add it there. The CLI, JSON and HTTP libraries compile into the `ecotest` binary. Your tests stay on the standard library.
@@ -26,7 +26,7 @@ The require belongs on the test target. The library is standard library only, so
 ```echo
 #[target: test] {
     #[sources: "tests/**/*.eco"]
-    #[requires: "echolang/ecotest" { version: "^0.1", source: git "https://github.com/echolang/ecotest" }]
+    #[requires: "echolang/ecotest" { version: "^0.2", source: git "https://github.com/echolang/ecotest" }]
 }
 ```
 
@@ -77,7 +77,7 @@ expect($bound)->yes(says: 'the listener bound');
 
 ```echo
 expect('hello Ada')->is('hello Ada')->has('Ada')->lacks('Bob');
-expect('hello Ada')->startsWith('hello')->endsWith('Ada')->length(9);
+expect('hello Ada')->starts('hello')->ends('Ada')->length(9);
 expect('')->empty();
 ```
 
@@ -190,14 +190,15 @@ The failure names the smallest value, the first failing value, and `ECOTEST_SEED
 
 ## Fixtures
 
-`$dir = TempDir();` at the top of a test is the whole setup. The directory is gone when the value goes.
+`$dir = TempDir();` at the top of a test is the whole setup. The directory is gone when the value goes. `read` answers a `result` with the `std::io::ioerror`, so a missing file is `fails()` and its contents are `ok(...)`; a directory or file that cannot be made stops the test at your line.
 
 ```echo
 use ecotest::TempDir;
 
 $dir = TempDir();
 $dir->write('a.txt', 'hello');
-expect($dir->read('a.txt'))->some('hello');
+expect($dir->read('a.txt'))->ok('hello');
+expect($dir->read('missing.txt'))->fails();
 ```
 
 `Calls<T>` is a recorder a fake and the test share. Record inside the fake, check afterwards:
@@ -221,22 +222,25 @@ expect($calls)->times(2)->nth(0, 'ada')->with('bob');
 ecotest::eventually(() : bool => $server->ready());
 ```
 
-`ecotest::run` starts a program and captures both streams. `expect($ran)->succeeds()->stdout()->has('done')` reads as one sentence. A program that cannot start stops the test.
+`ecotest::run` starts a program and captures both streams. `expect($ran)->succeeds()->stdout()->has('done')` reads as one sentence. A program that cannot start stops the test. `$ran->code` is the exit code, or null when a signal ended the program.
 
 ```echo
 $ran = ecotest::run('echo', ['hello']);
 expect($ran)->succeeds()->stdout()->is("hello\n");
 expect($ran)->stderr()->empty();
+expect($ran->code)->some(0);
 ```
 
 `bench` times a closure, finds a batch that takes about a millisecond, then samples until the budget is spent. Median and p95 go on a `bench` event. `note` and `metric` are the same channel: the tool shows them under the test.
 
 ```echo
-int64 $sum = 0;
 ecotest::note('ran against the fixture set');
 ecotest::metric('rows', 12);
 ecotest::bench('add', function() : void {
-    $sum = $sum + 1;
+    int64 $sum = 0;
+    for (int64 $i = 0; $i < 100; $i++) {
+        $sum = $sum + $i;
+    }
 });
 ```
 
@@ -290,7 +294,7 @@ The tool starts each service, waits until it is ready, exports `ECOTEST_<NAME>_U
 `modules/http` is a second package in this git repo. Same tests talk to a deployed URL, a service the tool started, or an app dispatched in process.
 
 ```echo
-#[requires: "echolang/ecotest/modules/http" { version: "^0.1", source: git "https://github.com/echolang/ecotest" }]
+#[requires: "echolang/ecotest/modules/http" { version: "^0.2", source: git "https://github.com/echolang/ecotest" }]
 ```
 
 One `Api`, three constructors:
@@ -324,6 +328,8 @@ $api->bearer('t0k')->get('/whoami')->body('Bearer t0k');
 $api->get('/users/1')->snapshot(['$.items[*].at']);
 ```
 
+`post`, `put` and `patch` take the body by its encoding: `json:` text or a `json::Value`, `form:` fields (a `map<string, string>`, URL-encoded), or `body:` with `type:`. Each sends its own Content-Type.
+
 JSON paths are `$.items[0].name`, `$.items[*].id`, `$['odd key']`. The leading `$` is optional. `[*]` fans out over an array, so a path can name several values.
 
 A failed check shows the exchange: the request line, the status, the headers, the start of the body. A request that got no response at all fails the first check made on it, at the test's line.
@@ -344,6 +350,22 @@ $api->get('/users/1')->ok()->json('$.name', 'Ada');
 ```
 
 It depends on a nexus checkout.
+
+## Changes in 0.2.0
+
+0.2.0 breaks the 0.1 API in a few places. Each one trades a sentinel or a string for a type that says what happened.
+
+- `expect($text)->startsWith(...)` and `->endsWith(...)` are `->starts(...)` and `->ends(...)`.
+- `TempDir::read` answers `result<string, std::io::ioerror>` instead of `string?`: `->some(x)` becomes `->ok(x)`, `->none()` becomes `->fails()`.
+- `Ran::$code` is `int32?`, null when a signal ended the program. `Ran::$signalled` is gone.
+- `Failure->render()` and `Event->render()` are gone. Interpolate them: `"{$failure}"`.
+- A `TempDir` that cannot be made or written is a check failure at your line, not a crash.
+- `caught()` inside `soft()` leaves the outer scope's failures alone. Before, it took them.
+- HTTP: `post`, `put` and `patch` take one `Body`, so `put` and `patch` now accept every encoding `post` does. Call sites stay as they were.
+- HTTP: `Request` and `Response` carry `array<Header> $headers` instead of `headerNames` and `headerValues`.
+- HTTP: `Reply->response` is `result<Response, TransportError>`, and `Reply->error` is gone. `TransportError` is `curl(curl::Error)` or `refused(string)`; print it with `"{$e}"`.
+- HTTP: `JsonPath::steps/all/one/replace` are functions in `ecotest::http::jsonpath`.
+- Runner: `who <file:x>` exits 2. A report that cannot be written fails the run. `affected` says why git refused.
 
 ## This repo
 

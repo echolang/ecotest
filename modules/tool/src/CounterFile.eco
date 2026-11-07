@@ -4,23 +4,29 @@ namespace ecotest::cli;
  * One test's `.ecocov` file: a 160-byte header carrying the test id, then per module its name and
  * its `uint32` counts, all little endian.
  */
-public class CounterFile
+public struct CounterFile
 {
     public string $testId = '';
-    public array<string> $modules = [];
-    public array<array<uint32>> $counts = [];
 
     /**
-     * The counter file at `$path`, or null when it is missing or not a version 2 file.
+     * Each module's counts, by module name, in the order of its counter sites.
      */
-    public static function load(const string& $path) : CounterFile?
+    public map<string, array<uint32>> $counts = [];
+
+    /**
+     * The counter file at `$path`, or why it cannot be read: missing, not a version 2 file, or cut
+     * short.
+     */
+    public static function load(const string& $path) : result<CounterFile, CounterError>
     {
-        string $bytes = Doc::read($path);
+        $bytes = guard std::io::readfile($path) else ($e) {
+            return .error(.unreadable($path, $e));
+        };
         if ($bytes->size() < 160 || $bytes->sub(0, 6) != 'ECOCOV' || CounterFile::u32($bytes, 8) != 2) {
-            return null;
+            return .error(.foreign($path));
         }
 
-        CounterFile $file = CounterFile();
+        $file = CounterFile();
         uint32 $n = CounterFile::u32($bytes, 12);
 
         usize $end = 24;
@@ -32,7 +38,7 @@ public class CounterFile
         usize $at = 160;
         for (uint32 $m = 0; $m < $n; $m++) {
             if ($at + 8 > $bytes->size()) {
-                return null;
+                return .error(.truncated($path));
             }
 
             usize $nameLength = CounterFile::u32($bytes, $at) as usize;
@@ -41,36 +47,21 @@ public class CounterFile
 
             usize $padded = ($nameLength + 3) / 4 * 4;
             if ($at + $padded + $count * 4 > $bytes->size()) {
-                return null;
+                return .error(.truncated($path));
             }
 
-            $file->modules[] = $bytes->sub($at, $nameLength);
+            $name = $bytes->sub($at, $nameLength);
             $at = $at + $padded;
 
-            array<uint32> $values = arr::room<uint32>($count);
+            $values = arr::room<uint32>($count);
             for (usize $i = 0; $i < $count; $i++) {
                 $values[] = CounterFile::u32($bytes, $at);
                 $at = $at + 4;
             }
-            $file->counts[] = $values;
+            $file->counts->set($name, mv $values);
         }
 
-        return $file;
-    }
-
-    /**
-     * The counts of module `$name`, or an empty list.
-     */
-    public const function of(const string& $name) : array<uint32>
-    {
-        for (usize $i = 0; $i < $this->modules->count(); $i++) {
-            if ($this->modules[$i] == $name) {
-                return $this->counts[$i];
-            }
-        }
-
-        array<uint32> $none = [];
-        return $none;
+        return .ok(mv $file);
     }
 
     /**

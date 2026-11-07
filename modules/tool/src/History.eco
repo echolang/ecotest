@@ -1,146 +1,165 @@
-namespace ecotest::cli;
-
 /**
  * `ecobuild/ecotest/history.jsonl`: one line per run with its totals and every test's outcome and
  * duration, so trends need no old run directories.
  */
-public class History
+
+namespace ecotest::cli::history;
+
+use ecotest::cli::{doc, files, text};
+
+/**
+ * Appends `$run` to the history at `$path`.
+ */
+public function append(const string& $path, const string& $runDir, const Run& $run, Totals? $totals) : status<std::io::ioerror>
 {
-    /**
-     * Appends `$run` to the history at `$path`.
-     */
-    public static function append(const string& $path, const string& $runDir, const Run& $run, const array<Ratio>& $totals) : void
-    {
-        json::Value $line = json::object();
-        $line['run'] = json::str($runDir);
-        $line['ms'] = json::int($run->wallMs);
-        $line['pass'] = json::int($run->count(Outcome::pass) as int64);
-        $line['fail'] = json::int($run->broken() as int64);
-        $line['skip'] = json::int($run->count(Outcome::skip) as int64);
-        $line['flaky'] = json::int($run->count(Outcome::flaky) as int64);
-        if (!$totals->empty()) {
-            $line['lines'] = json::float($totals[0]->percent());
-            $line['branches'] = json::float($totals[1]->percent());
-        }
+    $line = json::object();
+    $line['run'] = json::str($runDir);
+    $counts = $run->counts();
+    $line['ms'] = json::int($run->wallMs);
+    $line['pass'] = json::int($counts->pass as int64);
+    $line['fail'] = json::int($counts->fail as int64);
+    $line['skip'] = json::int($counts->skip as int64);
+    $line['flaky'] = json::int($counts->flaky as int64);
+    coverage($line, $totals);
 
-        json::Value $tests = json::arr();
-        foreach ($run->tests as const &$test) {
-            json::Value $t = json::arr();
-            $t[] = json::str($test->id);
-            $t[] = json::str($test->outcome->word());
-            $t[] = json::int($test->ms());
-            $tests[] = $t;
-        }
-        $line['tests'] = $tests;
+    $tests = json::arr();
+    foreach ($run->tests as const &$test) {
+        $t = json::arr();
+        $t[] = json::str($test->id);
+        $t[] = json::str($test->outcome->value());
+        $t[] = json::int($test->ms());
+        $tests[] = mv $t;
+    }
+    $line['tests'] = mv $tests;
 
-        Files::appendLine($path, json::dump($line));
+    return files::appendLine($path, json::dump($line));
+}
+
+/**
+ * Sets the line and branch percentages of `$totals` on the history line `$line`, when the run
+ * measured coverage.
+ */
+private function coverage(json::Value& $line, Totals? $totals) : void
+{
+    $t = guard $totals else {
+        return;
+    };
+
+    $line['lines'] = json::float($t->lines->percent());
+    $line['branches'] = json::float($t->branches->percent());
+}
+
+/**
+ * The trend report: the last runs, tests whose outcome changed between runs, and tests that
+ * got markedly slower.
+ */
+public function render(const string& $path, usize $last) : string
+{
+    $runs = doc::lines(doc::read($path) ?? '');
+    if ($runs->empty()) {
+        return 'no history yet: run `ecotest` first\n';
     }
 
-    /**
-     * The trend report: the last runs, tests whose outcome changed between runs, and tests that
-     * got markedly slower.
-     */
-    public static function render(const string& $path, usize $last) : string
-    {
-        array<json::Value> $runs = Doc::lines(Doc::read($path));
-        if ($runs->empty()) {
-            return "no history yet: run `ecotest` first\n";
-        }
-
-        usize $from = 0;
-        if ($runs->count() > $last) {
-            $from = $runs->count() - $last;
-        }
-
-        string $out = "run                         pass  fail  skip flaky      ms  lines\n";
-        for (usize $i = $from; $i < $runs->count(); $i++) {
-            json::Value $r = $runs[$i];
-            string $name = Text::base(Doc::text($r, 'run'));
-
-            int64 $pass = Doc::number($r, 'pass');
-            int64 $fail = Doc::number($r, 'fail');
-            int64 $skip = Doc::number($r, 'skip');
-            int64 $flaky = Doc::number($r, 'flaky');
-            int64 $ms = Doc::number($r, 'ms');
-            string $lines = '';
-            float64 $p = Doc::decimal($r, 'lines', -1.0);
-            if ($p >= 0.0) {
-                $lines = "{$p:.1f}%";
-            }
-
-            $out->append("{$name:<26} {$pass:>5} {$fail:>5} {$skip:>5} {$flaky:>5} {$ms:>7}  {$lines}\n");
-        }
-
-        // per test: outcomes and durations over the window, oldest first
-        map<string, usize> $at = [];
-        array<string> $ids = [];
-        array<array<string>> $outcomes = [];
-        array<array<int64>> $durations = [];
-
-        for (usize $i = $from; $i < $runs->count(); $i++) {
-            foreach (Doc::list($runs[$i], 'tests') as const &$t) {
-                string $id = ($t->at(0) ?? json::nil())->asStr() ?? '';
-                string $outcome = ($t->at(1) ?? json::nil())->asStr() ?? '';
-                int64 $ms = ($t->at(2) ?? json::nil())->asInt() ?? 0;
-
-                if (!$at->has($id)) {
-                    $at->set($id, $ids->count());
-                    $ids[] = $id;
-                    array<string> $o = [];
-                    array<int64> $d = [];
-                    $outcomes[] = $o;
-                    $durations[] = $d;
-                }
-
-                usize $k = $at->get($id);
-                $outcomes[$k][] = $outcome;
-                $durations[$k][] = $ms;
-            }
-        }
-
-        string $flips = '';
-        string $slower = '';
-
-        for (usize $k = 0; $k < $ids->count(); $k++) {
-            bool $passed = false;
-            bool $broke = false;
-            foreach ($outcomes[$k] as const &$o) {
-                if ($o == 'pass') {
-                    $passed = true;
-                }
-                if ($o == 'fail' || $o == 'flaky' || $o == 'timeout' || $o == 'signal') {
-                    $broke = true;
-                }
-            }
-            if ($passed && $broke) {
-                string $seq = str::join($outcomes[$k], ' ');
-                $flips->append("  {$ids[$k]}: {$seq}\n");
-            }
-
-            usize $n = $durations[$k]->count();
-            if ($n >= 3) {
-                array<int64> $before = [];
-                for (usize $i = 0; $i + 1 < $n; $i++) {
-                    $before[] = $durations[$k][$i];
-                }
-                $before->sort();
-                int64 $median = $before[$before->count() / 2];
-                int64 $now = $durations[$k][$n - 1];
-                if ($now > 20 && $now > $median * 2) {
-                    $slower->append("  {$ids[$k]}: {$now} ms, was {$median} ms\n");
-                }
-            }
-        }
-
-        if (!$flips->empty()) {
-            $out->append("\nchanged outcome across runs (flaky?):\n");
-            $out->append($flips);
-        }
-        if (!$slower->empty()) {
-            $out->append("\ngot slower:\n");
-            $out->append($slower);
-        }
-
-        return $out;
+    usize $from = 0;
+    if ($runs->count() > $last) {
+        $from = $runs->count() - $last;
     }
+
+    $out = 'run                         pass  fail  skip flaky      ms  lines\n';
+    for (usize $i = $from; $i < $runs->count(); $i++) {
+        const json::Value& $r = $runs[$i];
+        $name = text::base(doc::text($r, 'run'));
+
+        int64 $pass = doc::number($r, 'pass');
+        int64 $fail = doc::number($r, 'fail');
+        int64 $skip = doc::number($r, 'skip');
+        int64 $flaky = doc::number($r, 'flaky');
+        int64 $ms = doc::number($r, 'ms');
+        $lines = percent(doc::decimal($r, 'lines'));
+
+        $out->append("{$name:<26} {$pass:>5} {$fail:>5} {$skip:>5} {$flaky:>5} {$ms:>7}  {$lines}\n");
+    }
+
+    // per test: outcomes and durations over the window, oldest first, tests in first-seen order
+    ordered_map<string, Trend> $trends = [];
+
+    for (usize $i = $from; $i < $runs->count(); $i++) {
+        foreach (doc::list($runs[$i], 'tests') as const &$t) {
+            $id = ($t->at(0) ?? json::nil())->asStr() ?? '';
+            $outcome = ($t->at(1) ?? json::nil())->asStr() ?? '';
+            int64 $ms = ($t->at(2) ?? json::nil())->asInt() ?? 0;
+
+            if (!$trends->has($id)) {
+                $trends->set($id, Trend());
+            }
+            Trend& $trend = $trends->at($id);
+            $trend->outcomes[] = mv $outcome;
+            $trend->durations[] = $ms;
+        }
+    }
+
+    $flips = '';
+    $slower = '';
+
+    foreach ($trends as $id => const &$trend) {
+        $passed = false;
+        $broke = false;
+        foreach ($trend->outcomes as const &$o) {
+            if ($o == 'pass') {
+                $passed = true;
+            }
+            if ($o == 'fail' || $o == 'flaky' || $o == 'timeout' || $o == 'signal') {
+                $broke = true;
+            }
+        }
+        if ($passed && $broke) {
+            $seq = str::join($trend->outcomes, ' ');
+            $flips->append("  {$id}: {$seq}\n");
+        }
+
+        usize $n = $trend->durations->count();
+        if ($n >= 3) {
+            $before = arr::room<int64>($n - 1);
+            for (usize $i = 0; $i + 1 < $n; $i++) {
+                $before[] = $trend->durations[$i];
+            }
+            $before->sort();
+            int64 $median = $before[$before->count() / 2];
+            int64 $now = $trend->durations[$n - 1];
+            if ($now > 20 && $now > $median * 2) {
+                $slower->append("  {$id}: {$now} ms, was {$median} ms\n");
+            }
+        }
+    }
+
+    if (!$flips->empty()) {
+        $out->append('\nchanged outcome across runs (flaky?):\n');
+        $out->append($flips);
+    }
+    if (!$slower->empty()) {
+        $out->append('\ngot slower:\n');
+        $out->append($slower);
+    }
+
+    return $out;
+}
+
+/**
+ * One test across the runs of the window: how it ended and how long it took in each, oldest first.
+ */
+private struct Trend
+{
+    public array<string> $outcomes = [];
+    public array<int64> $durations = [];
+}
+
+/**
+ * `$p` with one decimal and a percent sign, or empty for a run without coverage.
+ */
+private function percent(float64? $p) : string
+{
+    $known = guard $p else {
+        return '';
+    };
+    return "{$known:.1f}%";
 }

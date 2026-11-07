@@ -27,12 +27,12 @@ public enum Style
     public static function of(const string& $word) : Style
     {
         if ($word == 'pretty') {
-            return Style::pretty;
+            return .pretty;
         }
         if ($word == 'simple') {
-            return Style::simple;
+            return .simple;
         }
-        return Style::auto;
+        return .auto;
     }
 
     /**

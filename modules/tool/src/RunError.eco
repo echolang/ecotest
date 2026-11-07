@@ -1,0 +1,30 @@
+namespace ecotest::cli;
+
+/**
+ * Why a pass of `echoc test` could not be run.
+ */
+public enum RunError
+{
+    /**
+     * The compiler `$echoc` could not be started.
+     */
+    case cannotRun(string $echoc, std::io::ioerror $cause);
+
+    /**
+     * The pass directory, or the log echoc's output goes to, could not be created at `$path`.
+     */
+    case cannotWrite(string $path, std::io::ioerror $cause);
+}
+
+namespace str;
+
+/**
+ * The reason in words, as `ecotest` prints it after `ecotest: `.
+ */
+public function from(const ecotest::cli::RunError& $e) : string
+{
+    return match ($e) {
+        .cannotRun($echoc, $cause) => "cannot run {$echoc}: {$cause}",
+        .cannotWrite($path, $cause) => "cannot write {$path}: {$cause}",
+    };
+}

@@ -4,18 +4,14 @@ namespace ecotest::cli;
  * Coverage of one source file: hits per line, per branch edge and per function, merged over every
  * test of the run.
  */
-public class FileCoverage
+public struct FileCoverage
 {
-    public string $module;
-    public string $file;
-    public string $path;
+    public const string $module;
+    public const string $file;
+    public const string $path;
     public map<int64, uint64> $lines = [];
-    public array<int64> $branchLines = [];
-    public array<string> $branchEdges = [];
-    public array<uint64> $branchHits = [];
-    public array<string> $functionNames = [];
-    public array<int64> $functionLines = [];
-    public array<uint64> $functionHits = [];
+    public array<BranchSite> $branches = [];
+    public array<FunctionSite> $functions = [];
 
     public constructor(const string& $module, const string& $file, const string& $path)
     {
@@ -29,7 +25,7 @@ public class FileCoverage
      */
     public const function lineTotals() : Ratio
     {
-        Ratio $r = Ratio(0, 0);
+        $r = Ratio();
         foreach ($this->lines as $line => const &$hits) {
             $r->total++;
             if ($hits > 0) {
@@ -44,10 +40,10 @@ public class FileCoverage
      */
     public const function branchTotals() : Ratio
     {
-        Ratio $r = Ratio(0, 0);
-        foreach ($this->branchHits as const &$hits) {
+        $r = Ratio();
+        foreach ($this->branches as const &$branch) {
             $r->total++;
-            if ($hits > 0) {
+            if ($branch->hits > 0) {
                 $r->hit++;
             }
         }
@@ -59,10 +55,10 @@ public class FileCoverage
      */
     public const function functionTotals() : Ratio
     {
-        Ratio $r = Ratio(0, 0);
-        foreach ($this->functionHits as const &$hits) {
+        $r = Ratio();
+        foreach ($this->functions as const &$function) {
             $r->total++;
-            if ($hits > 0) {
+            if ($function->hits > 0) {
                 $r->hit++;
             }
         }
@@ -79,7 +75,7 @@ public class FileCoverage
 
         array<FileCoverage> $out = [];
         foreach ($byLines as const &$file) {
-            Ratio $r = $file->lineTotals();
+            $r = $file->lineTotals();
             if ($r->hit < $r->total && $out->count() < $n) {
                 $out[] = $file;
             }
@@ -107,7 +103,7 @@ public class FileCoverage
      */
     public const function codeLines() : array<int64>
     {
-        array<int64> $out = $this->lines->keys();
+        $out = $this->lines->keys();
         $out->sort();
         return $out;
     }
@@ -117,8 +113,8 @@ public class FileCoverage
      */
     public const function missedRanges() : string
     {
-        array<int64> $missed = $this->missedLines();
-        string $out = '';
+        $missed = $this->missedLines();
+        $out = '';
         usize $i = 0;
 
         while ($i < $missed->count()) {

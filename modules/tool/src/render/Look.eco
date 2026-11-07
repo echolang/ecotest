@@ -1,21 +1,23 @@
 namespace ecotest::cli;
 
+use ecotest::cli::text;
+
 /**
  * The glyphs and colours of the pretty output, settled once for a stream: unicode marks and SGR
  * where the terminal takes them, ASCII and bare text where it does not.
  */
 public struct Look
 {
-    public command::TerminalCapabilities $caps;
-    public string $pass;
-    public string $fail;
-    public string $skip;
-    public string $flaky;
-    public string $sep;
-    public string $rail;
-    public string $dot;
-    public string $fill;
-    public string $rest;
+    public const command::TerminalCapabilities $caps;
+    public const string $pass;
+    public const string $fail;
+    public const string $skip;
+    public const string $flaky;
+    public const string $sep;
+    public const string $rail;
+    public const string $dot;
+    public const string $fill;
+    public const string $rest;
 
     public constructor(command::TerminalCapabilities $caps)
     {
@@ -64,7 +66,7 @@ public struct Look
      */
     public const function many(int64 $n, const string& $one) : string
     {
-        return Text::plural($n as usize, $one, "{$one}s");
+        return text::plural($n as usize, $one, "{$one}s");
     }
 
     /**
@@ -111,10 +113,10 @@ public struct Look
      */
     public const function headline(Outcome $outcome, const string& $title) : string
     {
-        string $mark = $this->mark($outcome);
-        string $out = "{$mark} {$title}";
+        $mark = $this->mark($outcome);
+        $out = "{$mark} {$title}";
         if ($outcome != Outcome::fail) {
-            string $word = $this->paint($outcome->word(), $this->tone($outcome));
+            $word = $this->paint($outcome->value(), $this->tone($outcome));
             $out->append("  {$word}");
         }
         return $out;
@@ -126,7 +128,7 @@ public struct Look
      */
     public const function title(const TestRecord& $test) : string
     {
-        TestTitle $t = $test->title(false);
+        $t = $test->title(false);
         if ($t->suite->empty()) {
             return $t->label;
         }
@@ -138,7 +140,7 @@ public struct Look
      */
     public const function meter(float64 $percent, int32 $cells) : string
     {
-        float64 $exact = $percent * ($cells as float64) / 100.0 + 0.5;
+        $exact = $percent * ($cells as float64) / 100.0 + 0.5;
         int32 $filled = $exact as int32;
         if ($filled > $cells) {
             $filled = $cells;
@@ -151,7 +153,7 @@ public struct Look
             $tone = command::SGR_WARNING;
         }
 
-        string $done = $this->paint(command::repeatCell($this->fill, $filled), $tone);
+        $done = $this->paint(command::repeatCell($this->fill, $filled), $tone);
         $done->append($this->mute(command::repeatCell($this->rest, $cells - $filled)));
         return $done;
     }

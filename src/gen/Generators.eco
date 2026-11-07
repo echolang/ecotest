@@ -1,6 +1,7 @@
 namespace ecotest::gen;
 
-use ecotest::{Gen, Pair, Random, Show};
+use ecotest::{Gen, Pair, Random};
+use ecotest::show;
 
 /**
  * Integers in `[$low, $high]`. A failing one shrinks towards 0, or towards the end of the range
@@ -143,7 +144,7 @@ public function text(alphabet: string $alphabet = 'abcdefghijklmnopqrstuvwxyz012
             for (usize $i = 0; $i < $v->size() && $i < 16; $i++) {
                 string $dropped = $v->sub(0, $i);
                 $dropped->append($v->sub($i + 1, $v->size() - $i - 1));
-                $out[] = $dropped;
+                $out[] = mv $dropped;
             }
 
             if (!$alphabet->empty()) {
@@ -153,14 +154,14 @@ public function text(alphabet: string $alphabet = 'abcdefghijklmnopqrstuvwxyz012
                         string $plain = $v->sub(0, $i);
                         $plain->push($simplest);
                         $plain->append($v->sub($i + 1, $v->size() - $i - 1));
-                        $out[] = $plain;
+                        $out[] = mv $plain;
                     }
                 }
             }
 
             return $out;
         },
-        (const string& $v) => Show::text($v)
+        (const string& $v) => show::text($v)
     );
 }
 
@@ -172,8 +173,8 @@ public function lists<T>(Gen<T> $item, max: usize $max = 16) : Gen<array<T>>
 {
     return Gen<array<T>>(
         function(Random& $r) : array<T> {
-            array<T> $out = [];
             usize $n = $r->below(($max + 1) as uint64) as usize;
+            $out = arr::room<T>($n);
 
             for (usize $i = 0; $i < $n; $i++) {
                 $out[] = $item->make($r);
@@ -200,8 +201,8 @@ public function lists<T>(Gen<T> $item, max: usize $max = 16) : Gen<array<T>>
                         $back[] = $v[$i];
                     }
                 }
-                $out[] = $front;
-                $out[] = $back;
+                $out[] = mv $front;
+                $out[] = mv $back;
             }
 
             for (usize $skip = 0; $skip < $n && $skip < 16; $skip++) {
@@ -211,15 +212,15 @@ public function lists<T>(Gen<T> $item, max: usize $max = 16) : Gen<array<T>>
                         $fewer[] = $v[$i];
                     }
                 }
-                $out[] = $fewer;
+                $out[] = mv $fewer;
             }
 
             for (usize $i = 0; $i < $n && $i < 8; $i++) {
-                array<T> $smaller = $item->shrink($v[$i]);
+                $smaller = $item->shrink($v[$i]);
                 if (!$smaller->empty()) {
                     array<T> $changed = $v;
                     $changed[$i] = $smaller[0];
-                    $out[] = $changed;
+                    $out[] = mv $changed;
                 }
             }
 
@@ -245,7 +246,10 @@ public function lists<T>(Gen<T> $item, max: usize $max = 16) : Gen<array<T>>
  */
 public function pick<T>(array<T> $items) : Gen<T>
 {
-    assert(!$items->empty(), 'gen::pick needs at least one item');
+    // a release build drops asserts, and an empty pick would index past the end
+    if ($items->empty()) {
+        die('gen::pick needs at least one item');
+    }
 
     return Gen<T>(
         (Random& $r) => $items[$r->below($items->count() as uint64) as usize],
@@ -284,8 +288,8 @@ public function pairs<A, B>(Gen<A> $first, Gen<B> $second) : Gen<Pair<A, B>>
             return $out;
         },
         function(const Pair<A, B>& $v) : string {
-            string $a = $first->show($v->first);
-            string $b = $second->show($v->second);
+            $a = $first->show($v->first);
+            $b = $second->show($v->second);
             return "({$a}, {$b})";
         }
     );

@@ -4,7 +4,7 @@
  */
 
 use ecotest::{expect, TempDir};
-use ecotest::cli::{Tail, LiveView, Tool, Style, Doc, Run, Gates, Verdict, JsonReport, FileCoverage, Ratio};
+use ecotest::cli::{Tail, LiveView, Tool, Runner, Invocation, doc, files, Run, Gates, Verdict, runjson};
 
 internal function terminal() : command::CLIContext
 {
@@ -18,10 +18,10 @@ internal function pipe() : command::CLIContext
 
 internal function rows(const command::CLIContext& $ctx) : string
 {
-    string $out = '';
+    $out = '';
     foreach ($ctx->page->rows as const &$row) {
         $out->append($row);
-        $out->append("\n");
+        $out->append('\n');
     }
     return $out;
 }
@@ -29,22 +29,31 @@ internal function rows(const command::CLIContext& $ctx) : string
 internal function passDir(const string& $events) : TempDir
 {
     $dir = TempDir();
-    bool $made = std::io::mkdir($dir->file('events'))->or(false);
+    guard std::io::mkdir($dir->file('events'));
     $dir->write('events/m_a.eco__adds.jsonl', $events);
     return $dir;
 }
 
+/**
+ * One of echoc's report rows, parsed from `$text`.
+ */
+internal function parsed(const string& $text) : json::Value
+{
+    $row = guard json::parse($text);
+    return $row;
+}
+
 internal function everything(const command::CLIContext& $ctx) : string
 {
-    string $out = rows($ctx);
+    $out = rows($ctx);
     $out->append($ctx->vt);
     return $out;
 }
 
 internal function pretty(Sample $sample, command::CLIContext $live) : Tool
 {
-    Tool $tool = $sample->tool();
-    $tool->style = Style::pretty;
+    $tool = $sample->tool();
+    $tool->style = .pretty;
     $tool->live = $live;
     $tool->page = pipe();
     return $tool;
@@ -53,16 +62,16 @@ internal function pretty(Sample $sample, command::CLIContext $live) : Tool
 test a_tail_answers_whole_lines_as_they_are_written
 {
     $dir = TempDir();
-    Tail $tail = Tail($dir->file('grows.log'));
+    $tail = Tail($dir->file('grows.log'));
 
     expect($tail->take())->is('');
 
-    $dir->write('grows.log', "one\ntw");
-    expect($tail->take())->is("one\n");
+    $dir->write('grows.log', 'one\ntw');
+    expect($tail->take())->is('one\n');
     expect($tail->take())->is('');
 
-    $dir->write('grows.log', "one\ntwo\nthree");
-    expect($tail->take())->is("two\n");
+    $dir->write('grows.log', 'one\ntwo\nthree');
+    expect($tail->take())->is('two\n');
 
     // once the writer is gone, a last line without its newline is still read
     expect($tail->rest())->is('three');
@@ -72,33 +81,40 @@ test a_tail_answers_whole_lines_as_they_are_written
 test a_view_ignores_rows_before_it_began
 {
     $ctx = pipe();
-    LiveView $view = LiveView($ctx);
+    $view = LiveView($ctx);
 
-    $view->output("early\n");
-    $view->row(expect(json::parse('{"type":"run","selected":1}'))->ok());
-    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::t","status":"pass"}'))->ok());
-    $view->row(expect(json::parse('{"type":"end"}'))->ok());
-    $view->row(expect(json::parse('{"type":"other"}'))->ok());
+    $view->output('early\n');
+    $view->row(parsed('{"type":"run","selected":1}'));
+    $view->row(parsed('{"type":"test","id":"m/a.eco::t","status":"pass"}'));
+    $view->row(parsed('{"type":"end"}'));
+    $view->row(parsed('{"type":"other"}'));
     $view->end('nowhere');
 
     expect($ctx->page->rows)->empty();
+
+    // a compile that stopped without a log still fails the spinner
+    $quiet = pipe();
+    $stopped = LiveView($quiet);
+    $stopped->begin(1, 1, 'nowhere');
+    $stopped->end('nowhere');
+    expect(rows($quiet))->has('echoc stopped before any test ran');
 }
 
 test a_view_shows_the_compile_then_the_tests_on_a_pipe
 {
     $ctx = pipe();
-    LiveView $view = LiveView($ctx);
+    $view = LiveView($ctx);
 
-    $dir = passDir("{\"type\":\"checks\",\"count\":3}\n");
+    $dir = passDir('{"type":"checks","count":3}\n');
     $view->begin(2, 3, $dir->path);
-    $view->output("compiling sample\n");
-    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::early","status":"pass"}'))->ok());
-    $view->row(expect(json::parse('{"type":"run","selected":3}'))->ok());
-    $view->output("echoc listing\n");
-    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'))->ok());
-    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::stops","module":"m","status":"fail","failure":{"headline":"fatal error","file":"tests/a.eco","line":9,"message":"expected 2, got 1\\n  in row 3"}}'))->ok());
-    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::hangs","module":"m","status":"timeout"}'))->ok());
-    $view->row(expect(json::parse('{"type":"end"}'))->ok());
+    $view->output('compiling sample\n');
+    $view->row(parsed('{"type":"test","id":"m/a.eco::early","status":"pass"}'));
+    $view->row(parsed('{"type":"run","selected":3}'));
+    $view->output('echoc listing\n');
+    $view->row(parsed('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'));
+    $view->row(parsed('{"type":"test","id":"m/a.eco::stops","module":"m","status":"fail","failure":{"headline":"fatal error","file":"tests/a.eco","line":9,"message":"expected 2, got 1\\n  in row 3"}}'));
+    $view->row(parsed('{"type":"test","id":"m/a.eco::hangs","module":"m","status":"timeout"}'));
+    $view->row(parsed('{"type":"end"}'));
 
     expect(rows($ctx))
         ->has('compiling sample')
@@ -115,21 +131,21 @@ test a_view_shows_the_compile_then_the_tests_on_a_pipe
 test a_green_pass_settles_the_bar_and_a_cut_one_fails_it
 {
     $ctx = terminal();
-    LiveView $view = LiveView($ctx);
+    $view = LiveView($ctx);
 
-    $dir = passDir("{\"type\":\"checks\",\"count\":1}\n");
+    $dir = passDir('{"type":"checks","count":1}\n');
     $view->begin(1, 1, $dir->path);
-    $view->row(expect(json::parse('{"type":"run","selected":1}'))->ok());
-    $view->row(expect(json::parse('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'))->ok());
-    $view->row(expect(json::parse('{"type":"end"}'))->ok());
+    $view->row(parsed('{"type":"run","selected":1}'));
+    $view->row(parsed('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'));
+    $view->row(parsed('{"type":"end"}'));
     $view->end('nowhere');
     expect($ctx->vt)->has('1 passed · 1 assertion in');
 
     $cut = terminal();
-    LiveView $stopped = LiveView($cut);
+    $stopped = LiveView($cut);
     $stopped->begin(1, 1, 'nowhere');
-    $stopped->row(expect(json::parse('{"type":"run","selected":2}'))->ok());
-    $stopped->row(expect(json::parse('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'))->ok());
+    $stopped->row(parsed('{"type":"run","selected":2}'));
+    $stopped->row(parsed('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'));
     $stopped->end('nowhere');
     expect(rows($cut))->has('1 passed in')->lacks('assertion');
 }
@@ -137,9 +153,9 @@ test a_green_pass_settles_the_bar_and_a_cut_one_fails_it
 test a_pretty_run_draws_the_tests_live_and_keeps_echocs_log
 {
     $sample = Sample();
-    command::CLIContext $live = terminal();
-    Tool $tool = pretty($sample, $live);
-    $tool->forwarded = ['--define', 'BROKEN'];
+    $live = terminal();
+    $tool = pretty($sample, $live);
+    $tool->echoc->forwarded = ['--define', 'BROKEN'];
 
     expect($tool->run())->is(1);
 
@@ -150,9 +166,9 @@ test a_pretty_run_draws_the_tests_live_and_keeps_echocs_log
 test a_pretty_run_on_a_pipe_writes_rows_and_names_each_pass
 {
     $sample = Sample();
-    command::CLIContext $live = pipe();
-    Tool $tool = pretty($sample, $live);
-    $tool->repeat = 2;
+    $live = pipe();
+    $tool = pretty($sample, $live);
+    $tool->echoc->repeat = 2;
 
     expect($tool->run())->is(0);
     expect(rows($live))->has('pass 1 of 2')->has('pass 2 of 2')->has('math.eco > halves');
@@ -161,22 +177,20 @@ test a_pretty_run_on_a_pipe_writes_rows_and_names_each_pass
 test a_watched_run_reports_what_reading_it_back_would
 {
     $sample = Sample();
-    Tool $tool = pretty($sample, pipe());
-    $tool->repeat = 2;
-    $tool->forwarded = ['--define', 'BROKEN'];
+    $tool = pretty($sample, pipe());
+    $tool->echoc->repeat = 2;
+    $tool->echoc->forwarded = ['--define', 'BROKEN'];
     expect($tool->run())->is(1);
 
-    Run $back = Run::load($sample->latest());
-    array<FileCoverage> $none = [];
-    array<Ratio> $noTotals = [];
-    json::Value $read = expect(json::parse(JsonReport::render($back, $none, $noTotals, Verdict::of($back, Gates(), []))))->ok();
-    json::Value $watched = $sample->runJson();
+    $back = Run(readFrom: $sample->latest());
+    $read = parsed(runjson::render($back, [], null, Verdict(on: $back, gates: Gates(), failed: [])));
+    $watched = $sample->runJson();
 
-    expect(Doc::number($watched, 'passes'))->is(2);
-    expect(Doc::number($watched, 'ms'))->is(Doc::number($read, 'ms'));
-    expect(json::pretty(Doc::object($watched, 'counts')))->is(json::pretty(Doc::object($read, 'counts')));
-    array<json::Value> $tests = Doc::list($watched, 'tests');
-    array<json::Value> $readTests = Doc::list($read, 'tests');
+    expect(doc::number($watched, 'passes'))->is(2);
+    expect(doc::number($watched, 'ms'))->is(doc::number($read, 'ms'));
+    expect(json::pretty(doc::object($watched, 'counts')))->is(json::pretty(doc::object($read, 'counts')));
+    $tests = doc::list($watched, 'tests');
+    $readTests = doc::list($read, 'tests');
     expect($tests->empty())->no();
     expect($tests->count())->is($readTests->count());
     for (usize $i = 0; $i < $tests->count(); $i++) {
@@ -192,7 +206,7 @@ test a_compile_error_fails_the_spinner_and_prints_echocs_log
     return $a + nope;
 }
 ');
-    command::CLIContext $live = pipe();
+    $live = pipe();
 
     expect(pretty($sample, $live)->run())->is(1);
     expect(rows($live))->has('echoc stopped before any test ran')->has('nope');
@@ -201,20 +215,34 @@ test a_compile_error_fails_the_spinner_and_prints_echocs_log
 test a_run_directory_that_cannot_be_written_fails_a_pretty_run
 {
     $sample = Sample();
-    string $root = $sample->dir->file('.ecotest');
-    bool $made = std::io::mkdir($root)->or(false);
+    $root = $sample->dir->file('.ecotest');
+    guard std::io::mkdir($root);
     expect(ecotest::run('chmod', ['555', $root]))->succeeds();
 
     int32 $code = pretty($sample, pipe())->run();
     expect(ecotest::run('chmod', ['755', $root]))->succeeds();
     expect($code)->is(1);
+
+    // a pass directory that is there but closed keeps echoc's log out
+    $dir = TempDir();
+    $pass = $dir->file('run/pass-1');
+    guard files::mkdirs(std::env::join($pass, 'events'));
+    expect(ecotest::run('chmod', ['555', $pass]))->succeeds();
+    $echoc = Invocation();
+    $echoc->project = $dir->path;
+    $runner = Runner();
+    $runner->view = LiveView(pipe());
+    $ran = $runner->run($echoc, $dir->file('run'));
+    expect(ecotest::run('chmod', ['755', $pass]))->succeeds();
+    $e = expect($ran)->fails();
+    expect("{$e}")->is("cannot write {$pass}/echoc.log: Permission denied");
 }
 
 test a_compiler_that_cannot_start_fails_a_pretty_run
 {
     $sample = Sample();
-    Tool $tool = pretty($sample, pipe());
-    $tool->echoc = '/nonexistent/echoc';
+    $tool = pretty($sample, pipe());
+    $tool->echoc->program = '/nonexistent/echoc';
 
     expect($tool->run())->is(1);
 }
@@ -222,9 +250,9 @@ test a_compiler_that_cannot_start_fails_a_pretty_run
 test auto_watches_a_terminal_and_leaves_a_pipe_to_echoc
 {
     $sample = Sample();
-    command::CLIContext $live = pipe();
-    Tool $tool = $sample->tool();
-    $tool->style = Style::auto;
+    $live = pipe();
+    $tool = $sample->tool();
+    $tool->style = .auto;
     $tool->live = $live;
     $tool->page = terminal();
 

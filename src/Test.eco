@@ -20,15 +20,22 @@ public function context(const string& $text) : Context
 
 /**
  * Runs `$body` and returns the checks it failed instead of failing the test, which is how a library
- * built on ecotest tests its own checks: `$failed = ecotest::caught(() => expect(1)->is(2));`. A
- * check that stops the test still stops it.
+ * built on ecotest tests its own checks: `$failed = ecotest::caught(function() : void { expect(1)->is(2); });`. A
+ * check that stops the test still stops it. Failures an enclosing `soft()` or `caught()` already
+ * holds stay with that scope.
  */
 public function caught(function<void()> $body) : array<Failure>
 {
     Session::enterSoft();
+    usize $before = Session::$held->count();
     $body();
-    array<Failure> $out = Session::$held;
-    Session::$held = [];
+
+    $out = arr::room<Failure>(Session::$held->count() - $before);
+    for (usize $i = $before; $i < Session::$held->count(); $i++) {
+        $out[] = Session::$held[$i];
+    }
+
+    Session::$held->truncate($before);
     Session::leaveSoft();
     return $out;
 }
@@ -56,7 +63,7 @@ public function metric(const string& $name, int64 $value) : void
 #[caller]
 public function skip(const string& $reason) : void
 {
-    std::src::location $at = std::src::caller();
+    $at = std::src::caller();
 
     Session::start();
     Session::$reported = true;
@@ -73,7 +80,7 @@ public function skip(const string& $reason) : void
 #[caller]
 public function needs(env: const string& $name) : string
 {
-    string $value = string(std::env::var($name, ''));
+    $value = string(std::env::var($name, ''));
 
     if ($value->empty()) {
         skip("{$name} is not set");

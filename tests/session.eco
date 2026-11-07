@@ -3,7 +3,7 @@
  * set, the seed from the environment, and the crash hook for a stop no check reported.
  */
 
-use ecotest::{expect, Session, Seed, Tally};
+use ecotest::{expect, Session, seed, Tally};
 
 test without_an_event_file_nothing_is_written
 {
@@ -33,7 +33,7 @@ test a_session_outside_the_tool_writes_nowhere
 
 test a_tally_without_a_path_writes_nothing
 {
-    Tally $t = Tally();
+    $t = Tally();
     $t->checks = 3;
     $t->flush();
 
@@ -50,13 +50,13 @@ test a_set_variable_is_handed_back
 test the_seed_comes_from_the_environment
 {
     setVar('ECOTEST_SEED', '42');
-    expect(Seed::pick())->is(42);
+    expect(seed())->is(42);
 
     setVar('ECOTEST_SEED', 'not a number');
-    expect(Seed::pick())->isNot(42);
+    expect(seed())->isNot(42);
 
     unsetVar('ECOTEST_SEED');
-    expect(Seed::pick())->above(0);
+    expect(seed())->above(0);
 }
 
 #[tests: expects death]

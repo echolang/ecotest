@@ -3,7 +3,7 @@ use ecotest::expect;
 test text_checks_pass
 {
     expect('abc')->is('abc')->isNot('abd')->has('b')->lacks('z');
-    expect('abc')->startsWith('ab')->endsWith('bc')->length(3);
+    expect('abc')->starts('ab')->ends('bc')->length(3);
     expect('')->empty();
 }
 
@@ -34,13 +34,13 @@ test text_lacks_fails
 #[tests: expects death]
 test text_starts_with_fails
 {
-    expect('abc')->startsWith('b');
+    expect('abc')->starts('b');
 }
 
 #[tests: expects death]
 test text_ends_with_fails
 {
-    expect('abc')->endsWith('a');
+    expect('abc')->ends('a');
 }
 
 #[tests: expects death]

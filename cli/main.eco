@@ -1,4 +1,4 @@
 // ecotest: run echoc's tests and turn what they report into metrics. The commands live in
-// ecotest-tool (modules/tool), where its tests reach them.
+// ecotest-tool (modules/tool), where its tests reach them
 
-std::env::exit(ecotest::cli::Cli::main(std::env::argv()));
+std::env::exit(ecotest::cli::main(std::env::argv()));

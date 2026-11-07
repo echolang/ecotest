@@ -7,6 +7,9 @@ namespace ecotest;
  */
 public class Calls<T>
 {
+    /**
+     * The argument of every recorded call, in the order they came.
+     */
     public array<T> $seen = [];
 
     /**
@@ -14,7 +17,7 @@ public class Calls<T>
      */
     public function record(T $value) : void
     {
-        $this->seen[] = $value;
+        $this->seen[] = mv $value;
     }
 
     /**

@@ -8,13 +8,13 @@ namespace ecotest;
 public function bench(
     const string& $label,
     function<void()> $work,
-    budget: std::time::duration $budget = std::time::duration::millis(200)
+    budget: std::time::duration $budget = .millis(200)
 ) : void {
     $work();
 
     uint64 $batch = 1;
     while ($batch < Batch::$ceiling) {
-        std::time::instant $probe = std::time::instant::now();
+        $probe = std::time::instant::now();
         for (uint64 $i = 0; $i < $batch; $i++) {
             $work();
         }
@@ -26,11 +26,11 @@ public function bench(
         $batch = $batch * 2;
     }
 
-    array<int64> $samples = [];
-    std::time::instant $started = std::time::instant::now();
+    $samples = arr::room<int64>(1000);
+    $started = std::time::instant::now();
 
     while ($samples->count() < 5 || ($started->elapsed()->as_nanos() < $budget->as_nanos() && $samples->count() < 1000)) {
-        std::time::instant $at = std::time::instant::now();
+        $at = std::time::instant::now();
         for (uint64 $i = 0; $i < $batch; $i++) {
             $work();
         }

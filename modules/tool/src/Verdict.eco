@@ -1,5 +1,7 @@
 namespace ecotest::cli;
 
+use ecotest::cli::doc;
+
 /**
  * What a run comes to once the gates have judged it: the gates, every one that failed as a line,
  * and whether the run is green with all of them held. Reports render this rather than judging the
@@ -14,27 +16,33 @@ public struct Verdict
     /**
      * The verdict on `$run`, which fell short of `$failed` of `$gates`.
      */
-    public static function of(const Run& $run, const Gates& $gates, const array<string>& $failed) : Verdict
+    public constructor(on: const Run& $run, gates: const Gates& $gates, failed: const array<string>& $failed)
     {
-        return Verdict($gates, $failed, $run->green() && $failed->empty());
+        $this->gates = $gates;
+        $this->failed = $failed;
+        $this->green = $run->green() && $failed->empty();
     }
 
     /**
      * The verdict `$run` got when it finished in `$dir`, as its `run.json` keeps it, with `$gates`
      * marking the coverage. A run that never wrote one is judged on its tests alone.
      */
-    public static function stored(const string& $dir, const Run& $run, const Gates& $gates) : Verdict
+    public constructor(storedIn: const string& $dir, run: const Run& $run, gates: const Gates& $gates)
     {
-        json::Value $doc = guard json::parse(Doc::read(std::env::join($dir, 'run.json'))) else {
-            return Verdict::of($run, $gates, []);
+        $this->gates = $gates;
+        $this->failed = [];
+        $this->green = $run->green();
+
+        $text = guard doc::read(std::env::join($dir, 'run.json')) else {
+            return;
+        };
+        $doc = guard json::parse($text) else {
+            return;
         };
 
-        array<string> $failed = [];
-        foreach (Doc::list($doc, 'failedGates') as const &$gate) {
-            $failed[] = $gate->asStr() ?? '';
+        foreach (doc::list($doc, 'failedGates') as const &$gate) {
+            $this->failed[] = $gate->asStr() ?? '';
         }
-
-        bool $green = Doc::object($doc, 'green')->asBool() ?? ($run->green() && $failed->empty());
-        return Verdict($gates, $failed, $green);
+        $this->green = doc::object($doc, 'green')->asBool() ?? ($run->green() && $this->failed->empty());
     }
 }

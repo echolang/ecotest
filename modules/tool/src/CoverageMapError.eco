@@ -1,0 +1,30 @@
+namespace ecotest::cli;
+
+/**
+ * Why echoc's `coverage/map.json` could not be read.
+ */
+public enum CoverageMapError
+{
+    /**
+     * The map at `$path` is missing or cannot be read. A pass run without coverage has none.
+     */
+    case unreadable(string $path, std::io::ioerror $cause);
+
+    /**
+     * The map at `$path` is not JSON.
+     */
+    case malformed(string $path, json::Error $cause);
+}
+
+namespace str;
+
+/**
+ * The reason in words.
+ */
+public function from(const ecotest::cli::CoverageMapError& $e) : string
+{
+    return match ($e) {
+        .unreadable($path, $cause) => "cannot read {$path}: {$cause}",
+        .malformed($path, $cause) => "{$path} does not parse: {$cause->message()}",
+    };
+}

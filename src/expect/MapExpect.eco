@@ -5,18 +5,16 @@ namespace ecotest;
  */
 public class MapExpect<K, V>
 {
+    /**
+     * The value under test.
+     */
     public map<K, V> $value;
-
-    public constructor(map<K, V> $value)
-    {
-        $this->value = $value;
-    }
 
     /**
      * The map holds `$key`.
      */
     #[caller]
-    public function has(key: const K& $key) : MapExpect<K, V>
+    public const function has(key: const K& $key) : MapExpect<K, V>
     {
         Session::checked();
 
@@ -24,7 +22,7 @@ public class MapExpect<K, V>
             return $this;
         }
 
-        Failure("expected key {$key}", std::src::caller())->raise();
+        fail("expected key {$key}", std::src::caller());
         return $this;
     }
 
@@ -32,18 +30,18 @@ public class MapExpect<K, V>
      * The map holds `$key`, and its value equals `$want`.
      */
     #[caller]
-    public function at(const K& $key, const V& $want) : MapExpect<K, V>
+    public const function at(const K& $key, const V& $want) : MapExpect<K, V>
     {
         Session::checked();
 
         if (!$this->value->has($key)) {
-            Failure("expected key {$key}", std::src::caller())->raise();
+            fail("expected key {$key}", std::src::caller());
             return $this;
         }
 
         $got = $this->value->get($key);
         if (!($got == $want)) {
-            Failure("at {$key}: expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}")->raise();
+            fail("at {$key}: expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}");
         }
 
         return $this;
@@ -53,13 +51,13 @@ public class MapExpect<K, V>
      * The map holds exactly `$count` keys.
      */
     #[caller]
-    public function size(usize $count) : MapExpect<K, V>
+    public const function size(usize $count) : MapExpect<K, V>
     {
         Session::checked();
 
         usize $m = $this->value->count();
         if ($m != $count) {
-            Failure("expected {$count} keys, got {$m}", std::src::caller())->raise();
+            fail("expected {$count} keys, got {$m}", std::src::caller());
         }
 
         return $this;
@@ -69,13 +67,13 @@ public class MapExpect<K, V>
      * The map holds no keys.
      */
     #[caller]
-    public function empty() : MapExpect<K, V>
+    public const function empty() : MapExpect<K, V>
     {
         Session::checked();
 
         usize $m = $this->value->count();
         if ($m != 0) {
-            Failure("expected no keys, got {$m}", std::src::caller())->raise();
+            fail("expected no keys, got {$m}", std::src::caller());
         }
 
         return $this;
@@ -85,7 +83,7 @@ public class MapExpect<K, V>
      * The map has the same keys as `$want`, each with an equal value.
      */
     #[caller]
-    public function is(const map<K, V>& $want) : MapExpect<K, V>
+    public const function is(const map<K, V>& $want) : MapExpect<K, V>
     {
         Session::checked();
 
@@ -110,7 +108,7 @@ public class MapExpect<K, V>
         }
 
         if (!$detail->empty()) {
-            Failure('maps differ (- missing, + extra, ~ changed)', std::src::caller(), $detail: $detail)->raise();
+            fail('maps differ (- missing, + extra, ~ changed)', std::src::caller(), $detail: $detail);
         }
 
         return $this;

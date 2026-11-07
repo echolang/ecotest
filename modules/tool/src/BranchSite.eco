@@ -1,0 +1,12 @@
+namespace ecotest::cli;
+
+/**
+ * One branch edge of a source file, such as `then` or `arm`, at its line, with how often it was
+ * taken over every test of the run.
+ */
+public struct BranchSite
+{
+    public int64 $line;
+    public string $edge;
+    public uint64 $hits;
+}

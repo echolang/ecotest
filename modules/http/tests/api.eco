@@ -1,4 +1,4 @@
-use ecotest::http::{Api, JsonPath};
+use ecotest::http::{Api, jsonpath};
 
 test checks_pass_on_a_live_server
 {
@@ -65,13 +65,13 @@ test a_missing_service_skips
 
 test json_paths_walk_keys_indexes_and_wildcards
 {
-    json::Value $doc = guard json::parse('{"a":{"b":[{"c":1},{"c":2}]},"odd key":3}');
+    $doc = guard json::parse('{"a":{"b":[{"c":1},{"c":2}]},"odd key":3}');
 
-    ecotest::expect(JsonPath::steps('$.a.b[0].c'))->is(['a', 'b', '[0]', 'c']);
-    ecotest::expect(JsonPath::all($doc, '$.a.b[*].c')->count())->is(2);
-    ecotest::expect(JsonPath::show(JsonPath::one($doc, "$['odd key']") ?? json::nil()))->is('3');
-    ecotest::expect(JsonPath::one($doc, '$.a.missing'))->none();
+    ecotest::expect(jsonpath::steps('$.a.b[0].c'))->is(['a', 'b', '[0]', 'c']);
+    ecotest::expect(jsonpath::all($doc, '$.a.b[*].c')->count())->is(2);
+    ecotest::expect(str::from(jsonpath::one($doc, "$['odd key']") ?? json::nil()))->is('3');
+    ecotest::expect(jsonpath::one($doc, '$.a.missing'))->none();
 
-    JsonPath::replace($doc, '$.a.b[*].c', json::str('x'));
-    ecotest::expect(JsonPath::show(JsonPath::one($doc, '$.a.b[1].c') ?? json::nil()))->is('"x"');
+    jsonpath::replace($doc, '$.a.b[*].c', json::str('x'));
+    ecotest::expect(str::from(jsonpath::one($doc, '$.a.b[1].c') ?? json::nil()))->is('"x"');
 }

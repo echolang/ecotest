@@ -7,18 +7,16 @@ namespace ecotest;
  */
 public class Expect<T>
 {
+    /**
+     * The value under test.
+     */
     public T $value;
-
-    public constructor(T $value)
-    {
-        $this->value = $value;
-    }
 
     /**
      * The value equals `$want`.
      */
     #[caller]
-    public function is(const T& $want) : Expect<T>
+    public const function is(const T& $want) : Expect<T>
     {
         Session::checked();
 
@@ -27,7 +25,7 @@ public class Expect<T>
         }
 
         $got = $this->value;
-        Failure("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}")->raise();
+        fail("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}");
         return $this;
     }
 
@@ -35,7 +33,7 @@ public class Expect<T>
      * The value differs from `$other`.
      */
     #[caller]
-    public function isNot(const T& $other) : Expect<T>
+    public const function isNot(const T& $other) : Expect<T>
     {
         Session::checked();
 
@@ -43,7 +41,7 @@ public class Expect<T>
             return $this;
         }
 
-        Failure("expected anything but {$other}", std::src::caller())->raise();
+        fail("expected anything but {$other}", std::src::caller());
         return $this;
     }
 
@@ -51,7 +49,7 @@ public class Expect<T>
      * The value passes `$test`. `says:` names what it should be in the failure.
      */
     #[caller]
-    public function satisfies(function<bool(const T&)> $test, says: string $what = '') : Expect<T>
+    public const function satisfies(function<bool(const T&)> $test, says: const string& $what = '') : Expect<T>
     {
         Session::checked();
 
@@ -65,7 +63,7 @@ public class Expect<T>
             $summary = "expected {$what}, got {$got}";
         }
 
-        Failure($summary, std::src::caller(), $actual: "{$got}")->raise();
+        fail($summary, std::src::caller(), $actual: "{$got}");
         return $this;
     }
 }

@@ -1,0 +1,129 @@
+namespace ecotest::cli;
+
+use ecotest::cli::doc;
+
+/**
+ * What a test wrote through ecotest in one pass: how it failed or why it skipped, how many checks
+ * it made, and the notes, metrics and benches it recorded. A record keeps its last pass's events,
+ * so a fresh pass starts from an empty one.
+ */
+public struct Events
+{
+    /**
+     * How the pass failed, or null when nothing failed.
+     */
+    public Fault? $fault = null;
+
+    public string $skipReason = '';
+
+    /**
+     * True once the test wrote any event, so its checks were counted.
+     */
+    public bool $usedEcotest = false;
+
+    public int64 $checks = 0;
+    public array<string> $notes = [];
+    public array<Metric> $metrics = [];
+    public array<BenchResult> $benches = [];
+
+    /**
+     * Folds one ecotest event of the pass into these events.
+     */
+    public function apply(const json::Value& $event) : void
+    {
+        $this->usedEcotest = true;
+        $type = doc::text($event, 'type');
+
+        if ($type == 'fail') {
+            $summary = doc::text($event, 'summary');
+            $file = doc::text($event, 'file');
+            int64 $line = doc::number($event, 'line');
+
+            if ($this->fault != null) {
+                $this->fault?->detail->append("\nalso {$file}:{$line}: {$summary}");
+                return;
+            }
+
+            $detail = doc::text($event, 'detail');
+            $expected = doc::text($event, 'expected');
+            $actual = doc::text($event, 'actual');
+            if (!$summary->contains($expected) || !$summary->contains($actual)) {
+                $values = "expected: {$expected}\n     got: {$actual}";
+                if (!$detail->empty()) {
+                    $values->append("\n");
+                    $values->append($detail);
+                }
+                $detail = mv $values;
+            }
+
+            array<string> $context = [];
+            foreach (doc::list($event, 'context') as const &$scope) {
+                $context[] = $scope->asStr() ?? '';
+            }
+
+            $this->fault = Fault(mv $summary, mv $file, $line, mv $detail, mv $context);
+            return;
+        }
+
+        if ($type == 'crash') {
+            $this->crashed($event);
+            return;
+        }
+
+        if ($type == 'skip') {
+            $this->skipReason = doc::text($event, 'reason');
+            return;
+        }
+
+        if ($type == 'checks') {
+            $this->checks = doc::number($event, 'count');
+            return;
+        }
+
+        if ($type == 'note') {
+            $this->notes[] = doc::text($event, 'text');
+            return;
+        }
+
+        if ($type == 'metric') {
+            $this->metrics[] = Metric(doc::text($event, 'name'), doc::number($event, 'value'));
+            return;
+        }
+
+        if ($type == 'bench') {
+            $this->benches[] = BenchResult(
+                doc::text($event, 'label'),
+                doc::number($event, 'p50_ns'),
+                doc::number($event, 'p95_ns'),
+                doc::number($event, 'calls')
+            );
+            return;
+        }
+
+        if ($type == 'snapshot-new') {
+            $path = doc::text($event, 'path');
+            $this->notes[] = "wrote new snapshot {$path}";
+            return;
+        }
+
+        if ($type == 'snapshot-updated') {
+            $path = doc::text($event, 'path');
+            $this->notes[] = "updated snapshot {$path}";
+        }
+    }
+
+    /**
+     * Records the crash `$crash` describes, its `headline`, `message`, `file` and `line`, unless a
+     * failure was recorded first.
+     */
+    public function crashed(const json::Value& $crash) : void
+    {
+        if ($this->fault != null) {
+            return;
+        }
+
+        $headline = doc::text($crash, 'headline');
+        $message = doc::text($crash, 'message');
+        $this->fault = Fault("{$headline}: {$message}", doc::text($crash, 'file'), doc::number($crash, 'line'));
+    }
+}

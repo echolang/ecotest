@@ -2,43 +2,16 @@ namespace ecotest::cli;
 
 /**
  * How a test ended, after ecotest's events are read: a skip that exited 0 is a skip, and a test
- * whose passes disagree is flaky.
+ * whose passes disagree is flaky. Backed by the word reports use, which `"{$outcome}"` prints.
  */
-public enum Outcome
+public enum Outcome : string
 {
-    case pass;
-    case fail;
-    case skip;
-    case timeout;
-    case signal;
-    case flaky;
-
-    /**
-     * The word reports use.
-     */
-    public const function word() : string
-    {
-        match ($this) {
-            Outcome::pass => {
-                return 'pass';
-            },
-            Outcome::fail => {
-                return 'fail';
-            },
-            Outcome::skip => {
-                return 'skip';
-            },
-            Outcome::timeout => {
-                return 'timeout';
-            },
-            Outcome::signal => {
-                return 'signal';
-            },
-            Outcome::flaky => {
-                return 'flaky';
-            },
-        };
-    }
+    case pass = 'pass';
+    case fail = 'fail';
+    case skip = 'skip';
+    case timeout = 'timeout';
+    case signal = 'signal';
+    case flaky = 'flaky';
 
     /**
      * The outcome a report row's `status` names. Anything unknown reads as a failure.
@@ -46,18 +19,18 @@ public enum Outcome
     public static function of(const string& $status) : Outcome
     {
         if ($status == 'pass') {
-            return Outcome::pass;
+            return .pass;
         }
         if ($status == 'timeout') {
-            return Outcome::timeout;
+            return .timeout;
         }
         if ($status == 'signal') {
-            return Outcome::signal;
+            return .signal;
         }
         if ($status == 'skip') {
-            return Outcome::skip;
+            return .skip;
         }
-        return Outcome::fail;
+        return .fail;
     }
 
     /**
@@ -73,12 +46,31 @@ public enum Outcome
      */
     public const function group() : string
     {
-        if ($this->broken()) {
-            return 'failed';
-        }
-        if ($this == Outcome::flaky || $this == Outcome::skip) {
-            return $this->word();
-        }
-        return 'pass';
+        return match ($this) {
+            .pass => 'pass',
+            .fail => 'failed',
+            .skip => 'skip',
+            .timeout => 'failed',
+            .signal => 'failed',
+            .flaky => 'flaky',
+        };
     }
+}
+
+namespace str;
+
+/**
+ * The word reports use for `$outcome`: `pass`, `fail`, `timeout` and so on.
+ */
+public function from(ecotest::cli::Outcome $outcome) : string
+{
+    return $outcome->value();
+}
+
+/**
+ * The word for `$outcome`, laid out by the format `$spec`, as in `"{$outcome:<9}"`.
+ */
+public function from(ecotest::cli::Outcome $outcome, const string& $spec) : string
+{
+    return from($outcome->value(), $spec);
 }

@@ -1,56 +1,84 @@
 namespace ecotest::cli;
 
 /**
- * The thresholds a run must meet. A negative bound is off.
+ * The thresholds a run must meet. A null bound is off.
  */
 public struct Gates
 {
-    public float64 $minLines = -1.0;
-    public float64 $minBranches = -1.0;
-    public float64 $minDiff = -1.0;
-    public int64 $maxFlaky = -1;
-    public int64 $slowMs = -1;
+    public float64? $minLines = null;
+    public float64? $minBranches = null;
+    public float64? $minDiff = null;
+    public int64? $maxFlaky = null;
 
     /**
-     * The verdict on `$run`, with every failed gate as a line. `$diff` is the diff coverage, or
-     * null when none was measured.
+     * The verdict on `$run`, with every failed gate as a line. `$totals` is the coverage and `$diff`
+     * the diff coverage, each null when none was measured.
      */
-    public const function check(const Run& $run, const array<Ratio>& $totals, Ratio? $diff) : Verdict
+    public const function check(const Run& $run, Totals? $totals, Ratio? $diff) : Verdict
     {
         array<string> $failed = [];
 
-        if (!$totals->empty() && Gates::below($totals[0], $this->minLines)) {
-            float64 $got = $totals[0]->percent();
-            $failed[] = "line coverage {$got:.1f}% is below {$this->minLines:.1f}%";
-        }
-
-        if ($totals->count() > 1 && Gates::below($totals[1], $this->minBranches)) {
-            float64 $got = $totals[1]->percent();
-            $failed[] = "branch coverage {$got:.1f}% is below {$this->minBranches:.1f}%";
-        }
+        $this->cover($failed, $totals);
 
         // no diff to measure has nothing to fall short of: a ratio over no lines reads as whole
-        Ratio $d = $diff ?? Ratio(0, 0);
-        if (Gates::below($d, $this->minDiff)) {
-            float64 $got = $d->percent();
-            $failed[] = "diff coverage {$got:.1f}% is below {$this->minDiff:.1f}%";
-        }
+        Gates::hold($failed, 'diff', $diff ?? Ratio(), $this->minDiff);
 
-        if ($this->maxFlaky >= 0) {
-            int64 $flaky = $run->count(Outcome::flaky) as int64;
-            if ($flaky > $this->maxFlaky) {
-                $failed[] = "{$flaky} flaky tests, at most {$this->maxFlaky} allowed";
-            }
-        }
+        Gates::allow($failed, $run->count(.flaky) as int64, $this->maxFlaky);
 
-        return Verdict::of($run, $this, $failed);
+        return Verdict(on: $run, gates: $this, failed: $failed);
     }
 
     /**
-     * True when `$r` falls short of the bound `$min`. A negative bound is off, so nothing does.
+     * Adds the lines for the line and branch coverage of `$totals` that fall short of their gates.
+     * A run without coverage has none to fall short of.
      */
-    public static function below(const Ratio& $r, float64 $min) : bool
+    private const function cover(array<string>& $failed, Totals? $totals) : void
     {
-        return $min >= 0.0 && $r->percent() < $min;
+        $t = guard $totals else {
+            return;
+        };
+
+        Gates::hold($failed, 'line', $t->lines, $this->minLines);
+        Gates::hold($failed, 'branch', $t->branches, $this->minBranches);
+    }
+
+    /**
+     * True when `$r` falls short of the bound `$min`. Without a bound nothing does.
+     */
+    public static function below(const Ratio& $r, float64? $min) : bool
+    {
+        $bound = guard $min else {
+            return false;
+        };
+        return $r->percent() < $bound;
+    }
+
+    /**
+     * Adds the line for the `$what` coverage `$r` to `$failed` when it falls short of `$min`.
+     */
+    private static function hold(array<string>& $failed, const string& $what, const Ratio& $r, float64? $min) : void
+    {
+        $bound = guard $min else {
+            return;
+        };
+
+        $got = $r->percent();
+        if ($got < $bound) {
+            $failed[] = "{$what} coverage {$got:.1f}% is below {$bound:.1f}%";
+        }
+    }
+
+    /**
+     * Adds the line for `$flaky` flaky tests to `$failed` when there are more than `$max`.
+     */
+    private static function allow(array<string>& $failed, int64 $flaky, int64? $max) : void
+    {
+        $most = guard $max else {
+            return;
+        };
+
+        if ($flaky > $most) {
+            $failed[] = "{$flaky} flaky tests, at most {$most} allowed";
+        }
     }
 }

@@ -3,49 +3,49 @@
  */
 
 use ecotest::{expect, TempDir};
-use ecotest::cli::{Cli};
+use ecotest::cli;
 
 test version_and_help_answer_zero
 {
-    expect(Cli::main(['ecotest', '--version']))->is(0);
-    expect(Cli::main(['ecotest', '--help']))->is(0);
+    expect(cli::main(['ecotest', '--version']))->is(0);
+    expect(cli::main(['ecotest', '--help']))->is(0);
 }
 
 test run_is_the_command_when_none_is_named
 {
-    expect(Cli::defaulted(['ecotest']))->is(['ecotest', 'run']);
-    expect(Cli::defaulted(['ecotest', '--coverage', '--html']))->is(['ecotest', 'run', '--coverage', '--html']);
-    expect(Cli::defaulted(['ecotest', 'run', '--coverage']))->is(['ecotest', 'run', '--coverage']);
-    expect(Cli::defaulted(['ecotest', 'report', 'x']))->is(['ecotest', 'report', 'x']);
-    expect(Cli::defaulted(['ecotest', '--help']))->is(['ecotest', '--help']);
-    expect(Cli::defaulted(['ecotest', '-v']))->is(['ecotest', '-v']);
+    expect(cli::defaulted(['ecotest']))->is(['ecotest', 'run']);
+    expect(cli::defaulted(['ecotest', '--coverage', '--html']))->is(['ecotest', 'run', '--coverage', '--html']);
+    expect(cli::defaulted(['ecotest', 'run', '--coverage']))->is(['ecotest', 'run', '--coverage']);
+    expect(cli::defaulted(['ecotest', 'report', 'x']))->is(['ecotest', 'report', 'x']);
+    expect(cli::defaulted(['ecotest', '--help']))->is(['ecotest', '--help']);
+    expect(cli::defaulted(['ecotest', '-v']))->is(['ecotest', '-v']);
 }
 
 test a_bad_command_line_answers_two
 {
-    expect(Cli::main(['ecotest', 'run', '--no-such-flag']))->is(2);
-    expect(Cli::main(['ecotest', 'affected']))->is(2);
-    expect(Cli::main(['ecotest', '--no-such-flag']))->is(2);
-    expect(Cli::main(['ecotest', 'history', '--coverage']))->is(2);
+    expect(cli::main(['ecotest', 'run', '--no-such-flag']))->is(2);
+    expect(cli::main(['ecotest', 'affected']))->is(2);
+    expect(cli::main(['ecotest', '--no-such-flag']))->is(2);
+    expect(cli::main(['ecotest', 'history', '--coverage']))->is(2);
 }
 
 test every_command_is_dispatched
 {
     $empty = TempDir();
 
-    expect(Cli::main(['ecotest', 'report', '--project', $empty->path]))->is(1);
-    expect(Cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--format', 'md']))->is(0);
-    expect(Cli::main(['ecotest', 'history', '--project', $empty->path]))->is(0);
-    expect(Cli::main(['ecotest', 'api', '--project', $empty->path]))->is(1);
-    expect(Cli::main(['ecotest', 'who', 'src/a.eco:1', '--project', $empty->path]))->is(1);
-    expect(Cli::main(['ecotest', 'affected', '--since', 'main', '--project', $empty->path]))->is(1);
+    expect(cli::main(['ecotest', 'report', '--project', $empty->path]))->is(1);
+    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--format', 'md']))->is(0);
+    expect(cli::main(['ecotest', 'history', '--project', $empty->path]))->is(0);
+    expect(cli::main(['ecotest', 'api', '--project', $empty->path]))->is(1);
+    expect(cli::main(['ecotest', 'who', 'src/a.eco:1', '--project', $empty->path]))->is(1);
+    expect(cli::main(['ecotest', 'affected', '--since', 'main', '--project', $empty->path]))->is(1);
 }
 
 test run_takes_every_flag
 {
     $sample = Sample();
 
-    int32 $code = Cli::main([
+    int32 $code = cli::main([
         'ecotest', 'run',
         '--project', $sample->dir->path,
         '--echoc', Sample::compiler(),
@@ -70,7 +70,7 @@ test the_style_is_a_word_the_command_line_knows
 {
     $empty = TempDir();
 
-    expect(Cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'pretty']))->is(0);
-    expect(Cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'simple', '--color', 'never']))->is(0);
-    expect(Cli::main(['ecotest', 'run', '--style', 'fancy']))->is(2);
+    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'pretty']))->is(0);
+    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'simple', '--color', 'never']))->is(0);
+    expect(cli::main(['ecotest', 'run', '--style', 'fancy']))->is(2);
 }

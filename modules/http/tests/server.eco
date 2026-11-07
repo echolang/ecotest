@@ -1,9 +1,8 @@
+use std::thread;
+
 /**
  * A real HTTP server on an ephemeral loopback port, on its own thread, for the checks to talk to.
  */
-
-use std::thread;
-
 internal class TestServer
 {
     public http::Server $app;
@@ -18,13 +17,13 @@ internal class TestServer
             json: '{"id":1,"name":"Ada","admin":false,"score":2.5,"note":null,"items":[{"id":1,"at":"x"},{"id":2,"at":"y"}]}'
         ));
         $this->app->post('/users', function(http::Request $r) : http::Response {
-            http::Response $res = http::Response(json: $r->body);
+            $res = http::Response(json: $r->body);
             $res->status = 201;
             return $res;
         });
         $this->app->get('/plain', (http::Request $r) : http::Response => http::Response(text: 'hello there'));
         $this->app->get('/whoami', function(http::Request $r) : http::Response {
-            string $auth = $r->header('Authorization') ?? 'nobody';
+            $auth = $r->header('Authorization') ?? 'nobody';
             return http::Response(text: $auth);
         });
     }
@@ -35,11 +34,10 @@ internal class TestServer
     public function start() : string
     {
         http::Server $app = $this->app;
-        thread::handle $spawned = guard thread::spawn(function() : void {
-            result<int32, http::Error> $r = $app->listen('127.0.0.1', 0);
-        }) else ($e) {
-            die($e->message());
-        };
+        // a port that cannot be bound stops here, not as a timeout in eventually() below
+        $spawned = guard thread::spawn(function() : void {
+            guard $app->listen('127.0.0.1', 0);
+        });
         $this->thread = $spawned;
 
         ecotest::eventually(() : bool => $app->port() > 0);
@@ -51,7 +49,7 @@ internal class TestServer
     {
         $this->app->stop();
         if ($this->thread != null) {
-            thread::handle $t = guard $this->thread;
+            $t = guard $this->thread;
             $t->join();
         }
     }

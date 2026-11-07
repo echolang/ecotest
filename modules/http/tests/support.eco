@@ -3,24 +3,21 @@
  * variable set for the rest of one test process.
  */
 
-use ecotest::http::{Reply, Request, Response, Verb};
+use ecotest::http::{Header, Reply, Request, Response};
 
 internal extern {
     function setenv as c_setenv(ptr<const uint8> $name, ptr<const uint8> $value, int32 $overwrite) : int32;
 }
 
 /**
- * A reply to `GET http://app/x` with `$status`, `$body` and the headers given as name, value pairs.
+ * A reply to `GET http://app/x` with `$status`, `$body` and `$headers`.
  */
-internal function reply(int64 $status, const string& $body, array<string> $headers = []) : Reply
+internal function reply(int64 $status, const string& $body, const array<Header>& $headers = []) : Reply
 {
-    Response $res = Response($status);
+    $res = Response($status);
     $res->body = $body;
-    for (usize $i = 0; $i + 1 < $headers->count(); $i = $i + 2) {
-        $res->headerNames[] = $headers[$i];
-        $res->headerValues[] = $headers[$i + 1];
-    }
-    return Reply(Request(Verb::get, 'http://app/x'), $res, '');
+    $res->headers = $headers;
+    return Reply(Request(.get, 'http://app/x'), .ok(mv $res));
 }
 
 /**
@@ -28,7 +25,7 @@ internal function reply(int64 $status, const string& $body, array<string> $heade
  */
 internal function lost() : Reply
 {
-    return Reply(Request(Verb::get, 'http://app/x'), Response(0), 'refused');
+    return Reply(Request(.get, 'http://app/x'), .error(.refused('refused')));
 }
 
 /**

@@ -5,68 +5,79 @@
 
 use ecotest::{expect, TempDir};
 use ecotest::cli::{
-    Run, TestRecord, Outcome, BenchResult, FileCoverage, Ratio, Escape, Text, Files, History, Doc, Gates, Verdict,
-    TerminalReport, MarkdownReport, JunitReport, HtmlReport, JsonReport, ServiceSpec, GitDiff, Glob,
-    PrettyReport, Look, Highlight
+    Run, TestRecord, Outcome, Totals, Attempt, Fault, Metric, BenchResult, FileCoverage, BranchSite, FunctionSite, Ratio, escape, text, files, history, doc, Gates, Verdict,
+    terminal, markdown, junit, html, runjson, ServiceSpec, GitDiff, glob, pretty, Look, highlight
 };
+
+/**
+ * `$line` as the HTML report's source view highlights it.
+ */
+internal function lit(const string& $line) : string
+{
+    $out = '';
+    highlight::line($out, $line);
+    return $out;
+}
 
 internal function judged(const Run& $run, const array<string>& $failed) : Verdict
 {
-    return Verdict::of($run, Gates(), $failed);
+    return Verdict(on: $run, gates: Gates(), failed: $failed);
+}
+
+/**
+ * Line, branch and function totals that are neither all hit nor all missed.
+ */
+internal function handTotals() : Totals
+{
+    return Totals(Ratio(2, 3), Ratio(1, 2), Ratio(1, 1));
 }
 
 internal function record(const string& $file, const string& $name, Outcome $outcome) : TestRecord
 {
-    string $id = "m/{$file}::{$name}";
-    TestRecord $t = TestRecord($id, TestRecord::key($id));
+    $id = "m/{$file}::{$name}";
+    $t = TestRecord($id);
     $t->module = 'm';
     $t->file = $file;
     $t->name = $name;
     $t->outcome = $outcome;
-    $t->attempts = [$outcome];
-    $t->durations = [12];
+    $t->attempts = [Attempt($outcome, 12)];
     return $t;
 }
 
 internal function handMade() : Run
 {
-    Run $run = Run('/p/.ecotest/run-1');
+    $run = Run('/p/.ecotest/run-1');
     $run->version = '0.13.0';
     $run->wallMs = 1500;
     $run->passes = 1;
     $run->reached = 1;
 
-    $run->tests[] = record('tests/a.eco', 'passes', Outcome::pass);
+    $run->tests[] = record('tests/a.eco', 'passes', .pass);
 
-    TestRecord $failed = record('tests/a.eco', 'fails', Outcome::fail);
-    $failed->failure = 'expected 2, got 1';
-    $failed->failureFile = 'tests/a.eco';
-    $failed->failureLine = 9;
-    $failed->failureDetail = "a <detail> & more";
-    $failed->context = ['row 3'];
+    $failed = record('tests/a.eco', 'fails', .fail);
+    $failed->events->fault = Fault('expected 2, got 1', 'tests/a.eco', 9, 'a <detail> & more', ['row 3']);
     $run->tests[] = $failed;
 
-    TestRecord $slow = record('tests/b.eco', 'hangs', Outcome::timeout);
-    $slow->failure = 'timed out';
+    $slow = record('tests/b.eco', 'hangs', .timeout);
+    $slow->events->fault = Fault('timed out');
     $run->tests[] = $slow;
 
-    TestRecord $killed = record('tests/b.eco', 'dies', Outcome::signal);
+    $killed = record('tests/b.eco', 'dies', .signal);
     $run->tests[] = $killed;
 
-    TestRecord $skipped = record('tests/b.eco', 'waits', Outcome::skip);
-    $skipped->skipReason = 'no "db"';
+    $skipped = record('tests/b.eco', 'waits', .skip);
+    $skipped->events->skipReason = 'no "db"';
     $run->tests[] = $skipped;
 
-    TestRecord $alsoSkipped = record('tests/b.eco', 'waits_too', Outcome::skip);
-    $alsoSkipped->skipReason = 'no cache';
+    $alsoSkipped = record('tests/b.eco', 'waits_too', .skip);
+    $alsoSkipped->events->skipReason = 'no cache';
     $run->tests[] = $alsoSkipped;
 
-    TestRecord $measured = record('tests/b.eco', 'measures', Outcome::pass);
-    $measured->usedEcotest = true;
-    $measured->notes = ['a note'];
-    $measured->metricNames = ['rows'];
-    $measured->metricValues = [3];
-    $measured->benches = [BenchResult('loop', 5, 9, 1000)];
+    $measured = record('tests/b.eco', 'measures', .pass);
+    $measured->events->usedEcotest = true;
+    $measured->events->notes = ['a note'];
+    $measured->events->metrics = [Metric('rows', 3)];
+    $measured->events->benches = [BenchResult('loop', 5, 9, 1000)];
     $run->tests[] = $measured;
 
     return $run;
@@ -74,17 +85,13 @@ internal function handMade() : Run
 
 internal function handCovered() : array<FileCoverage>
 {
-    FileCoverage $half = FileCoverage('m', 'src/half.eco', '/p/src/half.eco');
+    $half = FileCoverage('m', 'src/half.eco', '/p/src/half.eco');
     $half->lines->set(1, 1);
     $half->lines->set(2, 0);
-    $half->branchLines = [1, 1];
-    $half->branchEdges = ['then', 'else'];
-    $half->branchHits = [1, 0];
-    $half->functionNames = ['f'];
-    $half->functionLines = [1];
-    $half->functionHits = [1];
+    $half->branches = [BranchSite(1, 'then', 1), BranchSite(1, 'else', 0)];
+    $half->functions = [FunctionSite('f', 1, 1)];
 
-    FileCoverage $whole = FileCoverage('m', 'src/whole.eco', '/p/src/whole.eco');
+    $whole = FileCoverage('m', 'src/whole.eco', '/p/src/whole.eco');
     $whole->lines->set(1, 4);
 
     return [$half, $whole];
@@ -92,10 +99,10 @@ internal function handCovered() : array<FileCoverage>
 
 test the_terminal_report_shows_every_outcome_and_the_coverage
 {
-    array<FileCoverage> $files = handCovered();
-    array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    Run $run = handMade();
-    string $out = TerminalReport::render($run, $files, $totals, judged($run, ['coverage 66.7% is below 90%']), '', '');
+    $files = handCovered();
+    $totals = handTotals();
+    $run = handMade();
+    $out = terminal::render($run, $files, $totals, judged($run, ['coverage 66.7% is below 90%']), '', '');
 
     expect($out)
         ->has('7 tests: 2 passed, 3 failed, 2 skipped, 0 flaky')
@@ -110,33 +117,44 @@ test the_terminal_report_shows_every_outcome_and_the_coverage
         ->has('gate      FAIL coverage 66.7% is below 90%');
 }
 
+test the_terminal_report_lists_skips_and_flaky_tests_with_why
+{
+    $run = Run('/p/.ecotest/run-8');
+    $run->tests[] = record('tests/c.eco', 'skips', .skip);
+    $flips = record('tests/c.eco', 'flips', .flaky);
+    $flips->attempts = [Attempt(.pass, 12), Attempt(.fail, 12)];
+    $run->tests[] = $flips;
+
+    expect(terminal::render($run, [], null, judged($run, []), '', ''))
+        ->has('skipped   m/tests/c.eco::skips\n')
+        ->has('flaky     m/tests/c.eco::flips: pass fail\n');
+}
+
 test an_empty_run_reports_without_timing_or_checks
 {
-    Run $empty = Run('/p/.ecotest/run-2');
-    array<FileCoverage> $none = [];
-    array<Ratio> $noTotals = [];
+    $empty = Run('/p/.ecotest/run-2');
 
-    expect(TerminalReport::render($empty, $none, $noTotals, judged($empty, []), '', ''))->has('0 tests')->lacks('time ')->lacks('checks ');
+    expect(terminal::render($empty, [], null, judged($empty, []), '', ''))->has('0 tests')->lacks('time ')->lacks('checks ');
 }
 
 test the_pretty_report_in_ascii_puts_failures_first_and_closes_with_the_verdict
 {
-    array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    Run $run = handMade();
-    TestRecord $silent = record('tests/c.eco', 'quiet', Outcome::pass);
-    $silent->usedEcotest = true;
+    $totals = handTotals();
+    $run = handMade();
+    $silent = record('tests/c.eco', 'quiet', .pass);
+    $silent->events->usedEcotest = true;
     $run->tests[] = $silent;
-    TestRecord $flips = record('tests/c.eco', 'flips', Outcome::flaky);
-    $flips->attempts = [Outcome::pass, Outcome::fail];
+    $flips = record('tests/c.eco', 'flips', .flaky);
+    $flips->attempts = [Attempt(.pass, 12), Attempt(.fail, 12)];
     $run->tests[] = $flips;
     $run->passes = 2;
     $run->reached = 2;
 
-    string $out = PrettyReport::render(Look(command::plain()), $run, handCovered(), $totals, judged($run, ['coverage 66.7% is below 90%']), '50.0% of 2 changed lines with code ran since main', '/p/report.html');
+    $out = pretty::render(Look(command::plain()), $run, handCovered(), $totals, judged($run, ['coverage 66.7% is below 90%']), '50.0% of 2 changed lines with code ran since main', '/p/report.html');
 
     expect($out)
-        ->lacks("\x1b[")
-        ->has("  x tests/a.eco > fails\n    | tests/a.eco:9\n    | expected 2, got 1\n    | a <detail> & more\n    | in row 3")
+        ->lacks('\x1b[')
+        ->has('  x tests/a.eco > fails\n    | tests/a.eco:9\n    | expected 2, got 1\n    | a <detail> & more\n    | in row 3')
         ->has('x tests/b.eco > hangs  timeout')
         ->has('x tests/b.eco > dies  signal')
         ->has('slowest       12 ms')
@@ -160,77 +178,93 @@ test the_pretty_report_in_ascii_puts_failures_first_and_closes_with_the_verdict
 
 test the_pretty_report_in_colour_badges_a_green_run
 {
-    Run $run = Run('/p/.ecotest/run-4');
+    $run = Run('/p/.ecotest/run-4');
     $run->passes = 1;
     $run->reached = 1;
-    $run->tests[] = record('tests/a.eco', 'passes', Outcome::pass);
-    array<FileCoverage> $none = [];
-    array<Ratio> $totals = [Ratio(9, 10), Ratio(1, 4), Ratio(0, 0)];
+    $run->tests[] = record('tests/a.eco', 'passes', .pass);
+    $totals = Totals(Ratio(9, 10), Ratio(1, 4), Ratio());
 
-    string $out = PrettyReport::render(Look(command::TerminalCapabilities(true, true, 80, true)), $run, $none, $totals, judged($run, []), '', '');
+    $out = pretty::render(Look(command::TerminalCapabilities(true, true, 80, true)), $run, [], $totals, judged($run, []), '', '');
 
-    expect($out)->has("\x1b[7m PASS ")->has('  1 test  ')->lacks('assertion')->has('━')->has('─')->has('a.eco › passes')->lacks('report ')->lacks('✗');
+    expect($out)->has('\x1b[7m PASS ')->has('  1 test  ')->lacks('assertion')->has('━')->has('─')->has('a.eco › passes')->lacks('report ')->lacks('✗');
 }
 
 test the_pretty_report_says_when_echoc_never_reached_the_tests
 {
-    Run $run = Run('/p/.ecotest/run-5');
+    $run = Run('/p/.ecotest/run-5');
     $run->passes = 2;
     $run->reached = 1;
-    array<FileCoverage> $none = [];
-    array<Ratio> $noTotals = [];
 
-    string $pretty = PrettyReport::render(Look(command::plain()), $run, $none, $noTotals, judged($run, []), '', '');
+    $pretty = pretty::render(Look(command::plain()), $run, [], null, judged($run, []), '', '');
     expect($pretty)->has('x echoc stopped before the tests ran in 1 of 2 passes')->has('FAIL  0 tests  0 passed')->lacks('slowest');
 
     $run->passes = 1;
     $run->reached = 0;
-    expect(PrettyReport::render(Look(command::plain()), $run, $none, $noTotals, judged($run, []), '', ''))->has('tests ran\n');
-    expect(TerminalReport::render($run, $none, $noTotals, judged($run, []), '', ''))->has('stopped   echoc did not reach the tests in 1 of 1 passes');
+    expect(pretty::render(Look(command::plain()), $run, [], null, judged($run, []), '', ''))->has('tests ran\n');
+    expect(terminal::render($run, [], null, judged($run, []), '', ''))->has('stopped   echoc did not reach the tests in 1 of 1 passes');
     expect($run->green())->no();
 }
 
 test the_markdown_report_carries_failures_with_their_detail
 {
-    array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    Run $run = handMade();
-    string $out = MarkdownReport::render($run, handCovered(), $totals, judged($run, []));
+    $totals = handTotals();
+    $run = handMade();
+    $out = markdown::render($run, handCovered(), $totals, judged($run, []));
 
     expect($out)->has('## Tests failed')->has('expected 2, got 1')->has('  a <detail> & more');
     expect($out)->has('### Skipped')->has('no cache');
 }
 
+test a_failure_without_a_summary_shows_where_it_stopped_and_any_detail
+{
+    $run = Run('/p/.ecotest/run-9');
+    $bare = record('tests/d.eco', 'bare', .fail);
+    $bare->events->fault = Fault('', 'tests/d.eco', 4);
+    $run->tests[] = $bare;
+    $detailed = record('tests/d.eco', 'detailed', .fail);
+    $detailed->events->fault = Fault('', 'tests/d.eco', 5, 'only detail');
+    $run->tests[] = $detailed;
+
+    expect(terminal::render($run, [], null, judged($run, []), '', ''))
+        ->has('fail      m/tests/d.eco::bare\n          at tests/d.eco:4\nfail      m/tests/d.eco::detailed\n          at tests/d.eco:5\n            only detail\n');
+    expect(pretty::render(Look(command::plain()), $run, [], null, judged($run, []), '', ''))
+        ->has('  x tests/d.eco > bare\n    | tests/d.eco:4\n\n  x tests/d.eco > detailed\n    | tests/d.eco:5\n    | only detail\n');
+    expect(markdown::render($run, [], null, judged($run, [])))
+        ->has('- **fail** `m/tests/d.eco::bare` at `tests/d.eco:4`\n- **fail**')
+        ->has('`m/tests/d.eco::detailed` at `tests/d.eco:5`\n  ```\n  \n  only detail\n  ```\n');
+}
+
 test junit_groups_by_file_and_types_each_outcome
 {
-    string $xml = JunitReport::render(handMade());
+    $xml = junit::render(handMade());
 
     expect($xml)
         ->has('<testsuite name="tests/a.eco">')
-        ->has("  </testsuite>\n  <testsuite name=\"tests/b.eco\">")
+        ->has('  </testsuite>\n  <testsuite name="tests/b.eco">')
         ->has('<failure type="fail" message="expected 2, got 1">')
         ->has('<error type="timeout"')
         ->has('<error type="signal"')
         ->has('<skipped message="no &quot;db&quot;"/>')
         ->has('a &lt;detail&gt; &amp; more');
 
-    expect(JunitReport::render(Run('/p/.ecotest/run-3')))->lacks('<testsuite ')->has('</testsuites>');
+    expect(junit::render(Run('/p/.ecotest/run-3')))->lacks('<testsuite ')->has('</testsuites>');
 }
 
 test html_and_json_carry_the_same_run
 {
-    array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    Run $run = handMade();
-    Verdict $verdict = judged($run, ['too low']);
+    $totals = handTotals();
+    $run = handMade();
+    $verdict = judged($run, ['too low']);
 
-    expect(HtmlReport::render($run, handCovered(), $totals, $verdict))->has('fails')->has('src/half.eco')->has('too low');
-    expect(JsonReport::render($run, handCovered(), $totals, $verdict))->has('"timeout": 1')->has('"row 3"')->has('"rows": 3');
+    expect(html::render($run, handCovered(), $totals, $verdict))->has('fails')->has('src/half.eco')->has('too low');
+    expect(runjson::render($run, handCovered(), $totals, $verdict))->has('"timeout": 1')->has('"row 3"')->has('"rows": 3');
 }
 
 test the_html_report_puts_broken_tests_first_and_says_why
 {
-    array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    Run $run = handMade();
-    string $out = HtmlReport::render($run, handCovered(), $totals, judged($run, ['line coverage is below <90%>']));
+    $totals = handTotals();
+    $run = handMade();
+    $out = html::render($run, handCovered(), $totals, judged($run, ['line coverage is below <90%>']));
 
     expect($out)
         ->has('Tests <span class="gen ">failed</span>')
@@ -253,6 +287,7 @@ test the_html_report_puts_broken_tests_first_and_says_why
         ->has('<details class="code surface" id="file-src_half.eco">')
         ->has('<span>1 missed</span>')
         ->lacks('class="gate"')
+        ->lacks('Gate: lines')
         ->lacks('class="dot low"');
 
     // broken first, then skipped, then passed, each group in run order
@@ -264,17 +299,15 @@ test the_html_report_puts_broken_tests_first_and_says_why
 
 test the_html_report_badges_a_green_run_and_leaves_out_coverage_it_lacks
 {
-    Run $run = Run('/p/.ecotest/run-6');
+    $run = Run('/p/.ecotest/run-6');
     $run->passes = 1;
     $run->reached = 1;
     $run->wallMs = 250;
-    $run->tests[] = record('tests/a.eco', 'passes', Outcome::pass);
-    TestRecord $odd = TestRecord('loose', 'loose');
+    $run->tests[] = record('tests/a.eco', 'passes', .pass);
+    $odd = TestRecord('loose');
     $run->tests[] = $odd;
-    array<FileCoverage> $none = [];
-    array<Ratio> $noTotals = [];
 
-    string $out = HtmlReport::render($run, $none, $noTotals, judged($run, []));
+    $out = html::render($run, [], null, judged($run, []));
 
     expect($out)
         ->has('Tests <span class="gen good">passed</span>')
@@ -290,19 +323,19 @@ test the_html_report_badges_a_green_run_and_leaves_out_coverage_it_lacks
 
 test the_html_report_marks_gates_and_what_falls_short
 {
-    Run $run = Run('/p/.ecotest/run-7');
+    $run = Run('/p/.ecotest/run-7');
     $run->passes = 2;
     $run->reached = 1;
-    TestRecord $flips = record('tests/c.eco', 'flips', Outcome::flaky);
+    $flips = record('tests/c.eco', 'flips', .flaky);
     $run->tests[] = $flips;
-    $run->tests[] = record('tests/c.eco', 'waits', Outcome::skip);
-    $run->tests[] = record('tests/c.eco', 'breaks', Outcome::fail);
-    array<Ratio> $totals = [Ratio(2, 3), Ratio(1, 2), Ratio(1, 1)];
-    Gates $gates = Gates();
+    $run->tests[] = record('tests/c.eco', 'waits', .skip);
+    $run->tests[] = record('tests/c.eco', 'breaks', .fail);
+    $totals = handTotals();
+    $gates = Gates();
     $gates->minLines = 90.0;
     $gates->minBranches = 50.0;
 
-    string $out = HtmlReport::render($run, handCovered(), $totals, Verdict::of($run, $gates, []));
+    $out = html::render($run, handCovered(), $totals, Verdict(on: $run, gates: $gates, failed: []));
 
     expect($out)
         ->has('<span class="badge bad">1 failure</span><span class="badge bad">echoc stopped</span><span class="badge warn">1 flaky</span>')
@@ -322,13 +355,13 @@ test the_html_report_marks_gates_and_what_falls_short
 test the_html_report_shades_each_source_line_by_what_ran
 {
     $dir = TempDir();
-    FileCoverage $file = FileCoverage('m', 'src/two.eco', $dir->write('two.eco', "return 1;\nreturn 2;\n// end"));
+    $file = FileCoverage('m', 'src/two.eco', $dir->write('two.eco', 'return 1;\nreturn 2;\n// end'));
     $file->lines->set(1, 3);
     $file->lines->set(2, 0);
-    array<Ratio> $totals = [Ratio(1, 2), Ratio(0, 0), Ratio(0, 0)];
-    Run $run = handMade();
+    $totals = Totals(Ratio(1, 2), Ratio(), Ratio());
+    $run = handMade();
 
-    string $out = HtmlReport::render($run, [$file], $totals, judged($run, []));
+    $out = html::render($run, [$file], $totals, judged($run, []));
 
     expect($out)
         ->has('<div class="row hit"><span class="ln">1</span><span class="hits">3×</span><code><span class="k">return</span> <span class="n">1</span><span class="p">;</span></code></div>')
@@ -338,41 +371,42 @@ test the_html_report_shades_each_source_line_by_what_ran
 
 test highlight_colours_every_kind_of_token
 {
-    expect(Highlight::line("    string $s = 'a\\'b' . f(2.5) + Date ::x <y; // done"))
+    expect(lit("    string $s = 'a\\'b' . f(2.5) + Date ::x <y; // done"))
         ->is('    <span class="t">string</span> <span class="v">$s</span> <span class="p">=</span> <span class="s">&#39;a\\&#39;b&#39;</span> <span class="p">.</span> <span class="f">f</span><span class="p">(</span><span class="n">2.5</span><span class="p">)</span> <span class="p">+</span> <span class="t">Date</span> <span class="p">::</span><span class="v">x</span> <span class="p">&lt;</span><span class="v">y</span><span class="p">;</span> <span class="c">// done</span>');
-    expect(Highlight::line('  * a doc <line>'))->is('  <span class="c">* a doc &lt;line&gt;</span>');
-    expect(Highlight::line('/** opens'))->is('<span class="c">/** opens</span>');
-    expect(Highlight::line('call (1);'))->has('<span class="f">call</span> <span class="p">(</span>');
-    expect(Highlight::line('a;// tight'))->is('<span class="v">a</span><span class="p">;</span><span class="c">// tight</span>');
-    expect(Highlight::line('a/b $ "open'))->is('<span class="v">a</span><span class="p">/</span><span class="v">b</span> <span class="p">$</span> <span class="s">&quot;open</span>');
-    expect(Highlight::line('x$y'))->is('<span class="v">x</span><span class="v">$y</span>');
-    expect(Highlight::line("'\\"))->is('<span class="s">&#39;\\</span>');
-    expect(Highlight::line('end /'))->is('<span class="v">end</span> <span class="p">/</span>');
-    expect(Highlight::line(''))->is('');
+    expect(lit('  * a doc <line>'))->is('  <span class="c">* a doc &lt;line&gt;</span>');
+    expect(lit('/** opens'))->is('<span class="c">/** opens</span>');
+    expect(lit('call (1);'))->has('<span class="f">call</span> <span class="p">(</span>');
+    expect(lit('a;// tight'))->is('<span class="v">a</span><span class="p">;</span><span class="c">// tight</span>');
+    expect(lit('a/b $ "open'))->is('<span class="v">a</span><span class="p">/</span><span class="v">b</span> <span class="p">$</span> <span class="s">&quot;open</span>');
+    expect(lit('x$y'))->is('<span class="v">x</span><span class="v">$y</span>');
+    expect(lit("'\\"))->is('<span class="s">&#39;\\</span>');
+    expect(lit('end /'))->is('<span class="v">end</span> <span class="p">/</span>');
+    expect(lit(''))->is('');
 }
 
 test markup_escapes_entities_and_drops_control_bytes
 {
-    string $raw = "&<>\"'";
+    $raw = "&<>\"'";
     $raw->push(1);
-    $raw->append("\tx\n");
+    $raw->append('\tx\n');
 
-    expect(Escape::markup($raw))->is("&amp;&lt;&gt;&quot;&#39;\tx\n");
+    expect(escape::markup($raw))->is('&amp;&lt;&gt;&quot;&#39;\tx\n');
 }
 
 test text_indents_every_line_and_cuts_long_ones
 {
-    expect(Text::indent("a\nb", 2))->is("  a\n  b");
-    expect(Text::cut(str::repeat('x', 130)))->endsWith('x...')->length(123);
+    expect(text::indent('a\nb', 2))->is('  a\n  b');
+    expect(text::cut(str::repeat('x', 130)))->ends('x...')->length(123);
 }
 
 test outcomes_read_and_spell_every_status
 {
     foreach (['pass', 'fail', 'skip', 'timeout', 'signal'] as const &$word) {
-        expect(Outcome::of($word)->word())->is($word);
+        expect(Outcome::of($word)->value())->is($word);
     }
-    expect(Outcome::of('anything else')->word())->is('fail');
-    expect(Outcome::flaky->word())->is('flaky');
+    expect(Outcome::of('anything else')->value())->is('fail');
+    $flaky = Outcome::flaky;
+    expect("{$flaky}")->is('flaky');
 
     expect(Outcome::timeout->group())->is('failed');
     expect(Outcome::flaky->group())->is('flaky');
@@ -382,7 +416,7 @@ test outcomes_read_and_spell_every_status
 
 test a_record_without_passes_has_no_time_and_keeps_its_outcome
 {
-    TestRecord $t = TestRecord('m/a.eco::x', 'm_a.eco__x');
+    $t = TestRecord('m/a.eco::x');
     expect($t->ms())->is(0);
     expect($t->latest() == Outcome::pass)->yes();
 
@@ -393,86 +427,101 @@ test a_record_without_passes_has_no_time_and_keeps_its_outcome
 test a_stored_report_keeps_the_verdict_its_run_got
 {
     $dir = TempDir();
-    Run $run = handMade();
-    $run->tests = [record('tests/a.eco', 'passes', Outcome::pass)];
-    array<FileCoverage> $none = [];
-    array<Ratio> $noTotals = [];
-    $dir->write('run.json', JsonReport::render($run, $none, $noTotals, judged($run, ['line coverage 60.0% is below 90.0%'])));
+    $run = handMade();
+    $run->tests = [record('tests/a.eco', 'passes', .pass)];
+    $dir->write('run.json', runjson::render($run, [], null, judged($run, ['line coverage 60.0% is below 90.0%'])));
 
-    Verdict $stored = Verdict::stored($dir->path, $run, Gates());
+    $stored = Verdict(storedIn: $dir->path, run: $run, gates: Gates());
     expect($stored->green)->no();
     expect($stored->failed)->is(['line coverage 60.0% is below 90.0%']);
 
     // a run that never finished has nothing stored and is judged on its tests
     $empty = TempDir();
-    expect(Verdict::stored($empty->path, $run, Gates())->green)->yes();
+    expect(Verdict(storedIn: $empty->path, run: $run, gates: Gates())->green)->yes();
+
+    // and so is one whose run.json was cut off mid-write
+    $cut = TempDir();
+    $cut->write('run.json', '{"green": false, "failedGates": [');
+    expect(Verdict(storedIn: $cut->path, run: $run, gates: Gates())->green)->yes();
 }
 
 test a_service_variable_keeps_upper_case_and_digits
 {
-    array<string> $none = [];
-    ServiceSpec $spec = ServiceSpec('Web2-api', $none, '', 0, 0, '', $none, $none);
+    $spec = ServiceSpec('Web2-api', [], .delay(0), '', []);
     expect($spec->variable())->is('ECOTEST_WEB2_API_URL');
 }
 
 test globs_refuse_what_does_not_match
 {
-    expect(Glob::matches('src/*.x', 'src/a.eco'))->no();
-    expect(Glob::matches('src/a.eco', 'src/b.eco'))->no();
+    expect(glob::matches('src/*.x', 'src/a.eco'))->no();
+    expect(glob::matches('src/a.eco', 'src/b.eco'))->no();
 }
 
-test git_diff_without_git_is_null_and_skips_unknown_hunks
+test git_diff_says_why_git_gave_none_and_skips_unknown_hunks
 {
-    expect(GitDiff::since('/nonexistent/git', '.', 'main') == null)->yes();
+    $missing = expect(GitDiff::since('/nonexistent/git', '.', 'main'))->fails();
+    expect("{$missing}")->is('cannot run /nonexistent/git: No such file or directory');
+    $refused = expect(GitDiff::since('false', '.', 'main'))->fails();
+    expect("{$refused}")->is('git diff main failed (exit 1)');
+    $fake = TempDir();
+    $git = $fake->write('git', '#!/bin/sh\necho >&2\necho "fatal: bad revision $4" >&2\necho "usage: more" >&2\nexit 128\n');
+    expect(ecotest::run('chmod', ['+x', $git]))->succeeds();
+    $said = expect(GitDiff::since($git, '.', 'nope'))->fails();
+    expect("{$said}")->is('git diff nope failed (exit 128): fatal: bad revision nope');
 
-    GitDiff $diff = GitDiff::parse("@@ -1 +1 @@\n+++ /dev/null\n@@ -1 +1 @@\n+++ b/a.eco\n@@ -1,0 +2,0 @@\n");
-    expect($diff->files)->is(['a.eco']);
-    expect($diff->lines[0])->empty();
+    $diff = GitDiff(parsing: '@@ -1 +1 @@\n+++ /dev/null\n@@ -1 +1 @@\n+++ b/a.eco\n@@ -1,0 +2,0 @@\n');
+    expect($diff->files->count())->is(1);
+    expect($diff->files[0]->path)->is('a.eco');
+    expect($diff->files[0]->lines)->empty();
 
-    GitDiff $odd = GitDiff::parse("+++ b/a.eco\n@@ -1 +x @@\n@@ -1 +y,z @@\n@@ -1 +3,2 @@\n");
-    expect($odd->lines[0])->is([0, 3, 4]);
+    $odd = GitDiff(parsing: '+++ b/a.eco\n@@ -1 +x @@\n@@ -1 +y,z @@\n@@ -1 +3,2 @@\n');
+    expect($odd->files[0]->lines)->is([0, 3, 4]);
 
-    FileCoverage $mine = FileCoverage('m', 'a.eco', '/p/a.eco');
+    $mine = FileCoverage('m', 'a.eco', '/p/a.eco');
     $mine->lines->set(3, 1);
-    Ratio $r = $odd->coverage([$mine]);
+    $r = $odd->coverage([$mine]);
     expect($r->total)->is(1);
     expect($r->hit)->is(1);
 
-    FileCoverage $other = FileCoverage('m', 'src/other.eco', '/p/src/other.eco');
+    $other = FileCoverage('m', 'src/other.eco', '/p/src/other.eco');
     $other->lines->set(2, 1);
     expect($diff->coverage([$other])->total)->is(0);
 }
 
 test files_resolve_write_append_and_find_the_newest_run
 {
-    expect(Files::resolve('/base', ''))->is('/base');
-    expect(Files::resolve('/base', '/abs'))->is('/abs');
-    expect(Files::resolve('/base', 'rel'))->is('/base/rel');
+    expect(files::resolve('/base', ''))->is('/base');
+    expect(files::resolve('/base', '/abs'))->is('/abs');
+    expect(files::resolve('/base', 'rel'))->is('/base/rel');
 
-    expect(Files::write('/dev/null/nope/file', 'x'))->no();
-    Files::appendLine('/dev/null/nope/file', 'x');
+    $unwritten = expect(files::write('/dev/null/nope/file', 'x'))->fails();
+    expect("{$unwritten}")->is('Not a directory');
+    expect(files::appendLine('/dev/null/nope/file', 'x'))->fails();
+    expect(files::mkdirs('/dev/null/nope'))->fails();
 
     $dir = TempDir();
-    expect(Files::latest($dir->path))->empty();
-    expect(Files::latest($dir->file('missing')))->empty();
+    expect(files::mkdirs($dir->file('a/b')))->fine();
+    expect(files::mkdirs($dir->file('a/b')))->fine();
+    expect(files::latest($dir->path))->none();
+    expect(files::latest($dir->file('missing')))->none();
 }
 
 test history_shows_the_window_flips_and_slowdowns
 {
     $dir = TempDir();
-    string $path = $dir->file('history.jsonl');
+    $path = $dir->file('history.jsonl');
 
-    Files::appendLine($path, '{"run":"/p/.ecotest/run-0","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::t","pass",10]]}');
-    Files::appendLine($path, '');
-    Files::appendLine($path, 'not json');
-    Files::appendLine($path, '{"run":"run-1","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"lines":50.0,"tests":[["m/a::t","pass",10]]}');
-    Files::appendLine($path, '{"run":"run-2","ms":1,"pass":0,"fail":1,"skip":0,"flaky":0,"tests":[["m/a::t","fail",10]]}');
-    Files::appendLine($path, '{"run":"run-3","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::t","pass",90]]}');
-    Files::appendLine($path, '{"run":"run-4","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"lines":"n/a","tests":[[], [1, 2, "x"], ["m/a::steady","pass",30], ["m/a::t","pass",25]]}');
-    Files::appendLine($path, '{"run":"run-5","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::steady","pass",30], ["m/a::t","pass",26]]}');
-    Files::appendLine($path, '{"run":"run-6","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::steady","pass",31], ["m/a::t","pass",90]]}');
+    files::appendLine($path, '{"run":"/p/.ecotest/run-0","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::t","pass",10]]}');
+    files::appendLine($path, '');
+    files::appendLine($path, 'not json');
+    files::appendLine($path, '{"run":"run-1","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"lines":50.0,"tests":[["m/a::t","pass",10]]}');
+    files::appendLine($path, '{"run":"run-2","ms":1,"pass":0,"fail":1,"skip":0,"flaky":0,"tests":[["m/a::t","fail",10]]}');
+    files::appendLine($path, '{"run":"run-3","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::t","pass",90]]}');
+    files::appendLine($path, '{"run":"run-4","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"lines":"n/a","tests":[[], [1, 2, "x"], ["m/a::steady","pass",30], ["m/a::t","pass",25]]}');
+    files::appendLine($path, '{"run":"run-5","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::steady","pass",30], ["m/a::t","pass",26]]}');
+    files::appendLine($path, '{"run":"run-6","ms":1,"pass":1,"fail":0,"skip":0,"flaky":0,"tests":[["m/a::steady","pass",31], ["m/a::t","pass",90]]}');
 
-    string $out = History::render($path, 3);
+    $out = history::render($path, 3);
     expect($out)
         ->lacks('run-0')
         ->lacks('run-3')
@@ -481,14 +530,14 @@ test history_shows_the_window_flips_and_slowdowns
         ->has('got slower')
         ->has('m/a::t: 90 ms, was 26 ms');
 
-    string $early = History::render($path, 6);
+    $early = history::render($path, 6);
     expect($early)
         ->has('run-1')
         ->has('50.0%')
         ->has('changed outcome across runs')
         ->has('m/a::t: pass fail pass pass pass pass');
 
-    expect(History::render($dir->file('none.jsonl'), 3))->has('no history yet');
+    expect(history::render($dir->file('none.jsonl'), 3))->has('no history yet');
 }
 
 test a_run_relative_path_is_cut_at_its_project
@@ -501,26 +550,26 @@ test a_run_relative_path_is_cut_at_its_project
 
 test doc_reads_mistyped_fields_as_empty
 {
-    json::Value $doc = expect(json::parse('{"n": "seven", "s": 7, "l": {}, "f": "x", "i": 3}'))->ok();
+    $doc = guard json::parse('{"n": "seven", "s": 7, "l": {}, "f": "x", "i": 3}');
 
-    expect(Doc::text($doc, 's'))->empty();
-    expect(Doc::number($doc, 'n'))->is(0);
-    expect(Doc::list($doc, 'l'))->empty();
-    expect(Doc::decimal($doc, 'f', -1.0))->near(-1.0);
-    expect(Doc::decimal($doc, 'i', -1.0))->near(3.0);
-    expect(Doc::decimal($doc, 'gone', 2.5))->near(2.5);
-    expect(Doc::object($doc, 'gone')->isNull())->yes();
+    expect(doc::text($doc, 's'))->empty();
+    expect(doc::number($doc, 'n'))->is(0);
+    expect(doc::list($doc, 'l'))->empty();
+    expect(doc::decimal($doc, 'f'))->none();
+    expect(expect(doc::decimal($doc, 'i'))->some())->near(3.0);
+    expect(doc::decimal($doc, 'gone'))->none();
+    expect(doc::read('/nonexistent/file'))->none();
+    expect(doc::object($doc, 'gone')->isNull())->yes();
 }
 
 test the_diff_gate_holds_without_a_diff_and_above_its_bar
 {
-    Gates $gates = Gates();
+    $gates = Gates();
     $gates->minDiff = 50.0;
-    array<Ratio> $none = [];
-    Run $run = Run('/p/.ecotest/run-1');
+    $run = Run('/p/.ecotest/run-1');
 
-    expect($gates->check($run, $none, null)->failed)->empty();
-    expect($gates->check($run, $none, Ratio(3, 4))->failed)->empty();
-    expect($gates->check($run, $none, Ratio(1, 4))->failed->count())->is(1);
-    expect($gates->check($run, $none, Ratio(1, 4))->green)->no();
+    expect($gates->check($run, null, null)->failed)->empty();
+    expect($gates->check($run, null, Ratio(3, 4))->failed)->empty();
+    expect($gates->check($run, null, Ratio(1, 4))->failed->count())->is(1);
+    expect($gates->check($run, null, Ratio(1, 4))->green)->no();
 }

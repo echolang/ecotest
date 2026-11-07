@@ -1,161 +1,151 @@
-namespace ecotest::http;
-
 /**
  * A small JSON path: `$.items[0].name`, `$.items[*].id`, `$['odd key']`. The leading `$` is
  * optional. `[*]` fans out over an array, so a path can name several values.
  */
-public class JsonPath
+
+namespace ecotest::http::jsonpath;
+
+/**
+ * The steps of `$path`: object keys, and array indexes written as `[n]` or `[*]`.
+ */
+public function steps(const string& $path) : array<string>
 {
-    /**
-     * The steps of `$path`: object keys, and array indexes written as `[n]` or `[*]`.
-     */
-    public static function steps(const string& $path) : array<string>
-    {
-        array<string> $out = [];
-        usize $i = 0;
-        usize $n = $path->size();
+    array<string> $out = [];
+    usize $i = 0;
+    usize $n = $path->size();
 
-        if ($i < $n && $path->byte($i) == 36) {
+    if ($i < $n && $path->byte($i) == 36) {
+        $i++;
+    }
+
+    while ($i < $n) {
+        uint8 $c = $path->byte($i);
+
+        if ($c == 46) {
             $i++;
-        }
-
-        while ($i < $n) {
-            uint8 $c = $path->byte($i);
-
-            if ($c == 46) {
-                $i++;
-                usize $from = $i;
-                while ($i < $n && $path->byte($i) != 46 && $path->byte($i) != 91) {
-                    $i++;
-                }
-                $out[] = $path->sub($from, $i - $from);
-                continue;
-            }
-
-            if ($c == 91) {
-                usize $close = $path->find(']', $i);
-                if ($close >= $n) {
-                    break;
-                }
-
-                string $inner = $path->sub($i + 1, $close - $i - 1);
-                if ($inner->size() >= 2 && ($inner->byte(0) == 39 || $inner->byte(0) == 34)) {
-                    $out[] = $inner->sub(1, $inner->size() - 2);
-                } else {
-                    $out[] = "[{$inner}]";
-                }
-                $i = $close + 1;
-                continue;
-            }
-
             usize $from = $i;
             while ($i < $n && $path->byte($i) != 46 && $path->byte($i) != 91) {
                 $i++;
             }
             $out[] = $path->sub($from, $i - $from);
+            continue;
         }
 
-        return $out;
+        if ($c == 91) {
+            usize $close = $path->find(']', $i);
+            if ($close >= $n) {
+                break;
+            }
+
+            $inner = $path->sub($i + 1, $close - $i - 1);
+            if ($inner->size() >= 2 && ($inner->byte(0) == 39 || $inner->byte(0) == 34)) {
+                $out[] = $inner->sub(1, $inner->size() - 2);
+            } else {
+                $out[] = "[{$inner}]";
+            }
+            $i = $close + 1;
+            continue;
+        }
+
+        usize $from = $i;
+        while ($i < $n && $path->byte($i) != 46 && $path->byte($i) != 91) {
+            $i++;
+        }
+        $out[] = $path->sub($from, $i - $from);
     }
 
-    /**
-     * Every value `$path` names in `$doc`. Empty when the path leads nowhere.
-     */
-    public static function all(const json::Value& $doc, const string& $path) : array<json::Value>
-    {
-        array<json::Value> $current = [$doc->clone()];
+    return $out;
+}
 
-        foreach (JsonPath::steps($path) as const &$step) {
-            array<json::Value> $next = [];
+/**
+ * Every value `$path` names in `$doc`. Empty when the path leads nowhere.
+ */
+public function all(const json::Value& $doc, const string& $path) : array<json::Value>
+{
+    $current = [$doc->clone()];
 
-            foreach ($current as const &$value) {
-                if ($step == '[*]') {
-                    array<json::Value> $none = [];
-                    foreach ($value->asArray() ?? $none as const &$item) {
-                        $next[] = $item;
-                    }
-                } else if ($step->starts('[')) {
-                    uint64 $at = guard str::uint($step->sub(1, $step->size() - 2)) else {
-                        continue;
-                    };
-                    json::Value $item = guard $value->at($at as usize) else {
-                        continue;
-                    };
+    foreach (steps($path) as const &$step) {
+        array<json::Value> $next = [];
+
+        foreach ($current as const &$value) {
+            if ($step == '[*]') {
+                array<json::Value> $none = [];
+                foreach ($value->asArray() ?? $none as const &$item) {
                     $next[] = $item;
-                } else {
-                    json::Value $field = guard $value->get($step) else {
-                        continue;
-                    };
-                    $next[] = $field;
                 }
+            } else if ($step->starts('[')) {
+                uint64 $at = guard str::uint($step->sub(1, $step->size() - 2)) else {
+                    continue;
+                };
+                $item = guard $value->at($at as usize) else {
+                    continue;
+                };
+                $next[] = mv $item;
+            } else {
+                $field = guard $value->get($step) else {
+                    continue;
+                };
+                $next[] = mv $field;
             }
-
-            $current = $next;
         }
 
-        return $current;
+        $current = mv $next;
     }
 
-    /**
-     * The one value `$path` names, or null when it names none.
-     */
-    public static function one(const json::Value& $doc, const string& $path) : json::Value?
-    {
-        array<json::Value> $found = JsonPath::all($doc, $path);
-        if ($found->empty()) {
-            return null;
+    return $current;
+}
+
+/**
+ * The one value `$path` names, or null when it names none.
+ */
+public function one(const json::Value& $doc, const string& $path) : json::Value?
+{
+    $found = all($doc, $path);
+    if ($found->empty()) {
+        return null;
+    }
+    return $found[0];
+}
+
+/**
+ * Replaces every value `$path` names with `$with`, in place. For snapshots with fields that
+ * change on every run.
+ */
+public function replace(json::Value& $doc, const string& $path, const json::Value& $with) : void
+{
+    replaceFrom($doc, steps($path), 0, $with);
+}
+
+/**
+ * `replace` from step `$k` on.
+ */
+private function replaceFrom(json::Value& $value, const array<string>& $steps, usize $k, const json::Value& $with) : void
+{
+    if ($k == $steps->count()) {
+        $value = $with->clone();
+        return;
+    }
+
+    const string& $step = $steps[$k];
+
+    if ($step == '[*]') {
+        for (usize $i = 0; $i < $value->count(); $i++) {
+            replaceFrom($value[$i], $steps, $k + 1, $with);
         }
-        return $found[0];
+        return;
     }
 
-    /**
-     * Replaces every value `$path` names with `$with`, in place. For snapshots with fields that
-     * change on every run.
-     */
-    public static function replace(json::Value& $doc, const string& $path, const json::Value& $with) : void
-    {
-        JsonPath::replaceFrom($doc, JsonPath::steps($path), 0, $with);
-    }
-
-    /**
-     * `replace` from step `$k` on.
-     */
-    private static function replaceFrom(json::Value& $value, const array<string>& $steps, usize $k, const json::Value& $with) : void
-    {
-        if ($k == $steps->count()) {
-            $value = $with->clone();
+    if ($step->starts('[')) {
+        uint64 $at = guard str::uint($step->sub(1, $step->size() - 2)) else {
             return;
+        };
+        if (($at as usize) < $value->count()) {
+            replaceFrom($value[$at as usize], $steps, $k + 1, $with);
         }
-
-        string $step = $steps[$k];
-
-        if ($step == '[*]') {
-            for (usize $i = 0; $i < $value->count(); $i++) {
-                JsonPath::replaceFrom($value[$i], $steps, $k + 1, $with);
-            }
-            return;
-        }
-
-        if ($step->starts('[')) {
-            uint64 $at = guard str::uint($step->sub(1, $step->size() - 2)) else {
-                return;
-            };
-            if (($at as usize) < $value->count()) {
-                JsonPath::replaceFrom($value[$at as usize], $steps, $k + 1, $with);
-            }
-            return;
-        }
-
-        if ($value->get($step) != null) {
-            JsonPath::replaceFrom($value[$step], $steps, $k + 1, $with);
-        }
+        return;
     }
 
-    /**
-     * How a JSON value reads in a failure: strings quoted, everything else as JSON.
-     */
-    public static function show(const json::Value& $value) : string
-    {
-        return json::dump($value->clone());
+    if ($value->get($step) != null) {
+        replaceFrom($value[$step], $steps, $k + 1, $with);
     }
 }

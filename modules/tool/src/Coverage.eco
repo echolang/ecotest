@@ -1,5 +1,7 @@
 namespace ecotest::cli;
 
+use ecotest::cli::glob;
+
 /**
  * The coverage of a run: echoc's map plus every test's counter file, from every pass. Answers per
  * file totals, which tests ran a line, and whether a function was ever called.
@@ -8,10 +10,15 @@ public class Coverage
 {
     public CoverageMap $map;
     public array<CounterFile> $tests = [];
-    public array<string> $modules = [];
+
+    /**
+     * The modules reported, by name: the ones asked for and the ones whose tests ran.
+     */
+    public map<string, bool> $modules = [];
+
     public array<string> $exclude = [];
 
-    public constructor(CoverageMap $map)
+    public constructor(const CoverageMap& $map)
     {
         $this->map = $map;
     }
@@ -25,20 +32,20 @@ public class Coverage
         usize $pass = 1;
 
         while (true) {
-            string $passDir = std::env::join($dir, "pass-{$pass}");
-            bool $there = std::io::exists($passDir)->or(false);
+            $passDir = std::env::join($dir, "pass-{$pass}");
+            $there = std::io::exists($passDir)->or(false);
             if (!$there) {
                 break;
             }
 
-            string $covDir = std::env::join($passDir, 'coverage');
+            $covDir = std::env::join($passDir, 'coverage');
             $pass++;
 
-            CoverageMap $map = guard CoverageMap::load(std::env::join($covDir, 'map.json')) else {
+            $map = guard CoverageMap::load(std::env::join($covDir, 'map.json')) else {
                 continue;
             };
 
-            Coverage $into = $found ?? Coverage($map);
+            $into = $found ?? Coverage($map);
             $into->absorb(std::env::join($covDir, 'tests'));
             $found = $into;
         }
@@ -51,20 +58,20 @@ public class Coverage
      */
     public function absorb(const string& $dir) : void
     {
-        std::io::dir $listing = guard std::io::opendir($dir) else {
+        $listing = guard std::io::opendir($dir) else {
             return;
         };
 
         foreach ($listing as const &$entry) {
-            string $name = $entry->name();
+            $name = $entry->name();
             if (!$name->ends('.ecocov')) {
                 continue;
             }
 
-            CounterFile $loaded = guard CounterFile::load($entry->path()) else {
+            $loaded = guard CounterFile::load($entry->path()) else {
                 continue;
             };
-            $this->tests[] = $loaded;
+            $this->tests[] = mv $loaded;
         }
 
         $listing->close();
@@ -76,12 +83,7 @@ public class Coverage
      */
     public const function reports(const string& $module) : bool
     {
-        foreach ($this->modules as const &$wanted) {
-            if ($wanted == $module) {
-                return true;
-            }
-        }
-        return false;
+        return $this->modules->has($module);
     }
 
     /**
@@ -90,7 +92,7 @@ public class Coverage
     public const function excluded(const string& $file) : bool
     {
         foreach ($this->exclude as const &$pattern) {
-            if (Glob::matches($pattern, $file)) {
+            if (glob::matches($pattern, $file)) {
                 return true;
             }
         }
@@ -109,7 +111,12 @@ public class Coverage
         }
 
         foreach ($this->tests as const &$test) {
-            array<uint32> $counts = $test->of($sites->name);
+            if (!$test->counts->has($sites->name)) {
+                continue;
+            }
+
+            // a borrow into a test this const loop never changes
+            const array<uint32>& $counts = $test->counts->at($sites->name);
             for (usize $i = 0; $i < $n && $i < $counts->count(); $i++) {
                 $sum[$i] = $sum[$i] + ($counts[$i] as uint64);
             }
@@ -128,28 +135,30 @@ public class Coverage
 
         // a generic body is counted once per instance; the source has one branch and one function
         // there, so counters at the same position merge, and either instance running counts
-        map<string, usize> $seen = [];
+        map<Spot, usize> $edgeAt = [];
+        map<Spot, usize> $functionAt = [];
 
         foreach ($this->map->modules as const &$module) {
             if (!$this->reports($module->name)) {
                 continue;
             }
 
-            array<uint64> $hits = $this->merged($module);
+            $hits = $this->merged($module);
 
             for (usize $i = 0; $i < $module->sites->count(); $i++) {
-                CoverageSite $site = $module->sites[$i];
+                const CoverageSite& $site = $module->sites[$i];
                 if ($this->excluded($site->file)) {
                     continue;
                 }
 
-                string $key = "{$module->name}/{$site->file}";
+                $key = "{$module->name}/{$site->file}";
                 if (!$at->has($key)) {
                     $at->set($key, $out->count());
                     $out[] = FileCoverage($module->name, $site->file, std::env::join($module->dir, $site->file));
                 }
 
-                FileCoverage $file = $out[$at->get($key)];
+                usize $index = $at->get($key);
+                FileCoverage& $file = $out[$index];
                 uint64 $count = $hits[$i];
 
                 if ($site->kind == 'line') {
@@ -161,26 +170,22 @@ public class Coverage
                         $file->lines->set($site->line, $count);
                     }
                 } else if ($site->kind == 'branch') {
-                    string $spot = "{$key}:{$site->line}:{$site->column}:{$site->edge}";
-                    if ($seen->has($spot)) {
-                        usize $k = $seen->get($spot);
-                        $file->branchHits[$k] = $file->branchHits[$k] + $count;
+                    $spot = Spot($key, $site->line, $site->column, $site->edge);
+                    if ($edgeAt->has($spot)) {
+                        BranchSite& $branch = $file->branches[$edgeAt->get($spot)];
+                        $branch->hits = $branch->hits + $count;
                     } else {
-                        $seen->set($spot, $file->branchHits->count());
-                        $file->branchLines[] = $site->line;
-                        $file->branchEdges[] = $site->edge;
-                        $file->branchHits[] = $count;
+                        $edgeAt->set($spot, $file->branches->count());
+                        $file->branches[] = BranchSite($site->line, $site->edge, $count);
                     }
                 } else if ($site->kind == 'fn') {
-                    string $spot = "{$key}:{$site->line}:{$site->column}:fn";
-                    if ($seen->has($spot)) {
-                        usize $k = $seen->get($spot);
-                        $file->functionHits[$k] = $file->functionHits[$k] + $count;
+                    $spot = Spot($key, $site->line, $site->column, '');
+                    if ($functionAt->has($spot)) {
+                        FunctionSite& $function = $file->functions[$functionAt->get($spot)];
+                        $function->hits = $function->hits + $count;
                     } else {
-                        $seen->set($spot, $file->functionHits->count());
-                        $file->functionNames[] = $site->function;
-                        $file->functionLines[] = $site->line;
-                        $file->functionHits[] = $count;
+                        $functionAt->set($spot, $file->functions->count());
+                        $file->functions[] = FunctionSite($site->function, $site->line, $count);
                     }
                 }
             }
@@ -193,25 +198,23 @@ public class Coverage
     /**
      * Totals over every reported file.
      */
-    public const function totals(const array<FileCoverage>& $files) : array<Ratio>
+    public static function totals(const array<FileCoverage>& $files) : Totals
     {
-        Ratio $lines = Ratio(0, 0);
-        Ratio $branches = Ratio(0, 0);
-        Ratio $functions = Ratio(0, 0);
+        $t = Totals();
 
         foreach ($files as const &$file) {
-            Ratio $l = $file->lineTotals();
-            Ratio $b = $file->branchTotals();
-            Ratio $f = $file->functionTotals();
-            $lines->hit = $lines->hit + $l->hit;
-            $lines->total = $lines->total + $l->total;
-            $branches->hit = $branches->hit + $b->hit;
-            $branches->total = $branches->total + $b->total;
-            $functions->hit = $functions->hit + $f->hit;
-            $functions->total = $functions->total + $f->total;
+            $l = $file->lineTotals();
+            $b = $file->branchTotals();
+            $f = $file->functionTotals();
+            $t->lines->hit = $t->lines->hit + $l->hit;
+            $t->lines->total = $t->lines->total + $l->total;
+            $t->branches->hit = $t->branches->hit + $b->hit;
+            $t->branches->total = $t->branches->total + $b->total;
+            $t->functions->hit = $t->functions->hit + $f->hit;
+            $t->functions->total = $t->functions->total + $f->total;
         }
 
-        return [$lines, $branches, $functions];
+        return $t;
     }
 
     /**
@@ -220,15 +223,20 @@ public class Coverage
     public const function testsAt(const string& $file, int64 $line) : array<string>
     {
         array<string> $out = [];
+        map<string, bool> $named = [];
 
         foreach ($this->tests as const &$test) {
-            bool $hit = false;
+            $hit = false;
 
             foreach ($this->map->modules as const &$module) {
-                array<uint32> $counts = $test->of($module->name);
+                if (!$test->counts->has($module->name)) {
+                    continue;
+                }
+
+                const array<uint32>& $counts = $test->counts->at($module->name);
 
                 for (usize $i = 0; $i < $module->sites->count() && $i < $counts->count(); $i++) {
-                    CoverageSite $site = $module->sites[$i];
+                    const CoverageSite& $site = $module->sites[$i];
                     if ($site->line == $line && $counts[$i] > 0 && Coverage::sameFile($site->file, $file)) {
                         $hit = true;
                         break;
@@ -240,16 +248,9 @@ public class Coverage
                 }
             }
 
-            if ($hit) {
-                bool $seen = false;
-                foreach ($out as const &$id) {
-                    if ($id == $test->testId) {
-                        $seen = true;
-                    }
-                }
-                if (!$seen) {
-                    $out[] = $test->testId;
-                }
+            if ($hit && !$named->has($test->testId)) {
+                $named->set($test->testId, true);
+                $out[] = $test->testId;
             }
         }
 
@@ -265,10 +266,10 @@ public class Coverage
         bool? $found = null;
 
         foreach ($this->map->modules as const &$module) {
-            array<uint64> $hits = $this->merged($module);
+            $hits = $this->merged($module);
 
             for (usize $i = 0; $i < $module->sites->count(); $i++) {
-                CoverageSite $site = $module->sites[$i];
+                const CoverageSite& $site = $module->sites[$i];
                 if ($site->kind == 'fn' && $site->line == $line && Coverage::sameFile($site->file, $file)) {
                     if ($hits[$i] > 0) {
                         return true;

@@ -18,57 +18,26 @@ public class CurlTransport : Transport
      */
     public function send(const Request& $request) : result<Response, TransportError>
     {
-        curl::Request $out = curl::Request(CurlTransport::method($request->verb), $request->url);
+        $out = curl::Request($request->verb->curl(), $request->url);
         $out->body = $request->body;
         $out->timeout($this->timeoutMs);
 
-        for (usize $i = 0; $i < $request->headerNames->count(); $i++) {
-            $out->header($request->headerNames[$i], $request->headerValues[$i]);
+        foreach ($request->headers as const &$h) {
+            $out->header($h->name, $h->value);
         }
 
-        result<curl::Response, curl::Error> $sent = curl::send($out);
-        if ($sent->failed()) {
-            $e = $sent->failure();
-            return .error(.failed("{$e}"));
-        }
+        $got = guard curl::send($out) else ($e) {
+            return .error(.curl($e));
+        };
 
-        curl::Response $got = $sent->unwrap();
-        Response $res = Response($got->status);
+        $res = Response($got->status);
         $res->body = $got->body;
         $res->ms = ($got->seconds * 1000.0) as int64;
 
         foreach ($got->headers->items as const &$h) {
-            $res->headerNames[] = $h->name;
-            $res->headerValues[] = $h->value;
+            $res->headers[] = Header($h->name, $h->value);
         }
 
-        return .ok($res);
-    }
-
-    /**
-     * libcurl's spelling of `$verb`.
-     */
-    private static function method(Verb $verb) : curl::Method
-    {
-        match ($verb) {
-            Verb::get => {
-                return curl::Method::get;
-            },
-            Verb::head => {
-                return curl::Method::head;
-            },
-            Verb::post => {
-                return curl::Method::post;
-            },
-            Verb::put => {
-                return curl::Method::put;
-            },
-            Verb::patch => {
-                return curl::Method::patch;
-            },
-            Verb::delete => {
-                return curl::Method::delete;
-            },
-        };
+        return .ok(mv $res);
     }
 }

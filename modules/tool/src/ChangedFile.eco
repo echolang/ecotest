@@ -1,0 +1,11 @@
+namespace ecotest::cli;
+
+/**
+ * One file of a diff: its path from the repository root and the lines added or changed in it,
+ * in the order the hunks name them.
+ */
+public struct ChangedFile
+{
+    public string $path;
+    public array<int64> $lines = [];
+}

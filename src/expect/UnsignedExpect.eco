@@ -5,18 +5,16 @@ namespace ecotest;
  */
 public class UnsignedExpect
 {
+    /**
+     * The value under test.
+     */
     public uint64 $value;
-
-    public constructor(uint64 $value)
-    {
-        $this->value = $value;
-    }
 
     /**
      * The number equals `$want`.
      */
     #[caller]
-    public function is(uint64 $want) : UnsignedExpect
+    public const function is(uint64 $want) : UnsignedExpect
     {
         Session::checked();
 
@@ -24,7 +22,7 @@ public class UnsignedExpect
             return $this;
         }
 
-        Failure("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}")->raise();
+        fail("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}");
         return $this;
     }
 
@@ -32,7 +30,7 @@ public class UnsignedExpect
      * The number differs from `$other`.
      */
     #[caller]
-    public function isNot(uint64 $other) : UnsignedExpect
+    public const function isNot(uint64 $other) : UnsignedExpect
     {
         Session::checked();
 
@@ -40,7 +38,7 @@ public class UnsignedExpect
             return $this;
         }
 
-        Failure("expected anything but {$other}", std::src::caller())->raise();
+        fail("expected anything but {$other}", std::src::caller());
         return $this;
     }
 
@@ -48,7 +46,7 @@ public class UnsignedExpect
      * The number is greater than `$bound`.
      */
     #[caller]
-    public function above(uint64 $bound) : UnsignedExpect
+    public const function above(uint64 $bound) : UnsignedExpect
     {
         Session::checked();
 
@@ -56,7 +54,7 @@ public class UnsignedExpect
             return $this;
         }
 
-        Failure("expected more than {$bound}, got {$this->value}", std::src::caller())->raise();
+        fail("expected more than {$bound}, got {$this->value}", std::src::caller());
         return $this;
     }
 
@@ -64,7 +62,7 @@ public class UnsignedExpect
      * The number is less than `$bound`.
      */
     #[caller]
-    public function below(uint64 $bound) : UnsignedExpect
+    public const function below(uint64 $bound) : UnsignedExpect
     {
         Session::checked();
 
@@ -72,7 +70,7 @@ public class UnsignedExpect
             return $this;
         }
 
-        Failure("expected less than {$bound}, got {$this->value}", std::src::caller())->raise();
+        fail("expected less than {$bound}, got {$this->value}", std::src::caller());
         return $this;
     }
 
@@ -80,7 +78,7 @@ public class UnsignedExpect
      * The number lies in `[$low, $high]`, both ends included.
      */
     #[caller]
-    public function between(uint64 $low, uint64 $high) : UnsignedExpect
+    public const function between(uint64 $low, uint64 $high) : UnsignedExpect
     {
         Session::checked();
 
@@ -88,7 +86,7 @@ public class UnsignedExpect
             return $this;
         }
 
-        Failure("expected {$low} to {$high}, got {$this->value}", std::src::caller())->raise();
+        fail("expected {$low} to {$high}, got {$this->value}", std::src::caller());
         return $this;
     }
 }

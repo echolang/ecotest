@@ -6,8 +6,7 @@ namespace ecotest::http;
 public struct Response
 {
     public int64 $status;
-    public array<string> $headerNames = [];
-    public array<string> $headerValues = [];
+    public array<Header> $headers = [];
     public string $body = '';
     public int64 $ms = 0;
 
@@ -21,9 +20,9 @@ public struct Response
      */
     public const function header(const string& $name) : string?
     {
-        for (usize $i = 0; $i < $this->headerNames->count(); $i++) {
-            if (str::iequals($this->headerNames[$i]->view(), $name->view())) {
-                return $this->headerValues[$i];
+        foreach ($this->headers as const &$h) {
+            if (str::iequals($h->name->view(), $name->view())) {
+                return $h->value;
             }
         }
         return null;

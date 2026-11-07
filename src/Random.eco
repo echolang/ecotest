@@ -6,6 +6,9 @@ namespace ecotest;
  */
 public struct Random
 {
+    /**
+     * The generator's current state, never zero.
+     */
     public uint64 $state;
 
     public constructor(uint64 $seed)

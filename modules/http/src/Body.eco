@@ -1,0 +1,63 @@
+namespace ecotest::http;
+
+/**
+ * What a POST, PUT or PATCH sends: the encoded text and its Content-Type. Built at the call from
+ * the encoding's label, so `$api->post('/users', json: '{"id":7}')` reads as it sends.
+ */
+public struct Body
+{
+    /**
+     * The body as it goes on the wire.
+     */
+    public const string $text;
+
+    /**
+     * The Content-Type sent with it.
+     */
+    public const string $type;
+
+    /**
+     * JSON text, sent as it is.
+     */
+    public constructor(json: const string& $text)
+    {
+        $this->text = $text;
+        $this->type = 'application/json';
+    }
+
+    /**
+     * A JSON document, serialized compactly.
+     */
+    public constructor(json: const json::Value& $doc)
+    {
+        $this->text = json::dump($doc->clone());
+        $this->type = 'application/json';
+    }
+
+    /**
+     * Form fields as `a=1&b=two`, with everything but unreserved bytes percent-encoded.
+     */
+    public constructor(form: const map<string, string>& $fields)
+    {
+        string $out = '';
+        foreach ($fields as $key => const &$value) {
+            if (!$out->empty()) {
+                $out->append('&');
+            }
+            $out->append(curl::escape($key));
+            $out->append('=');
+            $out->append(curl::escape($value));
+        }
+        $this->text = mv $out;
+        $this->type = 'application/x-www-form-urlencoded';
+    }
+
+    /**
+     * Any text, sent as `$type`.
+     */
+    public constructor(body: const string& $text, type: const string& $type)
+    {
+        $this->text = $text;
+        $this->type = $type;
+    }
+}

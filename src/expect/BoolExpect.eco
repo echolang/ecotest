@@ -6,18 +6,16 @@ namespace ecotest;
  */
 public class BoolExpect
 {
+    /**
+     * The value under test.
+     */
     public bool $value;
-
-    public constructor(bool $value)
-    {
-        $this->value = $value;
-    }
 
     /**
      * The value is `true`.
      */
     #[caller]
-    public function yes(says: string $what = '') : BoolExpect
+    public const function yes(says: const string& $what = '') : BoolExpect
     {
         Session::checked();
 
@@ -25,7 +23,7 @@ public class BoolExpect
             return $this;
         }
 
-        Failure(BoolExpect::summary('true', $what), std::src::caller())->raise();
+        fail(BoolExpect::summary('true', $what), std::src::caller());
         return $this;
     }
 
@@ -33,7 +31,7 @@ public class BoolExpect
      * The value is `false`.
      */
     #[caller]
-    public function no(says: string $what = '') : BoolExpect
+    public const function no(says: const string& $what = '') : BoolExpect
     {
         Session::checked();
 
@@ -41,7 +39,7 @@ public class BoolExpect
             return $this;
         }
 
-        Failure(BoolExpect::summary('false', $what), std::src::caller())->raise();
+        fail(BoolExpect::summary('false', $what), std::src::caller());
         return $this;
     }
 

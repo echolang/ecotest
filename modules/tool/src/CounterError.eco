@@ -1,0 +1,36 @@
+namespace ecotest::cli;
+
+/**
+ * Why a test's `.ecocov` counter file could not be read.
+ */
+public enum CounterError
+{
+    /**
+     * The file at `$path` is missing or cannot be read.
+     */
+    case unreadable(string $path, std::io::ioerror $cause);
+
+    /**
+     * The file is too short for its header, or the header is not that of a version 2 counter file.
+     */
+    case foreign(string $path);
+
+    /**
+     * The file ends before the counts its header promises, as one cut off mid-write does.
+     */
+    case truncated(string $path);
+}
+
+namespace str;
+
+/**
+ * The reason in words.
+ */
+public function from(const ecotest::cli::CounterError& $e) : string
+{
+    return match ($e) {
+        .unreadable($path, $cause) => "cannot read {$path}: {$cause}",
+        .foreign($path) => "{$path} is not a version 2 counter file",
+        .truncated($path) => "{$path} ends before the counts it promises",
+    };
+}

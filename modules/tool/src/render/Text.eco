@@ -1,72 +1,70 @@
-namespace ecotest::cli;
-
 /**
  * Text helpers the reports share.
  */
-public class Text
+
+namespace ecotest::cli::text;
+
+/**
+ * How many bytes of a line a report shows before cutting.
+ */
+internal const usize WIDTH = 120;
+
+/**
+ * `$text` with every line indented by `$by` spaces.
+ */
+public function indent(const string& $text, usize $by) : string
 {
-    /**
-     * How many bytes of a line a report shows before cutting.
-     */
-    public static usize $width = 120;
+    $pad = str::repeat(' ', $by);
+    $out = '';
+    $first = true;
 
-    /**
-     * `$text` with every line indented by `$by` spaces.
-     */
-    public static function indent(const string& $text, usize $by) : string
-    {
-        $pad = str::repeat(' ', $by);
-        string $out = '';
-        bool $first = true;
-
-        foreach (str::split($text, "\n") as const &$line) {
-            if (!$first) {
-                $out->append("\n");
-            }
-            $first = false;
-            $out->append($pad);
-            $out->append(string($line));
+    foreach (str::split($text, '\n') as const &$line) {
+        if (!$first) {
+            $out->append('\n');
         }
-
-        return $out;
+        $first = false;
+        $out->append($pad);
+        $out->append(string($line));
     }
 
-    /**
-     * `$text` cut to `Text::$width` bytes, with `...` where it was cut.
-     */
-    public static function cut(const string& $text) : string
-    {
-        if ($text->size() <= Text::$width) {
-            return $text;
-        }
+    return $out;
+}
 
-        string $out = $text->sub(0, Text::$width);
-        $out->append('...');
-        return $out;
+/**
+ * `$text` cut to `WIDTH` bytes, with `...` where it was cut.
+ */
+public function cut(const string& $text) : string
+{
+    if ($text->size() <= WIDTH) {
+        return $text;
     }
 
-    /**
-     * `$n` and the word that fits it.
-     */
-    public static function plural(usize $n, const string& $one, const string& $many) : string
-    {
-        if ($n == 1) {
-            return "{$n} {$one}";
-        }
-        return "{$n} {$many}";
-    }
+    $out = $text->sub(0, WIDTH);
+    $out->append('...');
+    return $out;
+}
 
-    /**
-     * The last segment of `$path`.
-     */
-    public static function base(const string& $path) : string
-    {
-        usize $from = 0;
-        for (usize $i = 0; $i < $path->size(); $i++) {
-            if ($path->byte($i) == 47) {
-                $from = $i + 1;
-            }
-        }
-        return $path->sub($from, $path->size() - $from);
+/**
+ * `$n` and the word that fits it.
+ */
+public function plural(usize $n, const string& $one, const string& $many) : string
+{
+    if ($n == 1) {
+        return "{$n} {$one}";
     }
+    return "{$n} {$many}";
+}
+
+/**
+ * The last segment of `$path`.
+ */
+public function base(const string& $path) : string
+{
+    usize $from = 0;
+    for (usize $i = 0; $i < $path->size(); $i++) {
+        if ($path->byte($i) == 47) {
+            $from = $i + 1;
+        }
+    }
+    return $path->sub($from, $path->size() - $from);
 }

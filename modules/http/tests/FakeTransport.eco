@@ -1,36 +1,51 @@
+use ecotest::http::{Transport, Request, Response, TransportError};
+
 /**
  * A transport that answers from memory and remembers what it was sent.
  */
-
-use ecotest::http::{Transport, Request, Response, TransportError};
-
 internal class FakeTransport : Transport
 {
-    public array<string> $lines = [];
-    public array<string> $bodies = [];
-    public array<string> $types = [];
-    public array<usize> $headerCounts = [];
+    public array<Request> $sent = [];
     public Response $answer = Response(200);
     public bool $broken = false;
 
     public function send(const Request& $request) : result<Response, TransportError>
     {
-        $this->lines[] = $request->line();
-        $this->bodies[] = $request->body;
-        $this->headerCounts[] = $request->headerNames->count();
-
-        string $type = '';
-        for (usize $i = 0; $i < $request->headerNames->count(); $i++) {
-            if ($request->headerNames[$i] == 'Content-Type') {
-                $type = $request->headerValues[$i];
-            }
-        }
-        $this->types[] = $type;
+        $this->sent[] = $request;
 
         if ($this->broken) {
-            return .error(.failed('wire cut'));
+            return .error(.refused('wire cut'));
         }
-
         return .ok($this->answer);
+    }
+
+    /**
+     * The request line of everything sent, in order.
+     */
+    public const function lines() : array<string>
+    {
+        array<string> $out = [];
+        foreach ($this->sent as const &$request) {
+            $out[] = $request->line();
+        }
+        return $out;
+    }
+
+    /**
+     * The Content-Type of everything sent, in order, or empty where there was none.
+     */
+    public const function types() : array<string>
+    {
+        array<string> $out = [];
+        foreach ($this->sent as const &$request) {
+            string $type = '';
+            foreach ($request->headers as const &$h) {
+                if ($h->name == 'Content-Type') {
+                    $type = $h->value;
+                }
+            }
+            $out[] = $type;
+        }
+        return $out;
     }
 }

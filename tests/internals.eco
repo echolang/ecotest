@@ -1,19 +1,20 @@
 use ecotest::expect;
-use ecotest::{Json, Show, Session, Event, Diff, Failure, Random};
+use ecotest::{Session, Event, Failure, Random};
+use ecotest::{diff, jsonl, show};
 
 test json_quotes_controls_and_quotes
 {
-    expect(Json::quote("a\"b\\c\nd\te"))->is('"a\\"b\\\\c\\nd\\te"');
+    expect(jsonl::quote("a\"b\\c\nd\te"))->is('"a\\"b\\\\c\\nd\\te"');
 }
 
 test show_quotes_and_escapes_text
 {
-    expect(Show::text("it's\n"))->is("'it\\'s\\n'");
+    expect(show::text("it's\n"))->is("'it\\'s\\n'");
 }
 
 test show_indents_every_line
 {
-    expect(Show::indent("a\nb", 2))->is("  a\n  b");
+    expect(show::indent("a\nb", 2))->is("  a\n  b");
 }
 
 test session_key_matches_the_coverage_file_rule
@@ -23,24 +24,24 @@ test session_key_matches_the_coverage_file_rule
 
 test an_event_renders_one_json_line
 {
-    $line = Event('metric')->text('name', 'rows')->number('value', 12)->texts('tags', ['a', 'b'])->render();
-    expect($line)->is('{"type":"metric","name":"rows","value":12,"tags":["a","b"]}');
+    $event = Event('metric')->text('name', 'rows')->number('value', 12)->texts('tags', ['a', 'b']);
+    expect("{$event}")->is('{"type":"metric","name":"rows","value":12,"tags":["a","b"]}');
 }
 
 test equal_texts_have_no_diff
 {
-    expect(Diff::lines("a\nb", "a\nb"))->empty();
+    expect(diff::lines("a\nb", "a\nb"))->empty();
 }
 
 test a_diff_marks_the_changed_line_with_context
 {
-    expect(Diff::lines("a\nb\nc\nd\ne\nf\ng", "a\nb\nc\nX\ne\nf\ng"))->is("  ...\n  b\n  c\n- d\n+ X\n  e\n  f\n  ...\n");
+    expect(diff::lines("a\nb\nc\nd\ne\nf\ng", "a\nb\nc\nX\ne\nf\ng"))->is("  ...\n  b\n  c\n- d\n+ X\n  e\n  f\n  ...\n");
 }
 
 test a_diff_shows_added_and_removed_lines
 {
-    expect(Diff::lines("a\nb", "a\nb\nc"))->is("  a\n  b\n+ c\n");
-    expect(Diff::lines("a\nb\nc", "a\nc"))->is("  a\n- b\n  c\n");
+    expect(diff::lines("a\nb", "a\nb\nc"))->is("  a\n  b\n+ c\n");
+    expect(diff::lines("a\nb\nc", "a\nc"))->is("  a\n- b\n  c\n");
 }
 
 test a_failure_renders_values_context_and_detail
@@ -48,13 +49,13 @@ test a_failure_renders_values_context_and_detail
     $f = Failure('values differ', std::src::here(), $expected: '1', $actual: '2', $detail: 'more');
     $f->context = ['row 3'];
 
-    expect($f->render())->is("values differ\n  expected: 1\n       got: 2\n  more\n  in row 3");
+    expect("{$f}")->is("values differ\n  expected: 1\n       got: 2\n  more\n  in row 3");
 }
 
 test a_failure_quoting_its_values_says_them_once
 {
     $f = Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2');
-    expect($f->render())->is('expected 1, got 2');
+    expect("{$f}")->is('expected 1, got 2');
 }
 
 test json_spells_other_control_bytes_as_unicode_escapes
@@ -63,7 +64,7 @@ test json_spells_other_control_bytes_as_unicode_escapes
     $bell->push(7);
     $bell->push(31);
 
-    expect(Json::quote($bell))->is('"\\u0007\\u001f"');
+    expect(jsonl::quote($bell))->is('"\\u0007\\u001f"');
 }
 
 test show_spells_out_every_invisible_byte
@@ -71,38 +72,36 @@ test show_spells_out_every_invisible_byte
     string $odd = "a\r\tb";
     $odd->push(1);
 
-    expect(Show::text($odd))->is("'a\\r\\tb\\x1'");
+    expect(show::text($odd))->is("'a\\r\\tb\\x1'");
 }
 
 test show_cuts_long_text
 {
-    string $long = str::repeat('x', 200);
+    $long = str::repeat('x', 200);
 
-    expect(Show::text($long))->endsWith("x...'")->length(125);
-    expect(Show::cut($long))->endsWith('x...')->length(123);
-    expect(Show::cut('short'))->is('short');
+    expect(show::text($long))->ends("x...'")->length(125);
+    expect(show::cut($long))->ends('x...')->length(123);
+    expect(show::cut('short'))->is('short');
 }
 
 test a_diff_keeps_lines_only_one_side_has_at_the_end
 {
-    expect(Diff::lines("a\nb\nc", "a"))->is("  a\n- b\n- c\n");
+    expect(diff::lines("a\nb\nc", "a"))->is("  a\n- b\n- c\n");
 }
 
 test a_huge_diff_names_the_first_differing_line
 {
-    Diff::$limit = 1;
-
-    expect(Diff::lines("a\nb\nc", "a\nx\nc"))->is("first difference at line 2\n- b\n+ x\n");
-    expect(Diff::lines("a\nb", "a"))->is("first difference at line 2\n- b\n+ (end)\n");
-    expect(Diff::lines("a", "a\nb"))->is("first difference at line 2\n- (end)\n+ b\n");
+    expect(diff::lines("a\nb\nc", "a\nx\nc", 1))->is("first difference at line 2\n- b\n+ x\n");
+    expect(diff::lines("a\nb", "a", 1))->is("first difference at line 2\n- b\n+ (end)\n");
+    expect(diff::lines("a", "a\nb", 1))->is("first difference at line 2\n- (end)\n+ b\n");
 }
 
 test random_handles_its_edges
 {
-    Random $zero = Random(0);
+    $zero = Random(0);
     expect($zero->state)->isNot(0);
 
-    Random $r = Random(7);
+    $r = Random(7);
     expect($r->below(0))->is(0);
     expect($r->range(5, 5))->is(5);
     expect($r->range(9, 2))->is(9);

@@ -6,17 +6,18 @@ namespace ecotest;
  */
 public class Gen<T>
 {
-    public function<T(Random&)> $make;
-    public function<array<T>(const T&)> $shrink;
-    public function<string(const T&)> $show;
+    /**
+     * Makes one random value from `Random`.
+     */
+    public const function<T(Random&)> $make;
 
-    public constructor(
-        function<T(Random&)> $make,
-        function<array<T>(const T&)> $shrink,
-        function<string(const T&)> $show
-    ) {
-        $this->make = $make;
-        $this->shrink = $shrink;
-        $this->show = $show;
-    }
+    /**
+     * Offers smaller versions of a failing value for the shrinker to try.
+     */
+    public const function<array<T>(const T&)> $shrink;
+
+    /**
+     * Prints a value for the failure message.
+     */
+    public const function<string(const T&)> $show;
 }

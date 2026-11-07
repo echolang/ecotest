@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
  * What one test process knows about itself: which test it is, where its events go, the open
  * `soft()` and `context()` scopes, and the failures held until a soft scope ends. Started by the
@@ -30,15 +32,15 @@ public class Session
         Session::$started = true;
         Session::$id = string(std::env::var('ECHO_TEST_ID', ''));
 
-        string $dir = string(std::env::var('ECOTEST_RUN_DIR', ''));
+        $dir = string(std::env::var('ECOTEST_RUN_DIR', ''));
         if (!$dir->empty() && !Session::$id->empty()) {
-            string $folder = std::env::join($dir, 'events');
-            result<bool, std::io::ioerror> $made = std::io::mkdir($folder);
-            string $name = Session::key(Session::$id);
+            $folder = std::env::join($dir, 'events');
+            $made = std::io::mkdir($folder);
+            $name = Session::key(Session::$id);
             $name->append('.jsonl');
             Session::$events = std::env::join($folder, $name);
             // a static's field is not a place; the handle is
-            Tally $tally = Session::$tally;
+            $tally = Session::$tally;
             $tally->path = Session::$events;
         }
 
@@ -76,7 +78,7 @@ public class Session
     public static function checked() : void
     {
         Session::start();
-        Tally $tally = Session::$tally;
+        $tally = Session::$tally;
         $tally->checks = $tally->checks + 1;
     }
 
@@ -100,11 +102,11 @@ public class Session
      */
     internal static function append(const string& $path, const string& $line) : void
     {
-        std::io::file $f = guard std::io::append($path) else {
+        $f = guard std::io::append($path) else {
             return;
         };
 
-        result<usize, std::io::ioerror> $wrote = $f->write("{$line}\n");
+        $wrote = $f->write("{$line}\n");
         $f->close();
     }
 
@@ -117,7 +119,7 @@ public class Session
         $failure->context = Session::$context;
 
         if (Session::$soft > 0) {
-            Session::$held[] = $failure;
+            Session::$held[] = mv $failure;
             return;
         }
 
@@ -148,7 +150,7 @@ public class Session
         Session::$reported = true;
         $failure->event()->emit();
         Session::$tally->flush();
-        return $failure->render();
+        return "{$failure}";
     }
 
     /**
@@ -179,9 +181,9 @@ public class Session
         foreach (Session::$held as const &$failure) {
             $failure->event()->emit();
 
-            std::src::location $at = $failure->at;
+            $at = $failure->at;
             $text->append("\n\n{$at->file}:{$at->line}\n");
-            $text->append(Show::indent($failure->render(), 2));
+            $text->append(show::indent("{$failure}", 2));
         }
 
         Session::$tally->flush();

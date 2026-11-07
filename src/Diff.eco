@@ -1,187 +1,183 @@
-namespace ecotest;
-
 /**
  * Line diffs for text checks. `-` lines were expected and are missing, `+` lines came instead, and
  * a few unchanged lines around each change keep the reader oriented.
  */
-internal class Diff
+
+namespace ecotest::diff;
+
+/**
+ * Unchanged lines shown on each side of a change.
+ */
+internal const usize AROUND = 2;
+
+/**
+ * Above this many line pairs the table would be too big, and the diff names the first differing
+ * line instead.
+ */
+internal const usize LIMIT = 1000000;
+
+/**
+ * The diff between `$want` and `$got`, one marked line per row. Empty when they are equal. Past
+ * `$limit` line pairs it names the first differing line instead.
+ */
+internal function lines(const string& $want, const string& $got, usize $limit = LIMIT) : string
 {
-    /**
-     * Unchanged lines shown on each side of a change.
-     */
-    internal static usize $around = 2;
+    $a = str::split($want, "\n")->owned();
+    $b = str::split($got, "\n")->owned();
 
-    /**
-     * Above this many line pairs the table would be too big, and the diff names the first
-     * differing line instead.
-     */
-    internal static usize $limit = 1000000;
-
-    /**
-     * The diff between `$want` and `$got`, one marked line per row. Empty when they are equal.
-     */
-    internal static function lines(const string& $want, const string& $got) : string
-    {
-        array<string> $a = str::split($want, "\n")->owned();
-        array<string> $b = str::split($got, "\n")->owned();
-
-        if ($a->count() * $b->count() > Diff::$limit) {
-            return Diff::first($a, $b);
-        }
-
-        return Diff::render(Diff::walk($a, $b));
+    if ($a->count() * $b->count() > $limit) {
+        return first($a, $b);
     }
 
-    /**
-     * The rows of a longest-common-subsequence walk over two line lists.
-     */
-    private static function walk(const array<string>& $a, const array<string>& $b) : array<DiffLine>
-    {
-        usize $n = $a->count();
-        usize $m = $b->count();
-        usize $w = $m + 1;
+    return render(walk($a, $b));
+}
 
-        // $t[i * w + j] is the common length of a[i..] and b[j..]
-        array<uint32> $t = arr::room<uint32>(($n + 1) * $w);
-        for (usize $k = 0; $k < ($n + 1) * $w; $k++) {
-            $t[] = 0;
-        }
+/**
+ * The rows of a longest-common-subsequence walk over two line lists.
+ */
+private function walk(const array<string>& $a, const array<string>& $b) : array<DiffLine>
+{
+    usize $n = $a->count();
+    usize $m = $b->count();
+    usize $w = $m + 1;
 
-        usize $i = $n;
-        while ($i > 0) {
-            $i--;
-            usize $j = $m;
-            while ($j > 0) {
-                $j--;
-                if ($a[$i] == $b[$j]) {
-                    $t[$i * $w + $j] = $t[($i + 1) * $w + $j + 1] + 1;
-                } else if ($t[($i + 1) * $w + $j] >= $t[$i * $w + $j + 1]) {
-                    $t[$i * $w + $j] = $t[($i + 1) * $w + $j];
-                } else {
-                    $t[$i * $w + $j] = $t[$i * $w + $j + 1];
-                }
-            }
-        }
+    // $t[i * w + j] is the common length of a[i..] and b[j..]
+    $t = arr::room<uint32>(($n + 1) * $w);
+    for (usize $k = 0; $k < ($n + 1) * $w; $k++) {
+        $t[] = 0;
+    }
 
-        array<DiffLine> $rows = [];
-        usize $x = 0;
-        usize $y = 0;
-
-        while ($x < $n && $y < $m) {
-            if ($a[$x] == $b[$y]) {
-                $rows[] = DiffLine(DiffMark::same, $a[$x]);
-                $x++;
-                $y++;
-            } else if ($t[($x + 1) * $w + $y] >= $t[$x * $w + $y + 1]) {
-                $rows[] = DiffLine(DiffMark::want, $a[$x]);
-                $x++;
+    usize $i = $n;
+    while ($i > 0) {
+        $i--;
+        usize $j = $m;
+        while ($j > 0) {
+            $j--;
+            if ($a[$i] == $b[$j]) {
+                $t[$i * $w + $j] = $t[($i + 1) * $w + $j + 1] + 1;
+            } else if ($t[($i + 1) * $w + $j] >= $t[$i * $w + $j + 1]) {
+                $t[$i * $w + $j] = $t[($i + 1) * $w + $j];
             } else {
-                $rows[] = DiffLine(DiffMark::got, $b[$y]);
-                $y++;
+                $t[$i * $w + $j] = $t[$i * $w + $j + 1];
             }
         }
+    }
 
-        while ($x < $n) {
-            $rows[] = DiffLine(DiffMark::want, $a[$x]);
+    array<DiffLine> $rows = [];
+    usize $x = 0;
+    usize $y = 0;
+
+    while ($x < $n && $y < $m) {
+        if ($a[$x] == $b[$y]) {
+            $rows[] = DiffLine(.same, $a[$x]);
             $x++;
-        }
-
-        while ($y < $m) {
-            $rows[] = DiffLine(DiffMark::got, $b[$y]);
+            $y++;
+        } else if ($t[($x + 1) * $w + $y] >= $t[$x * $w + $y + 1]) {
+            $rows[] = DiffLine(.want, $a[$x]);
+            $x++;
+        } else {
+            $rows[] = DiffLine(.got, $b[$y]);
             $y++;
         }
-
-        return $rows;
     }
 
-    /**
-     * The changed rows plus `Diff::$around` unchanged ones on each side, with `...` for what was
-     * left out.
-     */
-    private static function render(const array<DiffLine>& $rows) : string
-    {
-        usize $n = $rows->count();
-        array<bool> $keep = arr::room<bool>($n);
-        for (usize $k = 0; $k < $n; $k++) {
-            $keep[] = false;
+    while ($x < $n) {
+        $rows[] = DiffLine(.want, $a[$x]);
+        $x++;
+    }
+
+    while ($y < $m) {
+        $rows[] = DiffLine(.got, $b[$y]);
+        $y++;
+    }
+
+    return $rows;
+}
+
+/**
+ * The changed rows plus `AROUND` unchanged ones on each side, with `...` for what was left out.
+ */
+private function render(const array<DiffLine>& $rows) : string
+{
+    usize $n = $rows->count();
+    $keep = arr::room<bool>($n);
+    for (usize $k = 0; $k < $n; $k++) {
+        $keep[] = false;
+    }
+
+    bool $changed = false;
+    for (usize $k = 0; $k < $n; $k++) {
+        if ($rows[$k]->mark == DiffMark::same) {
+            continue;
         }
 
-        bool $changed = false;
-        for (usize $k = 0; $k < $n; $k++) {
-            if ($rows[$k]->mark == DiffMark::same) {
-                continue;
-            }
-
-            $changed = true;
-            usize $from = 0;
-            if ($k > Diff::$around) {
-                $from = $k - Diff::$around;
-            }
-
-            usize $to = $k + Diff::$around;
-            for (usize $c = $from; $c <= $to && $c < $n; $c++) {
-                $keep[$c] = true;
-            }
+        $changed = true;
+        usize $from = 0;
+        if ($k > AROUND) {
+            $from = $k - AROUND;
         }
 
-        if (!$changed) {
-            return '';
+        usize $to = $k + AROUND;
+        for (usize $c = $from; $c <= $to && $c < $n; $c++) {
+            $keep[$c] = true;
         }
+    }
 
-        string $out = '';
-        bool $skipped = false;
+    if (!$changed) {
+        return '';
+    }
 
-        for (usize $k = 0; $k < $n; $k++) {
-            if (!$keep[$k]) {
-                $skipped = true;
-                continue;
-            }
+    string $out = '';
+    bool $skipped = false;
 
-            if ($skipped) {
-                $out->append("  ...\n");
-                $skipped = false;
-            }
-
-            DiffLine $row = $rows[$k];
-            if ($row->mark == DiffMark::want) {
-                $out->append('- ');
-            } else if ($row->mark == DiffMark::got) {
-                $out->append('+ ');
-            } else {
-                $out->append('  ');
-            }
-            $out->append($row->text);
-            $out->append("\n");
+    for (usize $k = 0; $k < $n; $k++) {
+        if (!$keep[$k]) {
+            $skipped = true;
+            continue;
         }
 
         if ($skipped) {
             $out->append("  ...\n");
+            $skipped = false;
         }
 
-        return $out;
+        const DiffLine& $row = $rows[$k];
+        $out->append(match ($row->mark) {
+            .want => '- ',
+            .got => '+ ',
+            .same => '  ',
+        });
+        $out->append($row->text);
+        $out->append("\n");
     }
 
-    /**
-     * The first line where two long texts part, for when a full diff would cost too much.
-     */
-    private static function first(const array<string>& $a, const array<string>& $b) : string
-    {
-        usize $k = 0;
-        while ($k < $a->count() && $k < $b->count() && $a[$k] == $b[$k]) {
-            $k++;
-        }
-
-        string $want = '(end)';
-        if ($k < $a->count()) {
-            $want = $a[$k];
-        }
-
-        string $got = '(end)';
-        if ($k < $b->count()) {
-            $got = $b[$k];
-        }
-
-        usize $line = $k + 1;
-        return "first difference at line {$line}\n- {$want}\n+ {$got}\n";
+    if ($skipped) {
+        $out->append("  ...\n");
     }
+
+    return $out;
+}
+
+/**
+ * The first line where two long texts part, for when a full diff would cost too much.
+ */
+private function first(const array<string>& $a, const array<string>& $b) : string
+{
+    usize $k = 0;
+    while ($k < $a->count() && $k < $b->count() && $a[$k] == $b[$k]) {
+        $k++;
+    }
+
+    string $want = '(end)';
+    if ($k < $a->count()) {
+        $want = $a[$k];
+    }
+
+    string $got = '(end)';
+    if ($k < $b->count()) {
+        $got = $b[$k];
+    }
+
+    usize $line = $k + 1;
+    return "first difference at line {$line}\n- {$want}\n+ {$got}\n";
 }

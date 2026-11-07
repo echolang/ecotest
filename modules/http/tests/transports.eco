@@ -4,14 +4,14 @@
  */
 
 use ecotest::expect;
-use ecotest::http::{Api, Service};
+use ecotest::http::{Api, Service, TransportError};
 
 test every_verb_and_body_reaches_the_transport
 {
     $fake = FakeTransport();
     $api = Api(transport: $fake, base: 'http://app/')->with('X-A', '1');
 
-    json::Value $doc = expect(json::parse('{"a":1}'))->ok();
+    $doc = guard json::parse('{"a":1}');
     map<string, string> $form = ['a b' => '1&2~'];
 
     $api->get('/a');
@@ -25,18 +25,18 @@ test every_verb_and_body_reaches_the_transport
     $api->put('/p', body: 'y', type: 'text/csv');
     $api->patch('/p', json: '{}');
 
-    expect($fake->lines)->is([
+    expect($fake->lines())->is([
         'GET http://app/a', 'HEAD http://app/b', 'DELETE http://other/c',
         'POST http://app/p', 'POST http://app/p', 'POST http://app/p', 'POST http://app/p',
         'PUT http://app/p', 'PUT http://app/p', 'PATCH http://app/p',
     ]);
-    expect($fake->bodies[4])->is('{"a":1}');
-    expect($fake->bodies[6])->is('a%20b=1%262~');
-    expect($fake->types)->is([
+    expect($fake->sent[4]->body)->is('{"a":1}');
+    expect($fake->sent[6]->body)->is('a%20b=1%262~');
+    expect($fake->types())->is([
         '', '', '', 'application/json', 'application/json', 'text/plain',
         'application/x-www-form-urlencoded', 'application/json', 'text/csv', 'application/json',
     ]);
-    expect($fake->headerCounts[0])->is(1);
+    expect($fake->sent[0]->headers->count())->is(1);
 }
 
 test form_fields_are_joined
@@ -45,8 +45,8 @@ test form_fields_are_joined
     map<string, string> $form = ['a' => '1', 'b' => '2'];
     Api(transport: $fake)->post('/f', form: $form);
 
-    expect($fake->lines)->is(['POST http://app/f']);
-    expect($fake->bodies[0])->has('a=1')->has('b=2')->has('&')->length(7);
+    expect($fake->lines())->is(['POST http://app/f']);
+    expect($fake->sent[0]->body)->has('a=1')->has('b=2')->has('&')->length(7);
 }
 
 test a_broken_transport_fails_the_first_check
@@ -59,6 +59,15 @@ test a_broken_transport_fails_the_first_check
     });
 
     expect($got)->is(['no response to GET http://app/a: wire cut']);
+}
+
+test a_transport_error_reads_as_its_reason
+{
+    TransportError $curl = .curl(.couldNotConnect);
+    TransportError $refused = .refused('wire cut');
+
+    expect("{$curl}")->is(curl::Error::couldNotConnect->message());
+    expect("{$refused}")->is('wire cut');
 }
 
 test a_named_service_is_read_from_its_variable
@@ -75,10 +84,10 @@ test libcurl_carries_every_verb
     $server = TestServer();
     $api = Api($server->start());
 
-    expect($api->head('/users/1')->error)->empty();
-    expect($api->delete('/users/1')->error)->empty();
-    expect($api->put('/users', json: '{}')->error)->empty();
-    expect($api->patch('/users', json: '{}')->error)->empty();
+    expect($api->head('/users/1')->response)->ok();
+    expect($api->delete('/users/1')->response)->ok();
+    expect($api->put('/users', json: '{}')->response)->ok();
+    expect($api->patch('/users', json: '{}')->response)->ok();
 }
 
 test a_service_a_test_starts_is_stopped_with_it
@@ -96,11 +105,11 @@ test a_service_that_cannot_start_stops_the_test
 #[tests: expects death]
 test a_service_that_never_answers_stops_the_test
 {
-    $deaf = Service('sleep', ['5'], ready: 'http://127.0.0.1:9/', url: '', within: std::time::duration::millis(200));
+    $deaf = Service('sleep', ['5'], ready: 'http://127.0.0.1:9/', url: '', within: .millis(200));
 }
 
 #[tests: expects death]
 test a_service_answering_with_an_error_is_never_ready
 {
-    $lost = Service('python3', ['-m', 'http.server', '18737', '--bind', '127.0.0.1'], ready: 'http://127.0.0.1:18737/missing', url: '', within: std::time::duration::millis(1500));
+    $lost = Service('python3', ['-m', 'http.server', '18737', '--bind', '127.0.0.1'], ready: 'http://127.0.0.1:18737/missing', url: '', within: .millis(1500));
 }

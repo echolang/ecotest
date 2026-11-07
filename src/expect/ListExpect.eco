@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
  * Checks on an `array<T>`. `size`, `empty`, `all`, `any` and `sorted` work on any `T` (`sorted`
  * needs `<`); the checks that compare items (`is`, `has`, `lacks`, `same`) need `==` and print
@@ -7,19 +9,17 @@ namespace ecotest;
  */
 public class ListExpect<T>
 {
+    /**
+     * The value under test.
+     */
     public array<T> $value;
-
-    public constructor(array<T> $value)
-    {
-        $this->value = $value;
-    }
 
     /**
      * The list equals `$want`: same length, same items in the same order. A failure names the
      * first index where they part.
      */
     #[caller]
-    public function is(const array<T>& $want) : ListExpect<T>
+    public const function is(const array<T>& $want) : ListExpect<T>
     {
         Session::checked();
 
@@ -46,12 +46,12 @@ public class ListExpect<T>
             $summary = "lists differ at index {$k}: expected {$w}, got {$g}";
         }
 
-        Failure(
+        fail(
             $summary,
             std::src::caller(),
             $expected: $this->show($want),
             $actual: $this->show($this->value)
-        )->raise();
+        );
         return $this;
     }
 
@@ -59,7 +59,7 @@ public class ListExpect<T>
      * The list holds exactly `$count` items.
      */
     #[caller]
-    public function size(usize $count) : ListExpect<T>
+    public const function size(usize $count) : ListExpect<T>
     {
         Session::checked();
 
@@ -68,7 +68,7 @@ public class ListExpect<T>
             return $this;
         }
 
-        Failure("expected {$count} items, got {$m}", std::src::caller())->raise();
+        fail("expected {$count} items, got {$m}", std::src::caller());
         return $this;
     }
 
@@ -76,7 +76,7 @@ public class ListExpect<T>
      * The list holds no items.
      */
     #[caller]
-    public function empty() : ListExpect<T>
+    public const function empty() : ListExpect<T>
     {
         Session::checked();
 
@@ -85,7 +85,7 @@ public class ListExpect<T>
         }
 
         usize $m = $this->value->count();
-        Failure("expected no items, got {$m}", std::src::caller())->raise();
+        fail("expected no items, got {$m}", std::src::caller());
         return $this;
     }
 
@@ -93,7 +93,7 @@ public class ListExpect<T>
      * Some item equals `$item`.
      */
     #[caller]
-    public function has(const T& $item) : ListExpect<T>
+    public const function has(const T& $item) : ListExpect<T>
     {
         Session::checked();
 
@@ -103,7 +103,7 @@ public class ListExpect<T>
             }
         }
 
-        Failure("expected the list to contain {$item}", std::src::caller(), $actual: $this->show($this->value))->raise();
+        fail("expected the list to contain {$item}", std::src::caller(), $actual: $this->show($this->value));
         return $this;
     }
 
@@ -111,13 +111,13 @@ public class ListExpect<T>
      * No item equals `$item`.
      */
     #[caller]
-    public function lacks(const T& $item) : ListExpect<T>
+    public const function lacks(const T& $item) : ListExpect<T>
     {
         Session::checked();
 
         for (usize $k = 0; $k < $this->value->count(); $k++) {
             if ($this->value[$k] == $item) {
-                Failure("expected the list not to contain {$item}, found at index {$k}", std::src::caller())->raise();
+                fail("expected the list not to contain {$item}, found at index {$k}", std::src::caller());
                 return $this;
             }
         }
@@ -129,7 +129,7 @@ public class ListExpect<T>
      * Every item passes `$test`. A failure names the first one that does not.
      */
     #[caller]
-    public function all(function<bool(const T&)> $test, says: string $what = '') : ListExpect<T>
+    public const function all(function<bool(const T&)> $test, says: const string& $what = '') : ListExpect<T>
     {
         Session::checked();
 
@@ -140,7 +140,7 @@ public class ListExpect<T>
                     $summary = "item {$k} is not {$what}";
                 }
 
-                Failure($summary, std::src::caller())->raise();
+                fail($summary, std::src::caller());
                 return $this;
             }
         }
@@ -152,7 +152,7 @@ public class ListExpect<T>
      * At least one item passes `$test`.
      */
     #[caller]
-    public function any(function<bool(const T&)> $test, says: string $what = '') : ListExpect<T>
+    public const function any(function<bool(const T&)> $test, says: const string& $what = '') : ListExpect<T>
     {
         Session::checked();
 
@@ -167,7 +167,7 @@ public class ListExpect<T>
             $summary = "no item is {$what}";
         }
 
-        Failure($summary, std::src::caller())->raise();
+        fail($summary, std::src::caller());
         return $this;
     }
 
@@ -175,14 +175,14 @@ public class ListExpect<T>
      * The items are in ascending order. Needs `<` on `T`.
      */
     #[caller]
-    public function sorted() : ListExpect<T>
+    public const function sorted() : ListExpect<T>
     {
         Session::checked();
 
         for (usize $k = 1; $k < $this->value->count(); $k++) {
             if ($this->value[$k] < $this->value[$k - 1]) {
                 usize $before = $k - 1;
-                Failure("expected ascending order, item {$k} comes before item {$before}", std::src::caller())->raise();
+                fail("expected ascending order, item {$k} comes before item {$before}", std::src::caller());
                 return $this;
             }
         }
@@ -194,11 +194,11 @@ public class ListExpect<T>
      * The list holds the same items as `$want`, each as often, in any order.
      */
     #[caller]
-    public function same(const array<T>& $want) : ListExpect<T>
+    public const function same(const array<T>& $want) : ListExpect<T>
     {
         Session::checked();
 
-        array<bool> $used = arr::room<bool>($this->value->count());
+        $used = arr::room<bool>($this->value->count());
         for (usize $k = 0; $k < $this->value->count(); $k++) {
             $used[] = false;
         }
@@ -215,12 +215,12 @@ public class ListExpect<T>
             }
 
             if (!$found) {
-                Failure(
+                fail(
                     "expected the same items in any order, {$item} is missing",
                     std::src::caller(),
                     $expected: $this->show($want),
                     $actual: $this->show($this->value)
-                )->raise();
+                );
                 return $this;
             }
         }
@@ -228,12 +228,12 @@ public class ListExpect<T>
         for (usize $k = 0; $k < $this->value->count(); $k++) {
             if (!$used[$k]) {
                 $item = $this->value[$k];
-                Failure(
+                fail(
                     "expected the same items in any order, {$item} is extra",
                     std::src::caller(),
                     $expected: $this->show($want),
                     $actual: $this->show($this->value)
-                )->raise();
+                );
                 return $this;
             }
         }
@@ -253,7 +253,7 @@ public class ListExpect<T>
                 $out->append(', ');
             }
 
-            if ($out->size() > Show::$width) {
+            if ($out->size() > show::WIDTH) {
                 $out->append('...');
                 break;
             }

@@ -1,99 +1,108 @@
-namespace ecotest::cli;
-
 /**
  * Small file chores the tool repeats.
  */
-public class Files
+
+namespace ecotest::cli::files;
+
+/**
+ * Creates `$path` and every missing directory above it. A directory that is already there is
+ * fine; the first one that cannot be made is the failure.
+ */
+public function mkdirs(const string& $path) : status<std::io::ioerror>
 {
-    /**
-     * Creates `$path` and every missing directory above it.
-     */
-    public static function mkdirs(const string& $path) : void
-    {
-        string $built = '';
-        bool $first = true;
+    $built = '';
+    $first = true;
 
-        foreach (str::split($path, '/') as const &$part) {
-            if (!$first) {
-                $built->append('/');
+    foreach (str::split($path, '/') as const &$part) {
+        if (!$first) {
+            $built->append('/');
+        }
+        $first = false;
+        $built->append(string($part));
+
+        if ($built->empty() || $built == '/') {
+            continue;
+        }
+
+        guard std::io::mkdir($built) else ($e) {
+            if (!std::io::exists($built)->or(false)) {
+                return .error($e);
             }
-            $first = false;
-            $built->append(string($part));
-
-            if (!$built->empty() && $built != '/') {
-                result<bool, std::io::ioerror> $made = std::io::mkdir($built);
-            }
-        }
-    }
-
-    /**
-     * `$path` as seen from `$base`: itself when absolute, `$base` when empty, joined onto `$base`
-     * otherwise.
-     */
-    public static function resolve(const string& $base, const string& $path) : string
-    {
-        if ($path->empty()) {
-            return $base;
-        }
-
-        if ($path->starts('/')) {
-            return $path;
-        }
-
-        return std::env::join($base, $path);
-    }
-
-    /**
-     * Writes `$text` to `$path`, saying so on failure. True when it was written.
-     */
-    public static function write(const string& $path, const string& $text) : bool
-    {
-        result<usize, std::io::ioerror> $wrote = std::io::writefile($path, $text);
-        if ($wrote->failed()) {
-            $e = $wrote->failure();
-            std::io::println("ecotest: cannot write {$path}: {$e}");
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * Appends one line to `$path`.
-     */
-    public static function appendLine(const string& $path, const string& $line) : void
-    {
-        std::io::file $f = guard std::io::append($path) else {
-            return;
+            continue;
         };
+    }
 
-        result<usize, std::io::ioerror> $wrote = $f->write("{$line}\n");
+    return .ok;
+}
+
+/**
+ * `$path` as seen from `$base`: itself when absolute, `$base` when empty, joined onto `$base`
+ * otherwise.
+ */
+public function resolve(const string& $base, const string& $path) : string
+{
+    if ($path->empty()) {
+        return $base;
+    }
+
+    if ($path->starts('/')) {
+        return $path;
+    }
+
+    return std::env::join($base, $path);
+}
+
+/**
+ * Writes `$text` to `$path`, replacing what was there.
+ */
+public function write(const string& $path, const string& $text) : status<std::io::ioerror>
+{
+    guard std::io::writefile($path, $text) else ($e) {
+        return .error($e);
+    };
+    return .ok;
+}
+
+/**
+ * Appends one line to `$path`, creating it when it is missing.
+ */
+public function appendLine(const string& $path, const string& $line) : status<std::io::ioerror>
+{
+    $f = guard std::io::append($path) else ($e) {
+        return .error($e);
+    };
+
+    guard $f->write("{$line}\n") else ($e) {
         $f->close();
+        return .error($e);
+    };
+    $f->close();
+    return .ok;
+}
+
+/**
+ * The newest run directory under `$root`, by its name, or null when there is no run yet.
+ */
+public function latest(const string& $root) : string?
+{
+    $best = '';
+
+    $listing = guard std::io::opendir($root) else {
+        return null;
+    };
+
+    foreach ($listing as const &$entry) {
+        $name = $entry->name();
+        if ($entry->is_directory() && $name->starts('run-') && $name > $best) {
+            $best = $name;
+        }
     }
 
-    /**
-     * The newest run directory under `$root`, by its name, or empty.
-     */
-    public static function latest(const string& $root) : string
-    {
-        string $best = '';
+    $listing->close();
 
-        std::io::dir $listing = guard std::io::opendir($root) else {
-            return '';
-        };
-
-        foreach ($listing as const &$entry) {
-            string $name = $entry->name();
-            if ($entry->is_directory() && $name->starts('run-') && $name > $best) {
-                $best = $name;
-            }
-        }
-
-        $listing->close();
-
-        if ($best->empty()) {
-            return '';
-        }
-
-        return std::env::join($root, $best);
+    if ($best->empty()) {
+        return null;
     }
+
+    return std::env::join($root, $best);
 }

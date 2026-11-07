@@ -6,23 +6,21 @@ namespace ecotest;
  */
 public class MaybeExpect<T>
 {
+    /**
+     * The value under test.
+     */
     public T? $value;
-
-    public constructor(T? $value)
-    {
-        $this->value = $value;
-    }
 
     /**
      * The value, or the test stops because it is absent.
      */
     #[caller]
-    public function some() : T
+    public const function some() : T
     {
         Session::checked();
-        std::src::location $at = std::src::caller();
+        $at = std::src::caller();
 
-        T $got = guard $this->value else {
+        $got = guard $this->value else {
             die(Session::report(Failure('expected a value, got null', $at)), $at);
         };
         return $got;
@@ -32,17 +30,17 @@ public class MaybeExpect<T>
      * A value is present and equals `$want`.
      */
     #[caller]
-    public function some(const T& $want) : MaybeExpect<T>
+    public const function some(const T& $want) : MaybeExpect<T>
     {
         Session::checked();
 
-        T $got = guard $this->value else {
-            Failure("expected {$want}, got null", std::src::caller(), $expected: "{$want}", $actual: 'null')->raise();
+        $got = guard $this->value else {
+            fail("expected {$want}, got null", std::src::caller(), $expected: "{$want}", $actual: 'null');
             return $this;
         };
 
         if (!($got == $want)) {
-            Failure("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}")->raise();
+            fail("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}");
         }
 
         return $this;
@@ -52,7 +50,7 @@ public class MaybeExpect<T>
      * No value is present.
      */
     #[caller]
-    public function none() : MaybeExpect<T>
+    public const function none() : MaybeExpect<T>
     {
         Session::checked();
 
@@ -60,7 +58,7 @@ public class MaybeExpect<T>
             return $this;
         }
 
-        Failure('expected null, got a value', std::src::caller())->raise();
+        fail('expected null, got a value', std::src::caller());
         return $this;
     }
 }

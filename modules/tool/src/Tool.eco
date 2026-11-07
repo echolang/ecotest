@@ -1,26 +1,27 @@
 namespace ecotest::cli;
 
+use ecotest::cli::{doc, files, history, html, junit, lcov, markdown, pretty, runjson, terminal};
+
 /**
- * The commands of the ecotest tool, behind the argument parsing in `Cli`. Runs live under
+ * The commands of the ecotest tool, behind the argument parsing in `main`. Runs live under
  * `.ecotest/run-<millis>/` in the project, beside its manifest, with `history.jsonl` beside them:
  * outside echoc's build directory, so `echoc clean` keeps the history and no module name can
- * collide with it. Every path and every program the tool starts is relative to `project`.
+ * collide with it. Every path and every program the tool starts is relative to the project echoc
+ * runs in.
  */
 public class Tool
 {
-    public string $project = '.';
-    public string $echoc = 'echoc';
+    /**
+     * How echoc is run on the module under test, which is where runs and the history live too.
+     */
+    public Invocation $echoc = Invocation();
     public string $git = 'git';
-    public string $buildDir = 'ecobuild';
-    public bool $coverage = false;
 
     /**
      * Whether `run` writes `report.html` into the run directory. Off unless asked for.
      */
     public bool $html = false;
 
-    public usize $repeat = 1;
-    public array<string> $forwarded = [];
     public array<string> $modules = [];
     public array<string> $exclude = [];
     public string $since = '';
@@ -39,6 +40,12 @@ public class Tool
     public command::CLIContext? $live = null;
 
     /**
+     * Whether `ecotest.json` was read already. Its excludes and services append, so a second read
+     * would list everything twice.
+     */
+    private bool $configured = false;
+
+    /**
      * The stream the summary goes to, stdout from the command line. None prints it plain.
      */
     public command::CLIContext? $page = null;
@@ -48,41 +55,50 @@ public class Tool
      */
     public const function root() : string
     {
-        return std::env::join($this->project, '.ecotest');
+        return std::env::join($this->echoc->project, '.ecotest');
     }
 
     /**
      * Reads `ecotest.json` beside the manifest, when there is one: coverage excludes, modules and
-     * thresholds, and the services to start. Flags given on the command line win.
+     * thresholds, and the services to start. Flags given on the command line win. Only the first
+     * call reads it, so `affected` can configure before it hands over to `run`.
      */
     public function configure() : void
     {
-        string $text = Doc::read(std::env::join($this->project, 'ecotest.json'));
+        if ($this->configured) {
+            return;
+        }
+        $this->configured = true;
+
+        // no ecotest.json is no configuration, and so is an empty one
+        $text = guard doc::read(std::env::join($this->echoc->project, 'ecotest.json')) else {
+            return;
+        };
         if ($text->empty()) {
             return;
         }
 
-        json::Value $doc = guard json::parse($text) else ($e) {
+        $doc = guard json::parse($text) else ($e) {
             std::io::println("ecotest: ecotest.json does not parse: {$e->message()}");
             return;
         };
 
-        json::Value $cov = Doc::object($doc, 'coverage');
+        $cov = doc::object($doc, 'coverage');
         if ($cov->isObject()) {
-            foreach (Doc::list($cov, 'exclude') as const &$pattern) {
+            foreach (doc::list($cov, 'exclude') as const &$pattern) {
                 $this->exclude[] = $pattern->asStr() ?? '';
             }
             if ($this->modules->empty()) {
-                foreach (Doc::list($cov, 'modules') as const &$name) {
+                foreach (doc::list($cov, 'modules') as const &$name) {
                     $this->modules[] = $name->asStr() ?? '';
                 }
             }
-            if ($this->gates->minLines < 0.0) {
-                $this->gates->minLines = Doc::decimal($cov, 'min', -1.0);
+            if ($this->gates->minLines == null) {
+                $this->gates->minLines = doc::decimal($cov, 'min');
             }
         }
 
-        $this->services->configure(Doc::list($doc, 'services'));
+        $this->services->configure(doc::list($doc, 'services'));
     }
 
     /**
@@ -93,37 +109,35 @@ public class Tool
         $this->configure();
 
         int64 $stamp = std::time::timestamp::now()->unix_millis();
-        string $dir = std::env::join($this->root(), "run-{$stamp}");
-        Files::mkdirs($dir);
+        $dir = std::env::join($this->root(), "run-{$stamp}");
+        guard files::mkdirs($dir) else ($e) {
+            std::io::println("ecotest: cannot write {$dir}: {$e}");
+            return 1;
+        };
 
-        if (!$this->services->start($dir, $this->project)) {
+        guard $this->services->start($dir, $this->echoc->project) else ($e) {
+            std::io::println("ecotest: {$e}");
             $this->services->stop();
             return 1;
-        }
+        };
 
-        Runner $runner = Runner();
-        $runner->project = $this->project;
-        $runner->echoc = $this->echoc;
-        $runner->buildDir = $this->buildDir;
-        $runner->coverage = $this->coverage;
-        $runner->repeat = $this->repeat;
-        $runner->forwarded = $this->forwarded;
+        $runner = Runner();
         $runner->seed = $stamp as uint64;
-        $runner->envNames = $this->services->envNames;
-        $runner->envValues = $this->services->envValues;
-        LiveView? $view = $this->liveView($dir);
+        $runner->env = $this->services->env;
+        $view = $this->liveView($dir);
         $runner->view = $view;
 
-        bool $ran = $runner->run($dir);
+        $ran = $runner->run($this->echoc, $dir);
         $this->services->stop();
 
-        if (!$ran) {
+        guard $ran else ($e) {
+            std::io::println("ecotest: {$e}");
             return 1;
-        }
+        };
 
         // a watched run was folded as its rows arrived; otherwise it is read back from the directory
-        LiveView $watched = guard $view else {
-            return $this->finish($dir, Run::load($dir));
+        $watched = guard $view else {
+            return $this->finish($dir, Run(readFrom: $dir));
         };
         $watched->run->settle();
         return $this->finish($dir, $watched->run);
@@ -138,31 +152,30 @@ public class Tool
 
         string $dir = $given;
         if ($dir->empty()) {
-            $dir = Files::latest($this->root());
-        }
-        if ($dir->empty()) {
-            std::io::println('ecotest: no run yet; run `ecotest` first');
-            return 1;
+            $newest = guard files::latest($this->root()) else {
+                std::io::println('ecotest: no run yet; run `ecotest` first');
+                return 1;
+            };
+            $dir = $newest;
         }
 
-        Run $run = Run::load($dir);
+        $run = Run(readFrom: $dir);
         array<FileCoverage> $files = [];
-        array<Ratio> $totals = [];
-        $this->measure($dir, $run, $files, $totals);
+        $totals = $this->measure($dir, $run, $files);
         // a stored run is shown with the verdict it got, not judged again: the gates only mark the
         // coverage
-        Verdict $verdict = Verdict::stored($dir, $run, $this->gates);
+        $verdict = Verdict(storedIn: $dir, run: $run, gates: $this->gates);
 
         if ($this->format == 'md') {
-            std::io::print(MarkdownReport::render($run, $files, $totals, $verdict));
+            std::io::print(markdown::render($run, $files, $totals, $verdict));
         } else if ($this->format == 'junit') {
-            std::io::print(JunitReport::render($run));
+            std::io::print(junit::render($run));
         } else if ($this->format == 'lcov') {
-            std::io::print(LcovReport::render($files));
+            std::io::print(lcov::render($files));
         } else if ($this->format == 'html') {
-            std::io::print(HtmlReport::render($run, $files, $totals, $verdict));
+            std::io::print(html::render($run, $files, $totals, $verdict));
         } else if ($this->format == 'json') {
-            std::io::print(JsonReport::render($run, $files, $totals, $verdict));
+            std::io::print(runjson::render($run, $files, $totals, $verdict));
         } else {
             std::io::print($this->summary($run, $files, $totals, $verdict, '', ''));
         }
@@ -173,9 +186,9 @@ public class Tool
     /**
      * `ecotest history`: trends over the last runs.
      */
-    public function history() : int32
+    public const function history() : int32
     {
-        std::io::print(History::render(std::env::join($this->root(), 'history.jsonl'), 15));
+        std::io::print(history::render(std::env::join($this->root(), 'history.jsonl'), 15));
         return 0;
     }
 
@@ -186,29 +199,23 @@ public class Tool
     {
         $this->configure();
 
-        string $dir = Files::latest($this->root());
-        Coverage $c = guard $this->coverageOf($dir) else {
-            std::io::println('ecotest: the newest run has no coverage; run `ecotest --coverage` first');
+        $uncovered = 'ecotest: the newest run has no coverage; run `ecotest --coverage` first';
+        $dir = guard files::latest($this->root()) else {
+            std::io::println($uncovered);
+            return 1;
+        };
+        $c = guard $this->coverageOf($dir) else {
+            std::io::println($uncovered);
             return 1;
         };
 
         // `build` needs somewhere to put a library's binary before it will print; the run keeps it
-        array<string> $args = ['build', '-p', 'decls', '-o', std::env::join($dir, 'decls-bin')];
-        if ($this->buildDir != 'ecobuild') {
-            $args[] = '--build-dir';
-            $args[] = $this->buildDir;
-        }
-
-        std::process::command $decls = std::process::command($this->echoc, $args);
-        $decls->dir($this->project);
-        result<std::process::output, std::io::ioerror> $ran = $decls->output();
-        if ($ran->failed()) {
-            std::io::println("ecotest: cannot run {$this->echoc}");
+        $decls = $this->echoc->command(['build', '-p', 'decls', '-o', std::env::join($dir, 'decls-bin')]);
+        $o = guard $decls->output() else {
+            std::io::println("ecotest: cannot run {$this->echoc->program}");
             return 1;
-        }
-
-        std::process::output $o = $ran->unwrap();
-        json::Value $doc = guard json::parse($o->stdout) else {
+        };
+        $doc = guard json::parse($o->stdout) else {
             std::io::println('ecotest: echoc -p decls did not answer with JSON');
             return 1;
         };
@@ -216,45 +223,45 @@ public class Tool
         usize $total = 0;
         array<string> $untested = [];
 
-        foreach (Doc::list($doc, 'modules') as const &$module) {
-            string $name = Doc::text($module, 'name');
+        foreach (doc::list($doc, 'modules') as const &$module) {
+            $name = doc::text($module, 'name');
             if (!$c->reports($name)) {
                 continue;
             }
 
-            foreach (Doc::list($module, 'declarations') as const &$decl) {
+            foreach (doc::list($module, 'declarations') as const &$decl) {
                 array<json::Value> $callables = [];
-                string $kind = Doc::text($decl, 'kind');
+                $kind = doc::text($decl, 'kind');
 
                 if ($kind == 'function') {
                     $callables[] = $decl;
                 } else {
-                    foreach (Doc::list($decl, 'methods') as const &$m) {
+                    foreach (doc::list($decl, 'methods') as const &$m) {
                         $callables[] = $m;
                     }
-                    foreach (Doc::list($decl, 'constructors') as const &$k) {
+                    foreach (doc::list($decl, 'constructors') as const &$k) {
                         $callables[] = $k;
                     }
                 }
 
                 foreach ($callables as const &$fn) {
-                    if (Doc::text($fn, 'visibility') != 'public') {
+                    if (doc::text($fn, 'visibility') != 'public') {
                         continue;
                     }
 
-                    string $file = Doc::text($fn, 'file');
-                    int64 $line = Doc::number($fn, 'line');
+                    $file = doc::text($fn, 'file');
+                    int64 $line = doc::number($fn, 'line');
                     if ($c->excluded($file)) {
                         continue;
                     }
 
-                    bool $was = guard $c->called($file, $line) else {
+                    $was = guard $c->called($file, $line) else {
                         continue;
                     };
 
                     $total++;
                     if (!$was) {
-                        string $qualified = Doc::text($fn, 'qualified');
+                        $qualified = doc::text($fn, 'qualified');
                         $untested[] = "{$qualified}  {$file}:{$line}";
                     }
                 }
@@ -262,9 +269,8 @@ public class Tool
         }
 
         usize $tested = $total - $untested->count();
-        Ratio $r = Ratio($tested, $total);
-        string $pct = $r->shown();
-        std::io::println("public api  {$tested} of {$total} called by a test ({$pct})");
+        $r = Ratio($tested, $total);
+        std::io::println("public api  {$tested} of {$total} called by a test ({$r})");
         foreach ($untested as const &$line) {
             std::io::println("  never called: {$line}");
         }
@@ -289,15 +295,19 @@ public class Tool
             return 2;
         }
 
-        string $file = $spec->sub(0, $colon);
-        int64 $line = str::int($spec->sub($colon + 1, $spec->size() - $colon - 1)) ?? 0;
+        $file = $spec->sub(0, $colon);
+        int64 $line = guard str::int($spec->sub($colon + 1, $spec->size() - $colon - 1)) else {
+            std::io::println('ecotest: expected <file:line>, for example src/date.eco:42');
+            return 2;
+        };
 
-        Coverage $c = guard $this->coverageOf(Files::latest($this->root())) else {
+        $this->configure();
+        $c = guard $this->newest() else {
             std::io::println('ecotest: the newest run has no coverage; run `ecotest --coverage` first');
             return 1;
         };
 
-        array<string> $ids = $c->testsAt($file, $line);
+        $ids = $c->testsAt($file, $line);
         if ($ids->empty()) {
             std::io::println("no test ran {$file}:{$line}");
             return 0;
@@ -315,30 +325,31 @@ public class Tool
      */
     public function affected() : int32
     {
-        Coverage $c = guard $this->coverageOf(Files::latest($this->root())) else {
+        $this->configure();
+        $c = guard $this->newest() else {
             std::io::println('ecotest: needs a run with coverage to know which tests touch what; run `ecotest --coverage` first');
             return 1;
         };
 
-        GitDiff $diff = guard GitDiff::since($this->git, $this->project, $this->since) else {
-            std::io::println("ecotest: git diff {$this->since} failed");
+        $diff = guard GitDiff::since($this->git, $this->echoc->project, $this->since) else ($e) {
+            std::io::println("ecotest: {$e}");
             return 1;
         };
 
         array<string> $names = [];
+        map<string, bool> $named = [];
 
-        for (usize $i = 0; $i < $diff->files->count(); $i++) {
-            foreach ($diff->lines[$i] as const &$line) {
-                foreach ($c->testsAt($diff->files[$i], $line) as const &$id) {
+        foreach ($diff->files as const &$changed) {
+            foreach ($changed->lines as const &$line) {
+                foreach ($c->testsAt($changed->path, $line) as const &$id) {
+                    // an id without `::` has no test name to filter on; sub() would underflow
                     usize $sep = $id->find('::');
-                    string $name = $id->sub($sep + 2, $id->size() - $sep - 2);
-                    bool $seen = false;
-                    foreach ($names as const &$n) {
-                        if ($n == $name) {
-                            $seen = true;
-                        }
+                    if ($sep >= $id->size()) {
+                        continue;
                     }
-                    if (!$seen) {
+                    $name = $id->sub($sep + 2, $id->size() - $sep - 2);
+                    if (!$named->has($name)) {
+                        $named->set($name, true);
                         $names[] = $name;
                     }
                 }
@@ -353,39 +364,56 @@ public class Tool
         usize $count = $names->count();
         std::io::println("ecotest: {$count} tests touch lines changed since {$this->since}");
         foreach ($names as const &$name) {
-            $this->forwarded[] = '--filter';
-            $this->forwarded[] = $name;
+            $this->echoc->forwarded[] = '--filter';
+            $this->echoc->forwarded[] = $name;
         }
 
         return $this->run();
     }
 
     /**
-     * Judges, renders and stores `$run`, finished in `$dir`. Returns the process exit code.
+     * Judges, renders and stores `$run`, finished in `$dir`. Returns the process exit code: 1 when
+     * the run is red or one of its reports could not be written.
      */
-    private function finish(const string& $dir, const Run& $run) : int32
+    private const function finish(const string& $dir, const Run& $run) : int32
     {
         array<FileCoverage> $files = [];
-        array<Ratio> $totals = [];
-        $this->measure($dir, $run, $files, $totals);
+        $totals = $this->measure($dir, $run, $files);
 
-        Ratio? $diff = $this->changed($files);
-        Verdict $verdict = $this->gates->check($run, $totals, $diff);
+        $diff = $this->changed($files);
+        $verdict = $this->gates->check($run, $totals, $diff);
 
-        Files::write(std::env::join($dir, 'run.json'), JsonReport::render($run, $files, $totals, $verdict));
-        Files::write(std::env::join($dir, 'summary.md'), MarkdownReport::render($run, $files, $totals, $verdict));
-        Files::write(std::env::join($dir, 'junit.xml'), JunitReport::render($run));
+        // each report's text by the path it is written to, in the order they are written
+        ordered_map<string, string> $reports = [];
+        $reports->set(std::env::join($dir, 'run.json'), runjson::render($run, $files, $totals, $verdict));
+        $reports->set(std::env::join($dir, 'summary.md'), markdown::render($run, $files, $totals, $verdict));
+        $reports->set(std::env::join($dir, 'junit.xml'), junit::render($run));
         if (!$files->empty()) {
-            Files::write(std::env::join($dir, 'lcov.info'), LcovReport::render($files));
+            $reports->set(std::env::join($dir, 'lcov.info'), lcov::render($files));
         }
 
-        string $report = '';
+        $report = '';
         if ($this->html) {
             $report = std::env::join($dir, 'report.html');
-            Files::write($report, HtmlReport::render($run, $files, $totals, $verdict));
+            $reports->set($report, html::render($run, $files, $totals, $verdict));
         }
 
-        History::append(std::env::join($this->root(), 'history.jsonl'), $dir, $run, $totals);
+        // every report is attempted; one that could not be written fails the run once it is shown
+        usize $unwritten = 0;
+        foreach ($reports as $path => const &$text) {
+            guard files::write($path, $text) else ($e) {
+                std::io::println("ecotest: cannot write {$path}: {$e}");
+                $unwritten++;
+                continue;
+            };
+        }
+
+        // a run the history misses is still a run: said, but not failed
+        $historyPath = std::env::join($this->root(), 'history.jsonl');
+        $kept = history::append($historyPath, $dir, $run, $totals);
+        if ($kept->failed()) {
+            std::io::println("ecotest: cannot write {$historyPath}: {$kept->failure()}");
+        }
 
         if (!$run->green()) {
             std::io::print($this->services->tails($dir, 12));
@@ -393,23 +421,24 @@ public class Tool
 
         std::io::print($this->summary($run, $files, $totals, $verdict, $this->diffText($diff), $report));
 
-        if (!$verdict->green) {
+        if (!$verdict->green || $unwritten > 0) {
             return 1;
         }
         return 0;
     }
 
     /**
-     * Fills `$files` and `$totals` from the coverage of `$run`, kept in `$dir`, when it has any.
+     * Fills `$files` from the coverage of `$run`, kept in `$dir`, and answers its totals, or null
+     * when the run has no coverage.
      */
-    private const function measure(const string& $dir, const Run& $run, array<FileCoverage>& $files, array<Ratio>& $totals) : void
+    private const function measure(const string& $dir, const Run& $run, array<FileCoverage>& $files) : Totals?
     {
-        Coverage $c = guard $this->scoped($dir, $run) else {
-            return;
+        $c = guard $this->scoped($dir, $run) else {
+            return null;
         };
 
         $files = $c->files();
-        $totals = $c->totals($files);
+        return Coverage::totals($files);
     }
 
     /**
@@ -422,7 +451,8 @@ public class Tool
             return null;
         }
 
-        GitDiff $d = guard GitDiff::since($this->git, $this->project, $this->since) else {
+        $d = guard GitDiff::since($this->git, $this->echoc->project, $this->since) else ($e) {
+            std::io::println("ecotest: no diff coverage: {$e}");
             return null;
         };
 
@@ -434,25 +464,24 @@ public class Tool
      */
     private const function diffText(Ratio? $diff) : string
     {
-        Ratio $d = guard $diff else {
+        $d = guard $diff else {
             return '';
         };
 
-        string $pct = $d->shown();
-        return "{$pct} of {$d->total} changed lines with code ran since {$this->since}";
+        return "{$d} of {$d->total} changed lines with code ran since {$this->since}";
     }
 
     /**
      * The summary the terminal gets: styled when the page takes it, plain otherwise. `$diff` and
      * `$report` are left out when empty.
      */
-    private const function summary(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
+    private const function summary(const Run& $run, const array<FileCoverage>& $files, Totals? $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
     {
-        Look $look = guard $this->look() else {
-            return TerminalReport::render($run, $files, $totals, $verdict, $diff, $report);
+        $look = guard $this->look() else {
+            return terminal::render($run, $files, $totals, $verdict, $diff, $report);
         };
 
-        return PrettyReport::render($look, $run, $files, $totals, $verdict, $diff, $report);
+        return pretty::render($look, $run, $files, $totals, $verdict, $diff, $report);
     }
 
     /**
@@ -482,9 +511,22 @@ public class Tool
         if (!$this->style->live($live->caps)) {
             return null;
         }
-        LiveView $view = LiveView($live);
+        $view = LiveView($live);
         $view->run = Run($dir);
         return $view;
+    }
+
+    /**
+     * The coverage of the newest run with this tool's module scope and excludes, or null when
+     * there is no run or it has no coverage.
+     */
+    private const function newest() : Coverage?
+    {
+        $dir = guard files::latest($this->root()) else {
+            return null;
+        };
+
+        return $this->coverageOf($dir);
     }
 
     /**
@@ -492,11 +534,7 @@ public class Tool
      */
     private const function coverageOf(const string& $dir) : Coverage?
     {
-        if ($dir->empty()) {
-            return null;
-        }
-
-        return $this->scoped($dir, Run::load($dir));
+        return $this->scoped($dir, Run(readFrom: $dir));
     }
 
     /**
@@ -504,17 +542,17 @@ public class Tool
      */
     private const function scoped(const string& $dir, const Run& $run) : Coverage?
     {
-        Coverage $c = guard Coverage::load($dir) else {
+        $c = guard Coverage::load($dir) else {
             return null;
         };
         $c->exclude = $this->exclude;
-        $c->modules = $this->modules;
+        foreach ($this->modules as const &$name) {
+            $c->modules->set($name, true);
+        }
 
         // the modules whose tests ran are the ones under test; --coverage-module adds to them
         foreach ($run->tests as const &$test) {
-            if (!$c->reports($test->module)) {
-                $c->modules[] = $test->module;
-            }
+            $c->modules->set($test->module, true);
         }
 
         return $c;

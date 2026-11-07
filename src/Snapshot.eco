@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::diff;
+
 /**
  * Snapshot files. The n-th snapshot a test takes lives at
  * `<test file dir>/__snapshots__/<file stem>/<test name>.<n>.snap`, so a snapshot moves with the
@@ -20,74 +22,72 @@ internal class Snapshot
     {
         Session::checked();
 
-        string $file = string(std::env::var('ECHO_TEST_FILE', ''));
-        string $name = string(std::env::var('ECHO_TEST_NAME', ''));
+        $file = string(std::env::var('ECHO_TEST_FILE', ''));
+        $name = string(std::env::var('ECHO_TEST_NAME', ''));
 
         if ($file->empty() || $name->empty()) {
-            Failure('snapshots need ECHO_TEST_FILE and ECHO_TEST_NAME, which echoc test sets', $at)->raise();
+            fail('snapshots need ECHO_TEST_FILE and ECHO_TEST_NAME, which echoc test sets', $at);
             return;
         }
 
         Snapshot::$taken = Snapshot::$taken + 1;
         usize $n = Snapshot::$taken;
 
-        string $root = std::env::join(Snapshot::directory($file), '__snapshots__');
-        string $folder = std::env::join($root, Snapshot::stem($file));
-        string $path = std::env::join($folder, "{$name}.{$n}.snap");
-        result<string, std::io::ioerror> $stored = std::io::readfile($path);
+        $root = std::env::join(Snapshot::directory($file), '__snapshots__');
+        $folder = std::env::join($root, Snapshot::stem($file));
+        $path = std::env::join($folder, "{$name}.{$n}.snap");
 
-        if ($stored->failed()) {
+        $want = guard std::io::readfile($path) else {
             if (Snapshot::flag('ECOTEST_CI')) {
-                Failure("snapshot {$path} does not exist, and ECOTEST_CI forbids writing it", $at)->raise();
+                fail("snapshot {$path} does not exist, and ECOTEST_CI forbids writing it", $at);
                 return;
             }
 
-            if (Snapshot::write($root, $folder, $path, $value, $at)) {
-                Event('snapshot-new')->text('path', $path)->at($at)->emit();
-            }
+            guard Snapshot::write($root, $folder, $path, $value) else ($e) {
+                fail("cannot write snapshot {$path}: {$e}", $at);
+                return;
+            };
+            Event('snapshot-new')->text('path', $path)->at($at)->emit();
             return;
-        }
+        };
 
-        string $want = $stored->unwrap();
         if ($want == $value) {
             return;
         }
 
         if (Snapshot::flag('ECOTEST_UPDATE')) {
-            if (Snapshot::write($root, $folder, $path, $value, $at)) {
-                Event('snapshot-updated')->text('path', $path)->at($at)->emit();
-            }
+            guard Snapshot::write($root, $folder, $path, $value) else ($e) {
+                fail("cannot write snapshot {$path}: {$e}", $at);
+                return;
+            };
+            Event('snapshot-updated')->text('path', $path)->at($at)->emit();
             return;
         }
 
-        string $detail = "(- snapshot, + now)\n";
-        $detail->append(Diff::lines($want, $value));
+        $detail = "(- snapshot, + now)\n";
+        $detail->append(diff::lines($want, $value));
         $detail->append("\nrerun with ECOTEST_UPDATE=1 to accept the new value");
-        Failure("snapshot {$name}.{$n} changed", $at, $detail: $detail)->raise();
+        fail("snapshot {$name}.{$n} changed", $at, $detail: $detail);
     }
 
     /**
-     * Writes a snapshot file and the two folders above it. False, with the check failed, when it
-     * cannot.
+     * Writes a snapshot file and the two folders above it. A folder that cannot be made shows up
+     * as the file's write error.
      */
     private static function write(
         const string& $root,
         const string& $folder,
         const string& $path,
-        const string& $value,
-        std::src::location $at
-    ) : bool {
-        result<bool, std::io::ioerror> $made = std::io::mkdir($root);
+        const string& $value
+    ) : status<std::io::ioerror> {
+        $made = std::io::mkdir($root);
         $made = std::io::mkdir($folder);
-        result<usize, std::io::ioerror> $wrote = std::io::writefile($path, $value);
 
-        if ($wrote->failed()) {
-            $e = $wrote->failure();
-            Failure("cannot write snapshot {$path}: {$e}", $at)->raise();
-            return false;
-        }
+        guard std::io::writefile($path, $value) else ($e) {
+            return .error($e);
+        };
 
-        return true;
+        return .ok;
     }
 
     /**
@@ -95,7 +95,7 @@ internal class Snapshot
      */
     private static function flag(const string& $name) : bool
     {
-        string $value = string(std::env::var($name, ''));
+        $value = string(std::env::var($name, ''));
         return !$value->empty() && $value != '0';
     }
 
@@ -104,10 +104,9 @@ internal class Snapshot
      */
     private static function directory(const string& $path) : string
     {
-        usize $cut = Snapshot::lastSlash($path);
-        if ($cut == $path->size()) {
+        $cut = guard Snapshot::lastSlash($path) else {
             return '.';
-        }
+        };
 
         return $path->sub(0, $cut);
     }
@@ -117,12 +116,7 @@ internal class Snapshot
      */
     private static function stem(const string& $path) : string
     {
-        usize $cut = Snapshot::lastSlash($path);
-        string $base = $path;
-        if ($cut != $path->size()) {
-            $base = $path->sub($cut + 1, $path->size() - $cut - 1);
-        }
-
+        $base = Snapshot::base($path);
         usize $dot = $base->size();
         for (usize $i = 0; $i < $base->size(); $i++) {
             if ($base->byte($i) == 46) {
@@ -134,11 +128,23 @@ internal class Snapshot
     }
 
     /**
-     * The index of the last `/` in `$path`, or its size when there is none.
+     * The file name of `$path`: everything after the last `/`, or all of it when there is none.
      */
-    private static function lastSlash(const string& $path) : usize
+    private static function base(const string& $path) : string
     {
-        usize $cut = $path->size();
+        $cut = guard Snapshot::lastSlash($path) else {
+            return $path;
+        };
+
+        return $path->sub($cut + 1, $path->size() - $cut - 1);
+    }
+
+    /**
+     * The index of the last `/` in `$path`, or null when there is none.
+     */
+    private static function lastSlash(const string& $path) : usize?
+    {
+        usize? $cut = null;
         for (usize $i = 0; $i < $path->size(); $i++) {
             if ($path->byte($i) == 47) {
                 $cut = $i;

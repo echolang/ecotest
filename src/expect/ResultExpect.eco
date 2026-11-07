@@ -8,12 +8,10 @@ namespace ecotest;
  */
 public class ResultExpect<T, E>
 {
+    /**
+     * The value under test.
+     */
     public result<T, E> $value;
-
-    public constructor(result<T, E> $value)
-    {
-        $this->value = $value;
-    }
 
     /**
      * The value, or the test stops with the error.
@@ -22,13 +20,12 @@ public class ResultExpect<T, E>
     public function ok() : T
     {
         Session::checked();
+        $at = std::src::caller();
 
-        if (!$this->value->has_value()) {
-            $e = $this->value->failure();
-            Failure("expected ok, got error {$e}", std::src::caller(), $actual: "{$e}")->stop();
-        }
-
-        return $this->value->unwrap();
+        $got = guard $this->value else ($e) {
+            die(Session::report(Failure("expected ok, got error {$e}", $at, $actual: "{$e}")), $at);
+        };
+        return $got;
     }
 
     /**
@@ -39,15 +36,13 @@ public class ResultExpect<T, E>
     {
         Session::checked();
 
-        if (!$this->value->has_value()) {
-            $e = $this->value->failure();
-            Failure("expected ok {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}")->raise();
+        $got = guard $this->value else ($e) {
+            fail("expected ok {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}");
             return $this;
-        }
+        };
 
-        $got = $this->value->unwrap();
         if (!($got == $want)) {
-            Failure("expected ok {$want}, got ok {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}")->raise();
+            fail("expected ok {$want}, got ok {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}");
         }
 
         return $this;
@@ -79,13 +74,13 @@ public class ResultExpect<T, E>
         Session::checked();
 
         if ($this->value->has_value()) {
-            Failure("expected error {$want}, got ok", std::src::caller(), $expected: "{$want}")->raise();
+            fail("expected error {$want}, got ok", std::src::caller(), $expected: "{$want}");
             return $this;
         }
 
         $e = $this->value->failure();
         if (!($e == $want)) {
-            Failure("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}")->raise();
+            fail("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}");
         }
 
         return $this;

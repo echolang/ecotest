@@ -1,0 +1,11 @@
+namespace ecotest::cli;
+
+/**
+ * How one pass of a test went, as echoc's report row says: its outcome and how long it took, in
+ * milliseconds.
+ */
+public struct Attempt
+{
+    public Outcome $outcome;
+    public int64 $ms;
+}

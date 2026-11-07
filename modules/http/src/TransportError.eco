@@ -6,19 +6,26 @@ namespace ecotest::http;
 public enum TransportError
 {
     /**
-     * Nothing answered: refused, unreachable, timed out, or the transport broke.
+     * libcurl got nothing back: refused, unreachable, timed out, or a URL it could not use.
      */
-    case failed(string $why);
+    case curl(curl::Error $cause);
 
     /**
-     * The reason, for a failure report.
+     * A transport other than libcurl, such as one that dispatches in process, could not deliver
+     * the request, for the reason given.
      */
-    public const function message() : string
-    {
-        match ($this) {
-            TransportError::failed($why) => {
-                return $why;
-            },
-        };
-    }
+    case refused(string $reason);
+}
+
+namespace str;
+
+/**
+ * The reason in words, as a failure report shows it: libcurl's sentence, or the transport's own.
+ */
+public function from(const ecotest::http::TransportError& $e) : string
+{
+    return match ($e) {
+        .curl($cause) => "{$cause}",
+        .refused($reason) => $reason,
+    };
 }

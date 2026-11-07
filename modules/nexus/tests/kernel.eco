@@ -6,11 +6,11 @@ use ecotest::http::{Api, KernelTransport};
 use nexus::testing::TestApp;
 use container::Container;
 
-class KEcho : nexus::Action
+internal class KEcho : nexus::Action
 {
     public function handle(nexus::Payload& $payload) : nexus::Response
     {
-        json::Value $o = json::object();
+        $o = json::object();
         $o['method'] = json::str($payload->request->method->verb());
         $o['body'] = json::str($payload->request->body);
         $o['who'] = json::str($payload->request->header('X-Who') ?? '');
@@ -18,7 +18,7 @@ class KEcho : nexus::Action
     }
 }
 
-class KApp : nexus::Extension
+internal class KApp : nexus::Extension
 {
     public function name() : string
     {
@@ -31,13 +31,13 @@ class KApp : nexus::Extension
             return KEcho();
         });
 
-        array<nexus::Method> $m = [nexus::Method::get, nexus::Method::post];
+        array<nexus::Method> $m = [.get, .post];
         array<nexus::MiddlewareRef> $w = [];
-        function<nexus::Response(nexus::Payload&)> $d = function(nexus::Payload& $payload) : nexus::Response {
-            KEcho $a = $payload->get<KEcho>();
+        $d = function(nexus::Payload& $payload) : nexus::Response {
+            $a = $payload->get<KEcho>();
             return $a->handle($payload);
         };
-        function<bool(Container)> $b = function(Container $services) : bool {
+        $b = function(Container $services) : bool {
             return $services->has<KEcho>();
         };
         $s->route(nexus::Route($m, '/echo', 'KEcho', $d, $b, $w));
@@ -48,7 +48,7 @@ class KApp : nexus::Extension
 test an_api_runs_against_the_kernel_in_process
 {
     array<nexus::Extension> $exts = [KApp()];
-    TestApp $app = TestApp::boot($exts);
+    $app = TestApp::boot($exts);
     $api = Api(transport: KernelTransport($app->kernel));
 
     $api->with('X-Who', 'tester')->get('/echo')->ok()->json('$.method', 'GET')->json('$.who', 'tester');
@@ -59,7 +59,7 @@ test an_api_runs_against_the_kernel_in_process
 test every_verb_and_any_url_shape_reaches_the_kernel
 {
     array<nexus::Extension> $exts = [KApp()];
-    TestApp $app = TestApp::boot($exts);
+    $app = TestApp::boot($exts);
     $api = Api(transport: KernelTransport($app->kernel), base: '');
 
     $api->get('/echo')->ok();

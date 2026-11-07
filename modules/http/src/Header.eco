@@ -1,0 +1,17 @@
+namespace ecotest::http;
+
+/**
+ * One header of a request or a response: its name as written, and its value.
+ */
+public struct Header
+{
+    /**
+     * The name as it was written. Lookups compare it without case.
+     */
+    public string $name;
+
+    /**
+     * The value, as it goes on the wire.
+     */
+    public string $value;
+}

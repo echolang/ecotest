@@ -1,0 +1,31 @@
+namespace ecotest::cli;
+
+/**
+ * Where a counter sits: the module's file, its line and column, and its branch edge. Counters of
+ * two instances of one generic body share a spot, which is how coverage merges them.
+ */
+internal struct Spot
+{
+    public string $file;
+    public int64 $line;
+    public int64 $column;
+    public string $edge;
+}
+
+/**
+ * True when two spots name the same place.
+ */
+operator (const Spot& $a) == (const Spot& $b) : bool
+{
+    return $a->line == $b->line && $a->column == $b->column && $a->edge == $b->edge && $a->file == $b->file;
+}
+
+namespace hash;
+
+/**
+ * The hash of `$spot`, so a map can key on it.
+ */
+internal function of(const ecotest::cli::Spot& $spot) : uint64
+{
+    return combine(combine(of($spot->file), of($spot->line)), combine(of($spot->column), of($spot->edge)));
+}

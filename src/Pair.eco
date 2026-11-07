@@ -5,6 +5,13 @@ namespace ecotest;
  */
 public struct Pair<A, B>
 {
+    /**
+     * The value from the first generator.
+     */
     public A $first;
+
+    /**
+     * The value from the second generator.
+     */
     public B $second;
 }

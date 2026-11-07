@@ -8,13 +8,13 @@ namespace ecotest;
 #[caller]
 public function eventually(
     function<bool()> $ready,
-    within: std::time::duration $limit = std::time::duration::secs(2),
-    every: std::time::duration $pause = std::time::duration::millis(10)
+    within: std::time::duration $limit = .secs(2),
+    every: std::time::duration $pause = .millis(10)
 ) : void {
-    std::src::location $at = std::src::caller();
+    $at = std::src::caller();
     Session::checked();
 
-    std::time::instant $started = std::time::instant::now();
+    $started = std::time::instant::now();
     usize $tries = 0;
 
     while (true) {
@@ -25,7 +25,7 @@ public function eventually(
 
         if ($started->elapsed()->as_millis() >= $limit->as_millis()) {
             int64 $ms = $limit->as_millis();
-            Failure("not ready after {$ms} ms ({$tries} tries)", $at)->raise();
+            fail("not ready after {$ms} ms ({$tries} tries)", $at);
             return;
         }
 

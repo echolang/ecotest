@@ -3,7 +3,7 @@
  */
 
 use ecotest::expect;
-use ecotest::http::{Reply};
+use ecotest::http::{Header, Reply};
 
 test a_request_without_a_response_fails_every_check_with_the_reason
 {
@@ -20,7 +20,7 @@ test a_request_without_a_response_fails_every_check_with_the_reason
 
 test status_header_and_body_failures_show_the_exchange
 {
-    Reply $r = reply(200, 'plain text', ['Content-Type', 'text/plain', 'X-Id', '7']);
+    $r = reply(200, 'plain text', [Header('Content-Type', 'text/plain'), Header('X-Id', '7')]);
     $r->ok()->header('x-id', '7')->type('text/')->body('plain text')->has('plain');
 
     $failures = ecotest::caught(function() : void {
@@ -43,7 +43,7 @@ test status_header_and_body_failures_show_the_exchange
     expect($summaries[4])->is('the body differs');
     expect($summaries[5])->is("expected the body to contain 'zzz'");
     expect($summaries[6])->is('expected an answer within 0 ms, took 0 ms');
-    expect($summaries[7])->startsWith('expected a JSON body (');
+    expect($summaries[7])->starts('expected a JSON body (');
     expect($summaries[8])->is('expected a 2xx status, got 500');
     expect($summaries[9])->is('expected a 2xx status, got 101');
     expect($summaries[10])->is("expected Content-Type text/plain, got ''");
@@ -54,7 +54,7 @@ test status_header_and_body_failures_show_the_exchange
 
 test json_failures_name_the_path
 {
-    Reply $r = reply(200, '{"s":"a","i":1,"f":1.5,"b":true,"n":null,"l":[1,2],"o":{"k":1}}');
+    $r = reply(200, '{"s":"a","i":1,"f":1.5,"b":true,"n":null,"l":[1,2],"o":{"k":1}}');
     $r->json('$.s', 'a')->json('$.i', 1)->json('$.f', 1.5)->json('$.b', true)->isNull('$.n')
         ->present('$.o.k')->count('$.l', 2)
         ->matches('$.l[*]', (const json::Value& $v) : bool => ($v->asInt() ?? 0) > 0);
@@ -86,7 +86,7 @@ test json_failures_name_the_path
 
 test capture_hands_back_text_or_json
 {
-    Reply $r = reply(200, '{"s":"a","i":1,"o":{"k":1}}');
+    $r = reply(200, '{"s":"a","i":1,"o":{"k":1}}');
 
     expect($r->capture('$.s'))->is('a');
     expect($r->capture('$.i'))->is('1');
@@ -96,13 +96,13 @@ test capture_hands_back_text_or_json
 #[tests: expects death]
 test capture_stops_on_a_body_that_is_not_json
 {
-    string $id = reply(200, 'plain')->capture('$.id');
+    $id = reply(200, 'plain')->capture('$.id');
 }
 
 #[tests: expects death]
 test capture_stops_when_nothing_is_there
 {
-    string $id = reply(200, '{}')->capture('$.id');
+    $id = reply(200, '{}')->capture('$.id');
 }
 
 test a_long_body_is_cut_in_the_report
@@ -111,7 +111,7 @@ test a_long_body_is_cut_in_the_report
         reply(500, str::repeat('x', 1300))->ok();
     });
 
-    expect($failures[0]->detail)->endsWith("\n   ... 100 more bytes");
+    expect($failures[0]->detail)->ends("\n   ... 100 more bytes");
 }
 
 test a_body_that_is_not_json_is_snapshot_as_it_is
@@ -123,6 +123,6 @@ test a_body_that_is_not_json_is_snapshot_as_it_is
 test capture_stops_even_inside_caught_on_a_body_that_is_not_json
 {
     $failures = ecotest::caught(function() : void {
-        string $id = reply(200, 'plain')->capture('$.id');
+        $id = reply(200, 'plain')->capture('$.id');
     });
 }

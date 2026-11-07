@@ -1,12 +1,12 @@
 namespace ecotest::cli;
 
 /**
- * Hit out of total, for lines, branches and functions.
+ * Hit out of total, for lines, branches and functions. `"{$ratio}"` prints the percentage.
  */
 public struct Ratio
 {
-    public usize $hit;
-    public usize $total;
+    public usize $hit = 0;
+    public usize $total = 0;
 
     /**
      * The percentage hit, 100 when there is nothing to hit.
@@ -19,13 +19,23 @@ public struct Ratio
 
         return 100.0 * ($this->hit as float64) / ($this->total as float64);
     }
+}
 
-    /**
-     * `81.4%`, one decimal.
-     */
-    public const function shown() : string
-    {
-        float64 $p = $this->percent();
-        return "{$p:.1f}%";
-    }
+namespace str;
+
+/**
+ * `$r` as a percentage with one decimal: `81.4%`.
+ */
+public function from(const ecotest::cli::Ratio& $r) : string
+{
+    $p = $r->percent();
+    return "{$p:.1f}%";
+}
+
+/**
+ * `$r` as a percentage, laid out by the format `$spec`, as in `"{$r:>6}"`.
+ */
+public function from(const ecotest::cli::Ratio& $r, const string& $spec) : string
+{
+    return from(from($r), $spec);
 }

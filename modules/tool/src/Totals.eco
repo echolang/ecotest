@@ -1,0 +1,11 @@
+namespace ecotest::cli;
+
+/**
+ * The coverage of a whole run: lines, branches and functions, each hit out of total.
+ */
+public struct Totals
+{
+    public Ratio $lines = Ratio();
+    public Ratio $branches = Ratio();
+    public Ratio $functions = Ratio();
+}

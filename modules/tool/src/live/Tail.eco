@@ -6,7 +6,7 @@ namespace ecotest::cli;
  */
 public class Tail
 {
-    private string $path;
+    private const string $path;
     private int64 $offset = 0;
 
     public constructor(const string& $path)
@@ -20,7 +20,7 @@ public class Tail
      */
     public function take() : string
     {
-        string $more = $this->unread();
+        $more = $this->unread();
 
         usize $end = $more->size();
         while ($end > 0 && $more->byte($end - 1) != 10) {
@@ -37,7 +37,7 @@ public class Tail
      */
     public function rest() : string
     {
-        string $more = $this->unread();
+        $more = $this->unread();
         $this->offset = $this->offset + ($more->size() as int64);
         return $more;
     }
@@ -45,14 +45,15 @@ public class Tail
     /**
      * The bytes past the offset, or empty while the file does not exist yet.
      */
-    private function unread() : string
+    private const function unread() : string
     {
-        std::io::file $f = guard std::io::open($this->path, .read) else {
+        $f = guard std::io::open($this->path, .read) else {
             return '';
         };
 
-        result<int64, std::io::ioerror> $at = $f->seek($this->offset, .start);
-        string $more = $f->readall()->or('');
+        // the offset never passes the end of a file this process opened, so seeking to it holds
+        guard $f->seek($this->offset, .start);
+        $more = $f->readall()->or('');
         $f->close();
         return $more;
     }

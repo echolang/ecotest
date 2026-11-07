@@ -4,9 +4,12 @@
  */
 
 use ecotest::{expect, TempDir};
-use ecotest::cli::{CounterFile, CoverageMap, Coverage, FileCoverage, Files};
+use ecotest::cli::{CounterFile, CoverageMap, Coverage};
 
-internal function u32(string& $out, usize $n) : void
+/**
+ * Appends `$n` to `$out` as a little-endian `uint32`, the way counter files store every number.
+ */
+internal function le32(string& $out, usize $n) : void
 {
     $out->push(($n % 256) as uint8);
     $out->push((($n / 256) % 256) as uint8);
@@ -19,11 +22,11 @@ internal function u32(string& $out, usize $n) : void
  */
 internal function counterFile(const string& $id, const string& $module, const array<usize>& $counts) : string
 {
-    string $out = 'ECOCOV';
+    $out = 'ECOCOV';
     $out->push(0);
     $out->push(0);
-    u32($out, 2);
-    u32($out, 1);
+    le32($out,2);
+    le32($out,1);
     for (usize $i = 0; $i < 8; $i++) {
         $out->push(0);
     }
@@ -32,14 +35,14 @@ internal function counterFile(const string& $id, const string& $module, const ar
         $out->push(0);
     }
 
-    u32($out, $module->size());
-    u32($out, $counts->count());
+    le32($out,$module->size());
+    le32($out,$counts->count());
     $out->append($module);
     while ($out->size() % 4 != 0) {
         $out->push(0);
     }
     foreach ($counts as const &$n) {
-        u32($out, $n);
+        le32($out,$n);
     }
 
     return $out;
@@ -51,7 +54,7 @@ internal function counterFile(const string& $id, const string& $module, const ar
  */
 internal function mapText() : string
 {
-    string $out = '{"v":2,"hash":"h","modules":[{"name":"m","dir":"/p","counters":[';
+    $out = '{"v":2,"hash":"h","modules":[{"name":"m","dir":"/p","counters":[';
     $out->append('{"local":0,"file":"src/a.eco","line":1,"column":1,"kind":"fn","function":"f"},');
     $out->append('{"local":1,"file":"src/a.eco","line":1,"column":1,"kind":"fn","function":"f"},');
     $out->append('{"local":2,"file":"src/a.eco","line":2,"column":5,"kind":"line","function":"f"},');
@@ -68,26 +71,39 @@ test a_counter_file_is_read_or_refused
 {
     $dir = TempDir();
     array<usize> $counts = [3, 0, 1];
-    string $good = $dir->write('good.ecocov', counterFile('m/t.eco::one', 'm', $counts));
+    $good = $dir->write('good.ecocov', counterFile('m/t.eco::one', 'm', $counts));
 
-    CounterFile $file = expect(CounterFile::load($good))->some();
+    $file = expect(CounterFile::load($good))->ok();
     expect($file->testId)->is('m/t.eco::one');
-    expect($file->modules)->is(['m']);
-    expect($file->of('m')->count())->is(3);
-    expect($file->of('other'))->empty();
+    expect($file->counts->keys())->is(['m']);
+    expect($file->counts->at('m')->count())->is(3);
+    expect($file->counts->has('other'))->no();
 
-    string $bytes = counterFile('m/t.eco::one', 'm', $counts);
-    expect(CounterFile::load($dir->write('short.ecocov', $bytes->sub(0, 100))))->none();
-    expect(CounterFile::load($dir->write('headless.ecocov', $bytes->sub(0, 164))))->none();
-    expect(CounterFile::load($dir->write('cut.ecocov', $bytes->sub(0, $bytes->size() - 2))))->none();
+    $bytes = counterFile('m/t.eco::one', 'm', $counts);
+    $short = expect(CounterFile::load($dir->write('short.ecocov', $bytes->sub(0, 100))))->fails();
+    expect("{$short}")->is("{$dir->file('short.ecocov')} is not a version 2 counter file");
+    $version = $bytes->sub(0, 8);
+    le32($version, 1);
+    $version->append($bytes->sub(12, $bytes->size() - 12));
+    $old = expect(CounterFile::load($dir->write('old.ecocov', $version)))->fails();
+    expect("{$old}")->has('is not a version 2 counter file');
+    $headless = expect(CounterFile::load($dir->write('headless.ecocov', $bytes->sub(0, 164))))->fails();
+    expect("{$headless}")->is("{$dir->file('headless.ecocov')} ends before the counts it promises");
+    $cut = expect(CounterFile::load($dir->write('cut.ecocov', $bytes->sub(0, $bytes->size() - 2))))->fails();
+    expect("{$cut}")->has('ends before the counts it promises');
+    $missing = expect(CounterFile::load($dir->file('missing.ecocov')))->fails();
+    expect("{$missing}")->is("cannot read {$dir->file('missing.ecocov')}: No such file or directory");
 }
 
-test a_map_that_does_not_parse_is_null_and_modules_are_found_by_name
+test a_map_that_does_not_parse_says_so_and_modules_are_found_by_name
 {
     $dir = TempDir();
-    expect(CoverageMap::load($dir->write('bad.json', '{')))->none();
+    $bad = expect(CoverageMap::load($dir->write('bad.json', '{')))->fails();
+    expect("{$bad}")->has("{$dir->file('bad.json')} does not parse: ");
+    $missing = expect(CoverageMap::load($dir->file('missing.json')))->fails();
+    expect("{$missing}")->is("cannot read {$dir->file('missing.json')}: No such file or directory");
 
-    CoverageMap $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->some();
+    $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->ok();
     expect(expect($map->module('lib'))->some()->dir)->is('/l');
     expect($map->module('nowhere'))->none();
 }
@@ -95,15 +111,15 @@ test a_map_that_does_not_parse_is_null_and_modules_are_found_by_name
 test instances_of_one_body_merge_into_one_function_line_and_edge
 {
     $dir = TempDir();
-    CoverageMap $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->some();
+    $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->ok();
 
-    Coverage $c = Coverage($map);
-    $c->modules = ['m'];
+    $c = Coverage($map);
+    $c->modules = ['m' => true];
     $c->exclude = ['gen/**'];
-    $c->tests[] = expect(CounterFile::load($dir->write('a.ecocov', counterFile('m/t.eco::a', 'm', [0, 2, 0, 1, 0, 1, 0, 0]))))->some();
-    $c->tests[] = expect(CounterFile::load($dir->write('b.ecocov', counterFile('m/t.eco::b', 'm', [0, 1, 0, 1, 0, 0, 0, 0]))))->some();
+    $c->tests[] = expect(CounterFile::load($dir->write('a.ecocov', counterFile('m/t.eco::a', 'm', [0, 2, 0, 1, 0, 1, 0, 0]))))->ok();
+    $c->tests[] = expect(CounterFile::load($dir->write('b.ecocov', counterFile('m/t.eco::b', 'm', [0, 1, 0, 1, 0, 0, 0, 0]))))->ok();
 
-    array<FileCoverage> $files = $c->files();
+    $files = $c->files();
     expect($files->count())->is(1);
     expect($files[0]->file)->is('src/a.eco');
     expect($files[0]->functionTotals()->total)->is(1);
@@ -122,13 +138,13 @@ test instances_of_one_body_merge_into_one_function_line_and_edge
 test a_test_counted_twice_is_named_once
 {
     $dir = TempDir();
-    CoverageMap $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->some();
+    $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->ok();
 
-    Coverage $c = Coverage($map);
-    $c->modules = ['m'];
-    string $one = counterFile('m/t.eco::a', 'm', [1, 1, 1, 1, 1, 1, 1]);
-    $c->tests[] = expect(CounterFile::load($dir->write('a.ecocov', $one)))->some();
-    $c->tests[] = expect(CounterFile::load($dir->write('a2.ecocov', $one)))->some();
+    $c = Coverage($map);
+    $c->modules = ['m' => true];
+    $one = counterFile('m/t.eco::a', 'm', [1, 1, 1, 1, 1, 1, 1]);
+    $c->tests[] = expect(CounterFile::load($dir->write('a.ecocov', $one)))->ok();
+    $c->tests[] = expect(CounterFile::load($dir->write('a2.ecocov', $one)))->ok();
 
     expect($c->testsAt('src/a.eco', 2))->is(['m/t.eco::a']);
     expect($c->files()->count())->is(2);
@@ -137,8 +153,8 @@ test a_test_counted_twice_is_named_once
 test a_folder_of_counter_files_skips_what_is_not_one
 {
     $dir = TempDir();
-    CoverageMap $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->some();
-    Coverage $c = Coverage($map);
+    $map = expect(CoverageMap::load($dir->write('map.json', mapText())))->ok();
+    $c = Coverage($map);
 
     $dir->write('notes.txt', 'x');
     $dir->write('broken.ecocov', 'x');

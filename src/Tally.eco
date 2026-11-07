@@ -21,7 +21,8 @@ internal class Tally
         }
 
         $this->flushed = true;
-        Session::append($this->path, Event('checks')->number('count', $this->checks)->render());
+        $event = Event('checks')->number('count', $this->checks);
+        Session::append($this->path, "{$event}");
     }
 
     destructor()

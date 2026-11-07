@@ -72,7 +72,7 @@ test bool_failures_say_what_was_wanted
 test text_failures_quote_the_text
 {
     $got = summaries(function() : void {
-        expect('abc')->isNot('abc')->has('x')->lacks('b')->startsWith('x')->endsWith('x')->empty()->length(9);
+        expect('abc')->isNot('abc')->has('x')->lacks('b')->starts('x')->ends('x')->empty()->length(9);
     });
 
     expect($got)->is([
@@ -129,7 +129,7 @@ test a_long_list_is_cut_in_the_report
     });
 
     expect($failures->count())->is(1);
-    expect($failures[0]->actual)->startsWith('[0, 1, 2, ')->endsWith(', ...]');
+    expect($failures[0]->actual)->starts('[0, 1, 2, ')->ends(', ...]');
     expect($failures[0]->actual->size())->below(140);
 }
 
@@ -157,8 +157,8 @@ test result_failures_name_the_error
 {
     $got = summaries(function() : void {
         expect(parse(''))->ok(1);
-        expect(parse('1'))->ok(2)->fails(Fault::bad);
-        expect(parse('x'))->fails(Fault::empty);
+        expect(parse('1'))->ok(2)->fails(.bad);
+        expect(parse('x'))->fails(.empty);
     });
 
     expect($got)->is([
@@ -172,14 +172,14 @@ test result_failures_name_the_error
 #[tests: expects death]
 test result_fails_without_a_value_stops_on_ok
 {
-    Fault $e = expect(parse('1'))->fails();
+    $e = expect(parse('1'))->fails();
 }
 
 test status_failures_name_the_error
 {
     $got = summaries(function() : void {
-        expect(check(true))->fails(Fault::bad);
-        expect(check(false))->fails(Fault::empty);
+        expect(check(true))->fails(.bad);
+        expect(check(false))->fails(.empty);
     });
 
     expect($got)->is([
@@ -191,7 +191,7 @@ test status_failures_name_the_error
 #[tests: expects death]
 test status_fails_without_a_value_stops_on_success
 {
-    Fault $e = expect(check(true))->fails();
+    $e = expect(check(true))->fails();
 }
 
 test nullable_failures_say_what_came
@@ -245,9 +245,9 @@ test call_failures_count_the_calls
 test a_run_failure_shows_both_streams
 {
     $failures = ecotest::caught(function() : void {
-        expect(Ran('tool', 2, false, 'out', 'err'))->exits(0);
-        expect(Ran('tool', 0, true, '', 'only err'))->succeeds();
-        expect(Ran('tool', 1, false, 'only out', ''))->exits(0);
+        expect(Ran('tool', 2, 'out', 'err'))->exits(0);
+        expect(Ran('tool', null, '', 'only err'))->succeeds();
+        expect(Ran('tool', 1, 'only out', ''))->exits(0);
     });
 
     expect($failures->count())->is(3);
@@ -271,8 +271,8 @@ test multi_line_text_failures_carry_a_diff
 
 test a_status_error_is_handed_back
 {
-    Fault $e = expect(check(false))->fails();
-    expect(value: $e)->is(Fault::bad);
+    $e = expect(check(false))->fails();
+    expect(value: $e)->is(.bad);
 }
 
 test a_fake_never_called_passes_never

@@ -1,52 +1,45 @@
-namespace ecotest::cli;
-
 /**
  * Coverage as an LCOV tracefile, which editors, genhtml and coverage services read.
  */
-public class LcovReport
+
+namespace ecotest::cli::lcov;
+
+/**
+ * The tracefile for `$files`.
+ */
+public function render(const array<FileCoverage>& $files) : string
 {
-    /**
-     * The tracefile for `$files`.
-     */
-    public static function render(const array<FileCoverage>& $files) : string
-    {
-        string $out = '';
+    $out = '';
 
-        foreach ($files as const &$file) {
-            $out->append("TN:\nSF:{$file->path}\n");
+    foreach ($files as const &$file) {
+        $out->append("TN:\nSF:{$file->path}\n");
 
-            for (usize $i = 0; $i < $file->functionNames->count(); $i++) {
-                int64 $line = $file->functionLines[$i];
-                string $name = $file->functionNames[$i];
-                $out->append("FN:{$line},{$name}\n");
-            }
-            for (usize $i = 0; $i < $file->functionNames->count(); $i++) {
-                uint64 $hits = $file->functionHits[$i];
-                string $name = $file->functionNames[$i];
-                $out->append("FNDA:{$hits},{$name}\n");
-            }
-
-            Ratio $fns = $file->functionTotals();
-            $out->append("FNF:{$fns->total}\nFNH:{$fns->hit}\n");
-
-            for (usize $i = 0; $i < $file->branchHits->count(); $i++) {
-                int64 $line = $file->branchLines[$i];
-                uint64 $hits = $file->branchHits[$i];
-                $out->append("BRDA:{$line},0,{$i},{$hits}\n");
-            }
-
-            Ratio $brs = $file->branchTotals();
-            $out->append("BRF:{$brs->total}\nBRH:{$brs->hit}\n");
-
-            foreach ($file->codeLines() as const &$line) {
-                uint64 $hits = $file->lines->get($line);
-                $out->append("DA:{$line},{$hits}\n");
-            }
-
-            Ratio $ls = $file->lineTotals();
-            $out->append("LF:{$ls->total}\nLH:{$ls->hit}\nend_of_record\n");
+        foreach ($file->functions as const &$function) {
+            $out->append("FN:{$function->line},{$function->name}\n");
+        }
+        foreach ($file->functions as const &$function) {
+            $out->append("FNDA:{$function->hits},{$function->name}\n");
         }
 
-        return $out;
+        $fns = $file->functionTotals();
+        $out->append("FNF:{$fns->total}\nFNH:{$fns->hit}\n");
+
+        for (usize $i = 0; $i < $file->branches->count(); $i++) {
+            const BranchSite& $branch = $file->branches[$i];
+            $out->append("BRDA:{$branch->line},0,{$i},{$branch->hits}\n");
+        }
+
+        $brs = $file->branchTotals();
+        $out->append("BRF:{$brs->total}\nBRH:{$brs->hit}\n");
+
+        foreach ($file->codeLines() as const &$line) {
+            uint64 $hits = $file->lines->get($line);
+            $out->append("DA:{$line},{$hits}\n");
+        }
+
+        $ls = $file->lineTotals();
+        $out->append("LF:{$ls->total}\nLH:{$ls->hit}\nend_of_record\n");
     }
+
+    return $out;
 }
