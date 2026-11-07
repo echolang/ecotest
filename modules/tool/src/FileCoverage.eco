@@ -70,6 +70,24 @@ public class FileCoverage
     }
 
     /**
+     * Up to `$n` of `$files` with lines that never ran, least covered first.
+     */
+    public static function worst(const array<FileCoverage>& $files, usize $n) : array<FileCoverage>
+    {
+        array<FileCoverage> $byLines = $files;
+        $byLines->sort(key: (const FileCoverage& $f) : float64 => $f->lineTotals()->percent());
+
+        array<FileCoverage> $out = [];
+        foreach ($byLines as const &$file) {
+            Ratio $r = $file->lineTotals();
+            if ($r->hit < $r->total && $out->count() < $n) {
+                $out[] = $file;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * The line numbers with code that never ran, ascending.
      */
     public const function missedLines() : array<int64>

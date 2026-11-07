@@ -5,8 +5,8 @@ use command;
 /**
  * The ecotest command line: the commands, their flags, and the hand-off to `Tool`.
  *
- *   ecotest run [--coverage] [--repeat N] [--filter ...] [gates]
- *   ecotest report [run] --format terminal|md|junit|lcov|html|json
+ *   ecotest run [--coverage] [--html] [--repeat N] [--filter ...] [--style auto|pretty|simple] [gates]
+ *   ecotest report [run] --format terminal|md|junit|lcov|html|json [--style ...]
  *   ecotest history
  *   ecotest api
  *   ecotest who <file:line>
@@ -32,6 +32,7 @@ public class Cli
         $app->positional($who, '<file:line>', 'the source line', 'A path, or its tail, and a line number.', 1, 1, '');
 
         command::Flag $coverage = $app->flag('coverage', '', 'measure line, branch and function coverage');
+        command::Flag $html = $app->flag('html', '', 'write report.html into the run directory');
         command::Arg $repeat = $app->arg('repeat', '', '<n>', 'run every test n times and flag the flaky ones');
         command::Arg $filter = $app->repeat('filter', '', '<spec>', 'which tests to run, as echoc test --filter');
         command::Arg $target = $app->arg('target', '', '<name>', 'a test target from the manifest');
@@ -47,8 +48,17 @@ public class Cli
         command::Arg $since = $app->arg('since', '', '<ref>', 'git ref for diff coverage and affected');
         command::Arg $format = $app->arg('format', '', '<name>', 'terminal, md, junit, lcov, html or json');
         command::Arg $project = $app->arg('project', '', '<dir>', 'the module to test, the current directory by default');
+        command::Arg $style = $app->arg('style', '', '<auto|pretty|simple>', 'live progress and a styled summary, or plain text');
 
-        foreach ([$coverage] as $f) {
+        array<command::OptionValue> $styles = [
+            command::OptionValue('auto', 'pretty on a terminal, simple elsewhere', 'Watch the run live when stderr is a terminal, and style the summary when stdout takes colour or unicode.'),
+            command::OptionValue('pretty', 'live progress and a styled summary', 'A spinner over the compile, a bar over the tests with failures as they happen, and a summary closed by a PASS or FAIL badge.'),
+            command::OptionValue('simple', 'echoc listing and plain text', 'What ecotest printed before it drew anything: the listing echoc writes, then the plain summary.'),
+        ];
+        $app->values($style, $styles);
+        $app->fallback($style, 'auto');
+
+        foreach ([$coverage, $html] as $f) {
             $app->accept($f, $run);
             $app->accept($f, $affected);
         }
@@ -63,6 +73,9 @@ public class Cli
         $app->accept($since, $affected);
         $app->require($since, $affected);
         $app->accept($format, $report);
+        foreach ([$run, $report, $affected] as $sub) {
+            $app->accept($style, $sub);
+        }
         $app->accept($echoc, $api);
         foreach ([$run, $report, $history, $api, $who, $affected] as $sub) {
             $app->accept($project, $sub);
@@ -98,10 +111,14 @@ public class Cli
             $tool->buildDir = 'ecobuild';
         }
         $tool->coverage = $parsed->stated($coverage);
+        $tool->html = $parsed->stated($html);
         $tool->repeat = (str::uint($parsed->value($repeat)) ?? 1) as usize;
         $tool->modules = $parsed->values($module);
         $tool->since = $parsed->value($since);
         $tool->format = $parsed->value($format);
+        $tool->style = Style::of($parsed->value($style));
+        $tool->live = command::CLIContext::from($parsed, $app, .stderr);
+        $tool->page = command::CLIContext::from($parsed, $app, .stdout);
 
         foreach ($parsed->values($filter) as const &$spec) {
             $tool->forwarded[] = '--filter';

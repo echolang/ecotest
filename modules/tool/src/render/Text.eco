@@ -1,7 +1,7 @@
 namespace ecotest::cli;
 
 /**
- * Layout helpers the text reports share.
+ * Text helpers the reports share.
  */
 public class Text
 {
@@ -43,5 +43,30 @@ public class Text
         string $out = $text->sub(0, Text::$width);
         $out->append('...');
         return $out;
+    }
+
+    /**
+     * `$n` and the word that fits it.
+     */
+    public static function plural(usize $n, const string& $one, const string& $many) : string
+    {
+        if ($n == 1) {
+            return "{$n} {$one}";
+        }
+        return "{$n} {$many}";
+    }
+
+    /**
+     * The last segment of `$path`.
+     */
+    public static function base(const string& $path) : string
+    {
+        usize $from = 0;
+        for (usize $i = 0; $i < $path->size(); $i++) {
+            if ($path->byte($i) == 47) {
+                $from = $i + 1;
+            }
+        }
+        return $path->sub($from, $path->size() - $from);
     }
 }

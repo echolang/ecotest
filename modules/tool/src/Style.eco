@@ -1,0 +1,59 @@
+namespace ecotest::cli;
+
+/**
+ * How the tool talks to a terminal: live progress and a styled summary, plain text, or whichever
+ * the stream can show.
+ */
+public enum Style
+{
+    /**
+     * Pretty where the stream can show it, simple everywhere else.
+     */
+    case auto;
+
+    /**
+     * Live progress while the tests run, and the styled summary after.
+     */
+    case pretty;
+
+    /**
+     * echoc's own listing, then the plain summary. What a pipe or a CI log gets.
+     */
+    case simple;
+
+    /**
+     * The style `--style` names. Anything else reads as auto.
+     */
+    public static function of(const string& $word) : Style
+    {
+        if ($word == 'pretty') {
+            return Style::pretty;
+        }
+        if ($word == 'simple') {
+            return Style::simple;
+        }
+        return Style::auto;
+    }
+
+    /**
+     * True when the run is watched live on a stream with `$caps`: a terminal that can be redrawn.
+     */
+    public const function live(const command::TerminalCapabilities& $caps) : bool
+    {
+        if ($this == Style::auto) {
+            return $caps->interactive;
+        }
+        return $this == Style::pretty;
+    }
+
+    /**
+     * True when the summary is styled for a stream with `$caps`: one that takes colour or unicode.
+     */
+    public const function styled(const command::TerminalCapabilities& $caps) : bool
+    {
+        if ($this == Style::auto) {
+            return $caps->color || $caps->unicode;
+        }
+        return $this == Style::pretty;
+    }
+}

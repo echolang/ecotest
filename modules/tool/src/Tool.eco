@@ -13,6 +13,12 @@ public class Tool
     public string $git = 'git';
     public string $buildDir = 'ecobuild';
     public bool $coverage = false;
+
+    /**
+     * Whether `run` writes `report.html` into the run directory. Off unless asked for.
+     */
+    public bool $html = false;
+
     public usize $repeat = 1;
     public array<string> $forwarded = [];
     public array<string> $modules = [];
@@ -21,6 +27,21 @@ public class Tool
     public string $format = '';
     public Gates $gates = Gates();
     public Services $services = Services();
+
+    /**
+     * Live progress and the styled summary, or plain text. Simple unless the command line says.
+     */
+    public Style $style = .simple;
+
+    /**
+     * Where live progress is drawn, stderr from the command line. None draws nothing live.
+     */
+    public command::CLIContext? $live = null;
+
+    /**
+     * The stream the summary goes to, stdout from the command line. None prints it plain.
+     */
+    public command::CLIContext? $page = null;
 
     /**
      * Where runs and the history live.
@@ -90,6 +111,7 @@ public class Tool
         $runner->seed = $stamp as uint64;
         $runner->envNames = $this->services->envNames;
         $runner->envValues = $this->services->envValues;
+        $runner->view = $this->liveView();
 
         bool $ran = $runner->run($dir);
         $this->services->stop();
@@ -130,11 +152,11 @@ public class Tool
         } else if ($this->format == 'lcov') {
             std::io::print(LcovReport::render($files));
         } else if ($this->format == 'html') {
-            std::io::print(HtmlReport::render($run, $files, $totals, $failedGates));
+            std::io::print(HtmlReport::render($run, $files, $totals, $failedGates, $this->gates));
         } else if ($this->format == 'json') {
             std::io::print(JsonReport::render($run, $files, $totals, $failedGates));
         } else {
-            std::io::print(TerminalReport::render($run, $files, $totals, $failedGates));
+            std::io::print($this->summary($run, $files, $totals, $failedGates, '', ''));
         }
 
         return 0;
@@ -343,15 +365,17 @@ public class Tool
         Ratio? $diff = $this->changed($files);
         array<string> $failedGates = $this->gates->check($run, $totals, $diff);
 
-        std::io::print(TerminalReport::render($run, $files, $totals, $failedGates));
-        std::io::print($this->diffLine($diff));
-
         Files::write(std::env::join($dir, 'run.json'), JsonReport::render($run, $files, $totals, $failedGates));
         Files::write(std::env::join($dir, 'summary.md'), MarkdownReport::render($run, $files, $totals, $failedGates));
         Files::write(std::env::join($dir, 'junit.xml'), JunitReport::render($run));
-        Files::write(std::env::join($dir, 'report.html'), HtmlReport::render($run, $files, $totals, $failedGates));
         if (!$files->empty()) {
             Files::write(std::env::join($dir, 'lcov.info'), LcovReport::render($files));
+        }
+
+        string $report = '';
+        if ($this->html) {
+            $report = std::env::join($dir, 'report.html');
+            Files::write($report, HtmlReport::render($run, $files, $totals, $failedGates, $this->gates));
         }
 
         History::append(std::env::join($this->root(), 'history.jsonl'), $dir, $run, $totals);
@@ -360,7 +384,7 @@ public class Tool
             std::io::print($this->services->tails($dir, 12));
         }
 
-        std::io::println("report    {$dir}/report.html");
+        std::io::print($this->summary($run, $files, $totals, $failedGates, $this->diffText($diff), $report));
 
         if (!$run->green() || !$failedGates->empty()) {
             return 1;
@@ -399,16 +423,59 @@ public class Tool
     }
 
     /**
-     * The summary line for diff coverage, or nothing without one.
+     * How much of the changed code ran, or nothing without a diff.
      */
-    private const function diffLine(Ratio? $diff) : string
+    private const function diffText(Ratio? $diff) : string
     {
         Ratio $d = guard $diff else {
             return '';
         };
 
         string $pct = $d->shown();
-        return "diff      {$pct} of {$d->total} changed lines with code ran since {$this->since}\n";
+        return "{$pct} of {$d->total} changed lines with code ran since {$this->since}";
+    }
+
+    /**
+     * The summary the terminal gets: styled when the page takes it, plain otherwise. `$diff` and
+     * `$report` are left out when empty.
+     */
+    private const function summary(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates, const string& $diff, const string& $report) : string
+    {
+        Look $look = guard $this->look() else {
+            return TerminalReport::render($run, $files, $totals, $failedGates, $diff, $report);
+        };
+
+        return PrettyReport::render($look, $run, $files, $totals, $failedGates, $diff, $report);
+    }
+
+    /**
+     * The look of the styled summary, or null when the page is printed plain.
+     */
+    private const function look() : Look?
+    {
+        command::CLIContext $page = guard $this->page else {
+            return null;
+        };
+
+        if (!$this->style->styled($page->caps)) {
+            return null;
+        }
+        return Look($page->caps);
+    }
+
+    /**
+     * The view that watches a run live, or null when echoc writes its own listing.
+     */
+    private const function liveView() : LiveView?
+    {
+        command::CLIContext $live = guard $this->live else {
+            return null;
+        };
+
+        if (!$this->style->live($live->caps)) {
+            return null;
+        }
+        return LiveView($live);
     }
 
     /**

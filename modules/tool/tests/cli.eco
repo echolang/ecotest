@@ -39,6 +39,7 @@ test run_takes_every_flag
         '--echoc', Sample::compiler(),
         '--build-dir', $sample->dir->file('build'),
         '--coverage',
+        '--html',
         '--repeat', '1',
         '--filter', 'adds',
         '--define', 'UNUSED',
@@ -51,4 +52,13 @@ test run_takes_every_flag
     ]);
 
     expect($code)->is(0);
+}
+
+test the_style_is_a_word_the_command_line_knows
+{
+    $empty = TempDir();
+
+    expect(Cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'pretty']))->is(0);
+    expect(Cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'simple', '--color', 'never']))->is(0);
+    expect(Cli::main(['ecotest', 'run', '--style', 'fancy']))->is(2);
 }

@@ -1,0 +1,348 @@
+namespace ecotest::cli;
+
+/**
+ * The summary for a terminal that takes colour or unicode: the failures first with where they
+ * stopped, then timing, checks, skips, coverage meters and the gates, closed by one PASS or FAIL
+ * line. Each section is left out when it has nothing to say.
+ */
+public class PrettyReport
+{
+    /**
+     * How many cells a coverage meter is wide.
+     */
+    public static int32 $meter = 24;
+
+    /**
+     * The summary of `$run` drawn with `$look`. `$diff` is the diff coverage sentence and `$report`
+     * the HTML report's path; either may be empty.
+     */
+    public static function render(const Look& $look, const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates, const string& $diff, const string& $report) : string
+    {
+        string $out = "\n";
+        $out->append(PrettyReport::failures($look, $run));
+
+        string $facts = PrettyReport::timing($look, $run);
+        $facts->append(PrettyReport::checks($look, $run));
+        $facts->append(PrettyReport::listed($look, $run, Outcome::skip, 'skipped'));
+        $facts->append(PrettyReport::listed($look, $run, Outcome::flaky, 'flaky'));
+        $facts->append(PrettyReport::extras($look, $run));
+        if (!$facts->empty()) {
+            $out->append($facts);
+            $out->append("\n");
+        }
+
+        string $measured = '';
+        if (!$totals->empty()) {
+            $measured->append(PrettyReport::coverage($look, $files, $totals));
+        }
+        if (!$diff->empty()) {
+            $measured->append(PrettyReport::label($look, 'diff'));
+            $measured->append("{$diff}\n");
+        }
+        foreach ($failedGates as const &$gate) {
+            $measured->append(PrettyReport::label($look, 'gate'));
+            $measured->append($look->paint("{$look->fail} {$gate}", command::SGR_ERROR));
+            $measured->append("\n");
+        }
+        if (!$measured->empty()) {
+            $out->append($measured);
+            $out->append("\n");
+        }
+
+        $out->append(PrettyReport::verdict($look, $run, $failedGates->empty()));
+
+        if (!$report->empty()) {
+            $out->append(PrettyReport::label($look, 'report'));
+            $out->append("{$report}\n");
+        }
+
+        return $out;
+    }
+
+    /**
+     * The muted label a section's first row starts with, padded to the column the rows share.
+     */
+    private static function label(const Look& $look, const string& $word) : string
+    {
+        string $padded = "{$word:<10}";
+        string $muted = $look->mute($padded);
+        return "  {$muted}";
+    }
+
+    /**
+     * The indent of a section's later rows, under its first.
+     */
+    private static function under() : string
+    {
+        return str::repeat(' ', 12);
+    }
+
+    /**
+     * The label when `$out` holds no rows of the section yet, the indent under it after.
+     */
+    private static function lead(const Look& $look, const string& $word, const string& $out) : string
+    {
+        if ($out->empty()) {
+            return PrettyReport::label($look, $word);
+        }
+        return PrettyReport::under();
+    }
+
+    /**
+     * Every line of `$text` behind the failure rail, muted when `$quiet`.
+     */
+    private static function railed(const Look& $look, const string& $text, bool $quiet) : string
+    {
+        string $rail = $look->mute($look->rail);
+        string $out = '';
+
+        foreach (str::split($text, "\n") as const &$line) {
+            string $body = string($line);
+            if ($quiet) {
+                $body = $look->mute($body);
+            }
+            $out->append("    {$rail} {$body}\n");
+        }
+
+        return $out;
+    }
+
+    /**
+     * Each broken test with its mark, where it stopped, what it said and the context it was in.
+     */
+    private static function failures(const Look& $look, const Run& $run) : string
+    {
+        string $out = '';
+
+        usize $stopped = $run->stopped();
+        if ($stopped > 0) {
+            string $mark = $look->paint($look->fail, command::SGR_ERROR);
+            $out->append("  {$mark} echoc stopped before the tests ran");
+            if ($run->passes > 1) {
+                $out->append(" in {$stopped} of {$run->passes} passes");
+            }
+            $out->append("\n\n");
+        }
+
+        foreach ($run->tests as const &$test) {
+            if (!$test->outcome->broken()) {
+                continue;
+            }
+
+            string $headline = $look->headline($test->outcome, $look->title($test->id, $test->module));
+            $out->append("  {$headline}\n");
+
+            if (!$test->failureFile->empty()) {
+                $out->append(PrettyReport::railed($look, "{$test->failureFile}:{$test->failureLine}", true));
+            }
+            if (!$test->failure->empty()) {
+                $out->append(PrettyReport::railed($look, $test->failure, false));
+            }
+            if (!$test->failureDetail->empty()) {
+                $out->append(PrettyReport::railed($look, $test->failureDetail, true));
+            }
+            foreach ($test->context as const &$scope) {
+                $out->append(PrettyReport::railed($look, "in {$scope}", true));
+            }
+            $out->append("\n");
+        }
+
+        return $out;
+    }
+
+    /**
+     * The slowest tests, then the median and the 95th percentile.
+     */
+    private static function timing(const Look& $look, const Run& $run) : string
+    {
+        if ($run->tests->empty()) {
+            return '';
+        }
+
+        string $out = '';
+
+        foreach ($run->slowest(TerminalReport::$top) as const &$test) {
+            $out->append(PrettyReport::lead($look, 'slowest', $out));
+
+            int64 $took = $test->ms();
+            string $title = $look->title($test->id, $test->module);
+            $out->append("{$took:>6} ms  {$title}\n");
+        }
+
+        int64 $median = $run->percentile(50);
+        int64 $slow = $run->percentile(95);
+        $out->append(PrettyReport::under());
+        $out->append($look->mute("p50 {$median} ms {$look->dot} p95 {$slow} ms"));
+        $out->append("\n");
+        return $out;
+    }
+
+    /**
+     * Assertions per test, and the passing tests that asserted nothing ecotest could see. The total
+     * is on the closing line.
+     */
+    private static function checks(const Look& $look, const Run& $run) : string
+    {
+        usize $counted = $run->asserting();
+        if ($counted == 0) {
+            return '';
+        }
+
+        float64 $per = ($run->assertions() as float64) / ($counted as float64);
+        string $out = PrettyReport::label($look, 'asserts');
+        $out->append("{$per:.1f} per test ");
+        usize $all = $run->tests->count();
+        $out->append($look->mute("{$look->dot} {$counted} of {$all} tests use ecotest"));
+        $out->append("\n");
+
+        foreach ($run->tests as const &$test) {
+            if ($test->usedEcotest && $test->outcome == Outcome::pass && $test->checks == 0) {
+                string $title = $look->title($test->id, $test->module);
+                $out->append(PrettyReport::under());
+                $out->append($look->paint('none', command::SGR_WARNING));
+                $out->append("  {$title}\n");
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The tests that ended with `$outcome` under `$word`, with why they were skipped or how their
+     * passes went.
+     */
+    private static function listed(const Look& $look, const Run& $run, Outcome $outcome, const string& $word) : string
+    {
+        string $out = '';
+
+        foreach ($run->tests as const &$test) {
+            if ($test->outcome != $outcome) {
+                continue;
+            }
+
+            string $why = $test->skipReason;
+            if ($outcome == Outcome::flaky) {
+                $why = $test->attemptWords();
+            }
+
+            $out->append(PrettyReport::lead($look, $word, $out));
+
+            string $mark = $look->mark($outcome);
+            string $title = $look->title($test->id, $test->module);
+            string $muted = $look->mute($why);
+            $out->append("{$mark} {$title}  {$muted}\n");
+        }
+
+        return $out;
+    }
+
+    /**
+     * Notes, metrics and benches the tests recorded.
+     */
+    private static function extras(const Look& $look, const Run& $run) : string
+    {
+        string $out = '';
+
+        foreach ($run->tests as const &$test) {
+            if ($test->notes->empty() && $test->metricNames->empty() && $test->benches->empty()) {
+                continue;
+            }
+            string $title = $look->mute($look->title($test->id, $test->module));
+
+            foreach ($test->notes as const &$note) {
+                $out->append(PrettyReport::label($look, 'note'));
+                $out->append("{$note}  {$title}\n");
+            }
+            for (usize $i = 0; $i < $test->metricNames->count(); $i++) {
+                $out->append(PrettyReport::label($look, 'metric'));
+                $out->append("{$test->metricNames[$i]} = {$test->metricValues[$i]}  {$title}\n");
+            }
+            foreach ($test->benches as const &$b) {
+                $out->append(PrettyReport::label($look, 'bench'));
+                $out->append("{$b->label}  {$b->p50} ns/op {$look->dot} p95 {$b->p95} ns  {$title}\n");
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * A meter per measure, then the least covered files with the lines they missed.
+     */
+    private static function coverage(const Look& $look, const array<FileCoverage>& $files, const array<Ratio>& $totals) : string
+    {
+        array<string> $names = ['lines', 'branches', 'functions'];
+        string $out = '';
+
+        for (usize $i = 0; $i < $names->count(); $i++) {
+            $out->append(PrettyReport::lead($look, 'coverage', $out));
+
+            string $name = $names[$i];
+            string $pct = $totals[$i]->shown();
+            string $bar = $look->meter($totals[$i]->percent(), PrettyReport::$meter);
+            $out->append("{$name:<10}{$pct:>6}  {$bar}\n");
+        }
+
+        foreach (FileCoverage::worst($files, TerminalReport::$top) as const &$file) {
+            string $pct = $file->lineTotals()->shown();
+            string $ranges = Text::cut($file->missedRanges());
+            string $missed = $look->mute("missing {$ranges}");
+            $out->append(PrettyReport::under());
+            $out->append("{$pct:>6}  {$file->file}  {$missed}\n");
+        }
+
+        return $out;
+    }
+
+    /**
+     * The closing line: a PASS or FAIL badge, the counts that are not zero, and the time.
+     */
+    private static function verdict(const Look& $look, const Run& $run, bool $gatesHeld) : string
+    {
+        usize $passed = $run->count(Outcome::pass);
+        usize $failed = $run->broken();
+        usize $skipped = $run->count(Outcome::skip);
+        usize $flaky = $run->count(Outcome::flaky);
+        usize $all = $run->tests->count();
+        float64 $secs = ($run->wallMs as float64) / 1000.0;
+
+        bool $ok = $run->green() && $gatesHeld;
+        string $tone = command::outcomeSgr($ok);
+        string $word = 'FAIL';
+        if ($ok) {
+            $word = 'PASS';
+        }
+
+        string $badge = $word;
+        if ($look->caps->color) {
+            $badge = $look->paint($look->paint($look->paint(" {$word} ", command::SGR_REVERSE), command::SGR_BOLD), $tone);
+        }
+
+        array<string> $parts = [$look->paint("{$passed} passed", command::SGR_SUCCESS)];
+        if ($failed > 0) {
+            $parts[] = $look->paint("{$failed} failed", command::SGR_ERROR);
+        }
+        if ($skipped > 0) {
+            $parts[] = $look->paint("{$skipped} skipped", command::SGR_WARNING);
+        }
+        if ($flaky > 0) {
+            $parts[] = $look->paint("{$flaky} flaky", command::SGR_WARNING);
+        }
+
+        string $counts = str::join($parts, $look->mute(" {$look->dot} "));
+
+        string $tested = $look->many($all as int64, 'test');
+        if ($run->asserting() > 0) {
+            string $asserted = $look->many($run->assertions(), 'assertion');
+            $tested->append(" {$look->dot} {$asserted}");
+        }
+
+        string $time = "in {$secs:.2f} s";
+        if ($run->passes > 1) {
+            $time->append(" over {$run->passes} passes");
+        }
+        string $muted = $look->mute($time);
+
+        return "  {$badge}  {$tested}  {$counts}  {$muted}\n";
+    }
+}

@@ -1,0 +1,282 @@
+namespace ecotest::cli;
+
+use command::element;
+
+/**
+ * One pass as it happens: echoc's output in a short scrolling window under a spinner while the
+ * tests compile, then a bar over the tests as their report rows arrive. A passing test scrolls
+ * through the window; a broken one is printed above it and stays.
+ *
+ * On a stream that cannot be redrawn, libcommand writes every row as a plain line instead.
+ */
+public class LiveView
+{
+    public command::CLIContext $ctx;
+    private Look $look;
+
+    private element::LogStream $window;
+    private element::Spinner? $spin = null;
+    private element::Progress? $bar = null;
+    private usize $passed = 0;
+    private usize $failed = 0;
+    private std::time::instant $since = std::time::instant::now();
+
+    // the last test finished since the bar was drawn; the bar moves once per batch of rows
+    private string $latest = '';
+
+    // which pass this is, when there are several, for the rows that settle
+    private string $pass = '';
+
+    // the pass as far as it got: each finished test with the events it wrote
+    private Run $run = Run('');
+
+    public constructor(command::CLIContext $ctx)
+    {
+        $this->ctx = $ctx;
+        $this->look = Look($ctx->caps);
+        // a window nothing was pushed into leaves the screen as it found it
+        $this->window = element::LogStream($ctx, 1);
+    }
+
+    /**
+     * Pass `$pass` of `$passes` starts in `$passDir`: the spinner over the compile, with its window.
+     */
+    public function begin(usize $pass, usize $passes, const string& $passDir) : void
+    {
+        $this->run = Run($passDir);
+        $this->passed = 0;
+        $this->failed = 0;
+        $this->since = std::time::instant::now();
+
+        $this->pass = '';
+        if ($passes > 1) {
+            $this->pass = " {$this->look->dot} pass {$pass} of {$passes}";
+        }
+        string $what = "compiling tests{$this->pass}";
+
+        $this->window = element::LogStream($this->ctx, 6);
+        element::Spinner $spin = $this->window->spinner();
+        $spin->start($what);
+        $this->spin = $spin;
+    }
+
+    /**
+     * True while echoc compiles, the only time its output is shown.
+     */
+    public const function compiling() : bool
+    {
+        return $this->spin != null;
+    }
+
+    /**
+     * Lines echoc wrote. Shown while it compiles; once the tests run, the report rows say more.
+     */
+    public function output(const string& $text) : void
+    {
+        if ($text->empty() || !$this->compiling()) {
+            return;
+        }
+
+        $this->window->push($text);
+    }
+
+    /**
+     * Rows of echoc's report, read together: the bar is drawn once for all of them.
+     */
+    public function rows(const array<json::Value>& $rows) : void
+    {
+        foreach ($rows as const &$row) {
+            $this->take($row);
+        }
+        $this->advance();
+    }
+
+    /**
+     * One row of echoc's report: the run starting, a test finishing, or the end.
+     */
+    public function row(const json::Value& $row) : void
+    {
+        $this->take($row);
+        $this->advance();
+    }
+
+    /**
+     * One row folded in without drawing the bar.
+     */
+    private function take(const json::Value& $row) : void
+    {
+        string $type = Doc::text($row, 'type');
+
+        if ($type == 'run') {
+            $this->started(Doc::number($row, 'selected'));
+            return;
+        }
+
+        if ($type == 'test') {
+            $this->finished($row);
+            return;
+        }
+
+        if ($type == 'end') {
+            $this->close(true);
+        }
+    }
+
+    /**
+     * echoc is gone. Without a run row it never reached the tests, so the spinner fails and its
+     * whole log at `$logPath` is printed; without an end row the bar fails where it stopped.
+     */
+    public function end(const string& $logPath) : void
+    {
+        $this->close(false);
+
+        element::Spinner $spin = guard $this->spin else {
+            return;
+        };
+
+        $this->window->close();
+        $spin->fail('echoc stopped before any test ran');
+        $this->spin = null;
+
+        foreach (str::lines(Doc::read($logPath)) as const &$line) {
+            $this->ctx->line(string($line));
+        }
+    }
+
+    /**
+     * The compile is done and `$total` tests are about to run: the spinner settles and the bar
+     * takes over in a window of its own.
+     */
+    private function started(int64 $total) : void
+    {
+        element::Spinner $spin = guard $this->spin else {
+            return;
+        };
+
+        float64 $secs = $this->elapsed();
+        $spin->succeed("compiled in {$secs:.1f} s{$this->pass}");
+        $this->spin = null;
+        $this->since = std::time::instant::now();
+
+        $this->window = element::LogStream($this->ctx, 4);
+        // the rows printed above the window keep their colour; nothing echoc wrote is pushed here
+        $this->window->strip = false;
+        element::Progress $bar = $this->window->progress();
+        $bar->start('tests', $total as int32);
+        $this->bar = $bar;
+    }
+
+    /**
+     * A test's report row: a pass scrolls through the window, a broken test stays above it with
+     * where it stopped, and the bar moves on.
+     */
+    private function finished(const json::Value& $row) : void
+    {
+        if ($this->bar == null) {
+            return;
+        }
+
+        Outcome $outcome = Outcome::of(Doc::text($row, 'status'));
+        string $id = Doc::text($row, 'id');
+        string $module = Doc::text($row, 'module');
+        string $title = $this->look->title($id, $module);
+
+        // the test has exited, so its events are all written
+        TestRecord $test = $this->run->find($id);
+        string $passDir = $this->run->dir;
+        $this->run->events($test, $passDir);
+
+        if ($outcome->broken()) {
+            $this->failed++;
+
+            string $lines = $this->look->headline($outcome, $title);
+
+            json::Value $failure = Doc::object($row, 'failure');
+            if ($failure->isObject()) {
+                string $file = Doc::text($failure, 'file');
+                int64 $line = Doc::number($failure, 'line');
+                // the summary shows the rest; one row keeps the window's height honest
+                string $message = Doc::text($failure, 'message');
+                usize $cut = $message->find("\n");
+                $message = $message->sub(0, $cut);
+                string $where = $this->look->mute("  {$this->look->rail} {$file}:{$line}  {$message}");
+                $lines->append("\n{$where}");
+            }
+
+            $this->window->print($lines);
+        } else {
+            $this->passed++;
+
+            int64 $ms = Doc::number($row, 'ms');
+            // drawn muted behind the window's rail, so the mark carries no colour
+            string $mark = $this->look->glyph($outcome);
+            string $pushed = "{$mark} {$title}  {$ms} ms";
+            if ($test->usedEcotest) {
+                string $asserted = $this->look->many($test->checks, 'assertion');
+                $pushed->append(" {$this->look->dot} {$asserted}");
+            }
+            $this->window->push($pushed);
+        }
+
+        $this->latest = $title;
+    }
+
+    /**
+     * The bar moves to the tests finished so far, if any finished since it was last drawn.
+     */
+    private function advance() : void
+    {
+        element::Progress $bar = guard $this->bar else {
+            return;
+        };
+        if ($this->latest->empty()) {
+            return;
+        }
+
+        $bar->set(($this->passed + $this->failed) as int32, $this->latest);
+        $this->latest = '';
+    }
+
+    /**
+     * The bar settles with the counts: green when every test of a `$whole` run passed. Otherwise
+     * the window goes and one failed row stays, under the failures already printed.
+     */
+    private function close(bool $whole) : void
+    {
+        element::Progress $bar = guard $this->bar else {
+            return;
+        };
+        $this->bar = null;
+        $this->latest = '';
+
+        float64 $secs = $this->elapsed();
+        string $summary = "{$this->passed} passed";
+        if ($this->failed > 0) {
+            $summary->append(" {$this->look->dot} {$this->failed} failed");
+        }
+        if ($this->run->asserting() > 0) {
+            string $asserted = $this->look->many($this->run->assertions(), 'assertion');
+            $summary->append(" {$this->look->dot} {$asserted}");
+        }
+        $summary->append(" in {$secs:.1f} s{$this->pass}");
+
+        usize $done = $this->passed + $this->failed;
+        $bar->set($done as int32, $summary);
+
+        if ($whole && $this->failed == 0) {
+            $bar->finish();
+            return;
+        }
+
+        $this->window->close();
+        $bar->fail();
+    }
+
+    /**
+     * Seconds since the compile or the tests started.
+     */
+    private const function elapsed() : float64
+    {
+        return ($this->since->elapsed()->as_millis() as float64) / 1000.0;
+    }
+}

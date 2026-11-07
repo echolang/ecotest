@@ -1,0 +1,167 @@
+namespace ecotest::cli;
+
+/**
+ * The glyphs and colours of the pretty output, settled once for a stream: unicode marks and SGR
+ * where the terminal takes them, ASCII and bare text where it does not.
+ */
+public struct Look
+{
+    public command::TerminalCapabilities $caps;
+    public string $pass;
+    public string $fail;
+    public string $skip;
+    public string $flaky;
+    public string $sep;
+    public string $rail;
+    public string $dot;
+    public string $fill;
+    public string $rest;
+
+    public constructor(command::TerminalCapabilities $caps)
+    {
+        $this->caps = $caps;
+        $this->flaky = '~';
+
+        if ($caps->unicode) {
+            $this->pass = '✓';
+            $this->fail = '✗';
+            $this->skip = '○';
+            $this->sep = '›';
+            $this->rail = '│';
+            $this->dot = '·';
+            $this->fill = '━';
+            $this->rest = '─';
+        } else {
+            $this->pass = 'v';
+            $this->fail = 'x';
+            $this->skip = 'o';
+            $this->sep = '>';
+            $this->rail = '|';
+            $this->dot = '-';
+            $this->fill = '#';
+            $this->rest = '.';
+        }
+    }
+
+    /**
+     * `$text` in `$sgr` when the stream takes colour, bare otherwise.
+     */
+    public const function paint(const string& $text, const string& $sgr) : string
+    {
+        return command::styled($text, $sgr, $this->caps->color);
+    }
+
+    /**
+     * `$text` drawn muted.
+     */
+    public const function mute(const string& $text) : string
+    {
+        return $this->paint($text, command::SGR_MUTED);
+    }
+
+    /**
+     * `$n` and the noun `$one`, plural unless there is exactly one.
+     */
+    public const function many(int64 $n, const string& $one) : string
+    {
+        return Text::plural($n as usize, $one, "{$one}s");
+    }
+
+    /**
+     * The colour an outcome is drawn in.
+     */
+    public const function tone(Outcome $outcome) : string
+    {
+        if ($outcome == Outcome::pass) {
+            return command::SGR_SUCCESS;
+        }
+        if ($outcome->broken()) {
+            return command::SGR_ERROR;
+        }
+        return command::SGR_WARNING;
+    }
+
+    /**
+     * The mark of an outcome, uncoloured.
+     */
+    public const function glyph(Outcome $outcome) : string
+    {
+        if ($outcome == Outcome::pass) {
+            return $this->pass;
+        }
+        if ($outcome == Outcome::skip) {
+            return $this->skip;
+        }
+        if ($outcome == Outcome::flaky) {
+            return $this->flaky;
+        }
+        return $this->fail;
+    }
+
+    /**
+     * The mark of an outcome, in its colour.
+     */
+    public const function mark(Outcome $outcome) : string
+    {
+        return $this->paint($this->glyph($outcome), $this->tone($outcome));
+    }
+
+    /**
+     * A broken test's first row: its mark and title, and the outcome named unless it plainly failed.
+     */
+    public const function headline(Outcome $outcome, const string& $title) : string
+    {
+        string $mark = $this->mark($outcome);
+        string $out = "{$mark} {$title}";
+        if ($outcome != Outcome::fail) {
+            string $word = $this->paint($outcome->word(), $this->tone($outcome));
+            $out->append("  {$word}");
+        }
+        return $out;
+    }
+
+    /**
+     * A test id as people read it: the module dropped, the file and the name apart, as in
+     * `tests/a.eco › adds`. Uncoloured, so it can be muted whole.
+     */
+    public const function title(const string& $id, const string& $module) : string
+    {
+        string $rest = $id;
+        string $prefix = "{$module}/";
+        if (!$module->empty() && $id->starts($prefix)) {
+            $rest = $id->sub($prefix->size(), $id->size() - $prefix->size());
+        }
+
+        usize $at = $rest->find('::');
+        if ($at == $rest->size()) {
+            return $rest;
+        }
+
+        string $file = $rest->sub(0, $at);
+        string $name = $rest->sub($at + 2, $rest->size() - $at - 2);
+        return "{$file} {$this->sep} {$name}";
+    }
+
+    /**
+     * A bar `$cells` wide filled to `$percent`: green from 80, amber from 50, red below.
+     */
+    public const function meter(float64 $percent, int32 $cells) : string
+    {
+        float64 $exact = $percent * ($cells as float64) / 100.0 + 0.5;
+        int32 $filled = $exact as int32;
+        if ($filled > $cells) {
+            $filled = $cells;
+        }
+
+        string $tone = command::SGR_ERROR;
+        if ($percent >= 80.0) {
+            $tone = command::SGR_SUCCESS;
+        } else if ($percent >= 50.0) {
+            $tone = command::SGR_WARNING;
+        }
+
+        string $done = $this->paint(command::repeatCell($this->fill, $filled), $tone);
+        $done->append($this->mute(command::repeatCell($this->rest, $cells - $filled)));
+        return $done;
+    }
+}

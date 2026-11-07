@@ -1,0 +1,166 @@
+namespace ecotest::cli;
+
+/**
+ * Echo source lines as markup for the HTML report, each token in a span its palette colours: `k`
+ * keywords, `t` types, `v` variables and plain words, `s` strings, `n` numbers, `c` comments, `f`
+ * calls and `p` punctuation. Whitespace stays bare.
+ */
+public class Highlight
+{
+    /**
+     * The class of every keyword and built-in type.
+     */
+    internal static map<string, string> $words = ['namespace' => 'k', 'use' => 'k', 'public' => 'k', 'private' => 'k', 'internal' => 'k', 'static' => 'k', 'const' => 'k', 'function' => 'k', 'class' => 'k', 'struct' => 'k', 'enum' => 'k', 'interface' => 'k', 'test' => 'k', 'return' => 'k', 'if' => 'k', 'else' => 'k', 'foreach' => 'k', 'for' => 'k', 'while' => 'k', 'match' => 'k', 'guard' => 'k', 'as' => 'k', 'throw' => 'k', 'true' => 'k', 'false' => 'k', 'null' => 'k', 'string' => 't', 'bool' => 't', 'void' => 't', 'usize' => 't', 'int8' => 't', 'int16' => 't', 'int32' => 't', 'int64' => 't', 'uint8' => 't', 'uint16' => 't', 'uint32' => 't', 'uint64' => 't', 'float32' => 't', 'float64' => 't', 'array' => 't', 'map' => 't', 'result' => 't'];
+
+    /**
+     * `$line`, escaped and split into spans. A line that opens or continues a block comment is one
+     * comment span.
+     */
+    public static function line(const string& $line) : string
+    {
+        usize $n = $line->size();
+        usize $lead = 0;
+        while ($lead < $n && Highlight::blank($line->byte($lead))) {
+            $lead++;
+        }
+
+        string $rest = $line->sub($lead, $n - $lead);
+        if ($rest->starts('/*') || $rest->starts('*')) {
+            string $out = Escape::markup($line->sub(0, $lead));
+            Highlight::span($out, 'c', $rest);
+            return $out;
+        }
+
+        string $out = '';
+        usize $i = 0;
+
+        while ($i < $n) {
+            uint8 $b = $line->byte($i);
+            usize $from = $i;
+            string $cls = 'p';
+
+            if (Highlight::comment($line, $i)) {
+                $i = $n;
+                $cls = 'c';
+            } else if ($b == 39 || $b == 34) {
+                $i++;
+                while ($i < $n && $line->byte($i) != $b) {
+                    if ($line->byte($i) == 92 && $i + 1 < $n) {
+                        $i++;
+                    }
+                    $i++;
+                }
+                if ($i < $n) {
+                    $i++;
+                }
+                $cls = 's';
+            } else if ($b == 36 && $i + 1 < $n && Highlight::wordByte($line->byte($i + 1))) {
+                $i++;
+                while ($i < $n && Highlight::wordByte($line->byte($i))) {
+                    $i++;
+                }
+                $cls = 'v';
+            } else if ($b >= 48 && $b <= 57) {
+                while ($i < $n && (Highlight::wordByte($line->byte($i)) || $line->byte($i) == 46)) {
+                    $i++;
+                }
+                $cls = 'n';
+            } else if (Highlight::wordByte($b)) {
+                while ($i < $n && Highlight::wordByte($line->byte($i))) {
+                    $i++;
+                }
+                $cls = Highlight::kind($line->sub($from, $i - $from), $line, $i);
+            } else if (Highlight::blank($b)) {
+                while ($i < $n && Highlight::blank($line->byte($i))) {
+                    $i++;
+                }
+                $cls = '';
+            } else {
+                $i++;
+                while ($i < $n && Highlight::punctuation($line, $i)) {
+                    $i++;
+                }
+            }
+
+            Highlight::span($out, $cls, $line->sub($from, $i - $from));
+        }
+
+        return $out;
+    }
+
+    /**
+     * The class of word `$word`, which ends at `$after` in `$line`: a keyword, a type, a call when
+     * a `(` follows, otherwise a plain word.
+     */
+    private static function kind(const string& $word, const string& $line, usize $after) : string
+    {
+        if (Highlight::$words->has($word)) {
+            return Highlight::$words->get($word);
+        }
+
+        uint8 $first = $word->byte(0);
+        if ($first >= 65 && $first <= 90) {
+            return 't';
+        }
+
+        usize $i = $after;
+        while ($i < $line->size() && Highlight::blank($line->byte($i))) {
+            $i++;
+        }
+        if ($i < $line->size() && $line->byte($i) == 40) {
+            return 'f';
+        }
+        return 'v';
+    }
+
+    /**
+     * `$text` escaped onto `$out`, in a span of class `$cls` unless that is empty.
+     */
+    private static function span(string& $out, const string& $cls, const string& $text) : void
+    {
+        if ($cls->empty()) {
+            $out->append(Escape::markup($text));
+            return;
+        }
+        $out->append("<span class=\"{$cls}\">");
+        $out->append(Escape::markup($text));
+        $out->append('</span>');
+    }
+
+    /**
+     * True when a `//` comment starts at `$i`.
+     */
+    private static function comment(const string& $line, usize $i) : bool
+    {
+        return $line->byte($i) == 47 && $i + 1 < $line->size() && $line->byte($i + 1) == 47;
+    }
+
+    /**
+     * True when the byte at `$i` carries on a run of punctuation: nothing that starts another
+     * token.
+     */
+    private static function punctuation(const string& $line, usize $i) : bool
+    {
+        uint8 $b = $line->byte($i);
+        if (Highlight::wordByte($b) || Highlight::blank($b) || Highlight::comment($line, $i)) {
+            return false;
+        }
+        return $b != 36 && $b != 39 && $b != 34;
+    }
+
+    /**
+     * True for letters, digits and `_`.
+     */
+    private static function wordByte(uint8 $b) : bool
+    {
+        return ($b >= 97 && $b <= 122) || ($b >= 65 && $b <= 90) || ($b >= 48 && $b <= 57) || $b == 95;
+    }
+
+    /**
+     * True for spaces and tabs.
+     */
+    private static function blank(uint8 $b) : bool
+    {
+        return $b == 32 || $b == 9;
+    }
+}

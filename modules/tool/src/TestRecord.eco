@@ -76,6 +76,18 @@ public class TestRecord
     }
 
     /**
+     * How each pass went, in order: `pass fail pass`.
+     */
+    public const function attemptWords() : string
+    {
+        array<string> $words = [];
+        foreach ($this->attempts as const &$attempt) {
+            $words[] = $attempt->word();
+        }
+        return str::join($words, ' ');
+    }
+
+    /**
      * Settles `$outcome` from the passes: a skip stays a skip, passes that disagree are flaky,
      * otherwise the last pass decides.
      */

@@ -18,6 +18,11 @@ public class Runner
     public array<string> $envValues = [];
 
     /**
+     * Watches each pass live when set. Without one, echoc writes its own listing to the terminal.
+     */
+    public LiveView? $view = null;
+
+    /**
      * Runs every pass into `$dir`. True when echoc could be started for each of them.
      */
     public function run(const string& $dir) : bool
@@ -48,6 +53,25 @@ public class Runner
                 $echoc->env($this->envNames[$i], $this->envValues[$i]);
             }
 
+            if (!$this->launch($echoc, $passDir, $pass)) {
+                return false;
+            }
+
+            if ($this->coverage) {
+                $this->keepCoverage($passDir);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Runs one pass of `$echoc` to its end: with the streams inherited, or watched through the view.
+     * False when echoc could not be started.
+     */
+    private function launch(std::process::command& $echoc, const string& $passDir, usize $pass) : bool
+    {
+        LiveView $view = guard $this->view else {
             if ($this->repeat > 1) {
                 std::io::println("ecotest: pass {$pass} of {$this->repeat}");
             }
@@ -58,13 +82,67 @@ public class Runner
                 std::io::println("ecotest: cannot run {$this->echoc}: {$e}");
                 return false;
             }
+            return true;
+        };
 
-            if ($this->coverage) {
-                $this->keepCoverage($passDir);
+        return $this->watch($echoc, $passDir, $pass, $view);
+    }
+
+    /**
+     * Runs one pass with echoc's output in `echoc.log` beside its report, and feeds both to `$view`
+     * as they grow, until echoc ends.
+     */
+    private function watch(std::process::command& $echoc, const string& $passDir, usize $pass, LiveView $view) : bool
+    {
+        string $logPath = std::env::join($passDir, 'echoc.log');
+        std::io::file $log = guard std::io::create($logPath) else ($e) {
+            std::io::println("ecotest: cannot write {$logPath}: {$e}");
+            return false;
+        };
+
+        // the log is printed back when the compile fails, so it keeps echoc's colour
+        if ($view->ctx->caps->color) {
+            $echoc->arg('--color');
+            $echoc->arg('always');
+        }
+        $echoc->stdout(.file($log));
+        $echoc->stderr(.merge);
+
+        std::process::child $child = guard $echoc->spawn() else ($e) {
+            $log->close();
+            std::io::println("ecotest: cannot run {$this->echoc}: {$e}");
+            return false;
+        };
+
+        $view->begin($pass, $this->repeat, $passDir);
+        Tail $report = Tail(std::env::join($passDir, 'report.jsonl'));
+        Tail $output = Tail($logPath);
+
+        bool $running = true;
+        while ($running) {
+            // read once more after echoc ended, so its last rows are seen
+            $running = Runner::alive($child);
+            if ($view->compiling()) {
+                $view->output($output->take());
+            }
+            $view->rows(Doc::lines($report->take()));
+            if ($running) {
+                std::thread::sleep(40);
             }
         }
 
+        $log->close();
+        $view->end($logPath);
         return true;
+    }
+
+    /**
+     * True while `$child` has not ended.
+     */
+    private static function alive(std::process::child& $child) : bool
+    {
+        // a child this process spawned can always be asked; dying beats watching forever
+        return $child->try_wait()->unwrap() == null;
     }
 
     /**

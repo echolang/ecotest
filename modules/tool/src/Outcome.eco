@@ -67,4 +67,18 @@ public enum Outcome
     {
         return $this == Outcome::fail || $this == Outcome::timeout || $this == Outcome::signal;
     }
+
+    /**
+     * The group a report lists the outcome in: `failed`, `flaky`, `skip` or `pass`.
+     */
+    public const function group() : string
+    {
+        if ($this->broken()) {
+            return 'failed';
+        }
+        if ($this == Outcome::flaky || $this == Outcome::skip) {
+            return $this->word();
+        }
+        return 'pass';
+    }
 }

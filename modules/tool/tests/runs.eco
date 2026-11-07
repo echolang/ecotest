@@ -11,6 +11,7 @@ test a_green_run_with_coverage_writes_every_report
     $sample = Sample();
     Tool $tool = $sample->tool();
     $tool->coverage = true;
+    $tool->html = true;
 
     expect($tool->run())->is(0);
 
@@ -52,6 +53,7 @@ test a_red_run_fails_and_names_the_failures
     $tool->forwarded = ['--define', 'BROKEN'];
 
     expect($tool->run())->is(1);
+    expect(std::io::exists(std::env::join($sample->latest(), 'report.html'))->or(true))->no();
 
     json::Value $wrong = Doc::object($sample->result('halves_wrongly'), 'failure');
     expect(Doc::text($wrong, 'summary'))->is('expected 2, got 1');

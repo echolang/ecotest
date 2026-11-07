@@ -15,7 +15,7 @@ public class History
         $line['run'] = json::str($runDir);
         $line['ms'] = json::int($run->wallMs);
         $line['pass'] = json::int($run->count(Outcome::pass) as int64);
-        $line['fail'] = json::int(($run->count(Outcome::fail) + $run->count(Outcome::timeout) + $run->count(Outcome::signal)) as int64);
+        $line['fail'] = json::int($run->broken() as int64);
         $line['skip'] = json::int($run->count(Outcome::skip) as int64);
         $line['flaky'] = json::int($run->count(Outcome::flaky) as int64);
         if (!$totals->empty()) {
@@ -55,16 +55,7 @@ public class History
         string $out = "run                         pass  fail  skip flaky      ms  lines\n";
         for (usize $i = $from; $i < $runs->count(); $i++) {
             json::Value $r = $runs[$i];
-            string $name = Doc::text($r, 'run');
-            usize $slash = $name->size();
-            for (usize $k = 0; $k < $name->size(); $k++) {
-                if ($name->byte($k) == 47) {
-                    $slash = $k;
-                }
-            }
-            if ($slash < $name->size()) {
-                $name = $name->sub($slash + 1, $name->size() - $slash - 1);
-            }
+            string $name = Text::base(Doc::text($r, 'run'));
 
             int64 $pass = Doc::number($r, 'pass');
             int64 $fail = Doc::number($r, 'fail');

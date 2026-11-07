@@ -11,6 +11,11 @@ public class Run
     public string $version = '';
     public int64 $wallMs = 0;
     public usize $passes = 0;
+
+    /**
+     * How many passes reached their tests. echoc stops short of them when the tests do not compile.
+     */
+    public usize $reached = 0;
     public array<TestRecord> $tests = [];
     public map<string, usize> $index = [];
 
@@ -56,6 +61,7 @@ public class Run
 
             if ($type == 'run') {
                 $this->version = Doc::text($row, 'version');
+                $this->reached++;
                 continue;
             }
 
@@ -87,10 +93,7 @@ public class Run
             $test->metricValues = [];
             $test->benches = [];
 
-            string $events = std::env::join(std::env::join($passDir, 'events'), "{$test->key}.jsonl");
-            foreach (Doc::lines(Doc::read($events)) as const &$event) {
-                $this->apply($test, $event);
-            }
+            $this->events($test, $passDir);
 
             json::Value $crash = Doc::object($row, 'failure');
             if ($test->failure->empty() && $crash->isObject()) {
@@ -116,6 +119,17 @@ public class Run
         $this->index->set($id, $this->tests->count());
         $this->tests[] = $test;
         return $test;
+    }
+
+    /**
+     * Applies every event `$test` wrote in the pass at `$passDir`.
+     */
+    public function events(TestRecord $test, const string& $passDir) : void
+    {
+        string $path = std::env::join(std::env::join($passDir, 'events'), "{$test->key}.jsonl");
+        foreach (Doc::lines(Doc::read($path)) as const &$event) {
+            $this->apply($test, $event);
+        }
     }
 
     /**
@@ -264,10 +278,93 @@ public class Run
     }
 
     /**
-     * True when no test failed, timed out or was killed. Flaky tests are judged by the gates.
+     * How many tests failed, timed out or were killed.
+     */
+    public const function broken() : usize
+    {
+        usize $n = 0;
+        foreach ($this->tests as const &$test) {
+            if ($test->outcome->broken()) {
+                $n++;
+            }
+        }
+        return $n;
+    }
+
+    /**
+     * The duration `$percent` of the tests finished within, in milliseconds, or 0 without tests.
+     */
+    public const function percentile(usize $percent) : int64
+    {
+        if ($this->tests->empty()) {
+            return 0;
+        }
+
+        array<int64> $ms = [];
+        foreach ($this->tests as const &$test) {
+            $ms[] = $test->ms();
+        }
+        $ms->sort();
+        return $ms[($ms->count() * $percent) / 100];
+    }
+
+    /**
+     * The `$n` slowest tests, slowest first.
+     */
+    public const function slowest(usize $n) : array<TestRecord>
+    {
+        array<TestRecord> $byTime = $this->tests;
+        $byTime->sort(by: (const TestRecord& $a, const TestRecord& $b) : ordering => $b->ms() <=> $a->ms());
+
+        while ($byTime->count() > $n) {
+            $byTime->pop();
+        }
+        return $byTime;
+    }
+
+    /**
+     * How many assertions the tests made through ecotest.
+     */
+    public const function assertions() : int64
+    {
+        int64 $n = 0;
+        foreach ($this->tests as const &$test) {
+            $n = $n + $test->checks;
+        }
+        return $n;
+    }
+
+    /**
+     * How many tests used ecotest, so their assertions were counted.
+     */
+    public const function asserting() : usize
+    {
+        usize $n = 0;
+        foreach ($this->tests as const &$test) {
+            if ($test->usedEcotest) {
+                $n++;
+            }
+        }
+        return $n;
+    }
+
+    /**
+     * How many passes stopped before their tests ran.
+     */
+    public const function stopped() : usize
+    {
+        return $this->passes - $this->reached;
+    }
+
+    /**
+     * True when every pass reached its tests and none failed, timed out or was killed. Flaky tests
+     * are judged by the gates.
      */
     public const function green() : bool
     {
+        if ($this->stopped() > 0) {
+            return false;
+        }
         foreach ($this->tests as const &$test) {
             if ($test->outcome->broken()) {
                 return false;

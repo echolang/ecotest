@@ -11,7 +11,7 @@ public class MarkdownReport
     public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates) : string
     {
         usize $passed = $run->count(Outcome::pass);
-        usize $failed = $run->count(Outcome::fail) + $run->count(Outcome::timeout) + $run->count(Outcome::signal);
+        usize $failed = $run->broken();
         usize $skipped = $run->count(Outcome::skip);
         usize $flaky = $run->count(Outcome::flaky);
 

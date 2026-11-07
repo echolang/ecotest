@@ -12,14 +12,15 @@ public class TerminalReport
     public static usize $top = 5;
 
     /**
-     * The summary of `$run`.
+     * The summary of `$run`. `$diff` is the diff coverage sentence and `$report` the HTML report's
+     * path; either may be empty.
      */
-    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates) : string
+    public static function render(const Run& $run, const array<FileCoverage>& $files, const array<Ratio>& $totals, const array<string>& $failedGates, const string& $diff, const string& $report) : string
     {
         string $out = "\n";
 
         usize $passed = $run->count(Outcome::pass);
-        usize $failed = $run->count(Outcome::fail) + $run->count(Outcome::timeout) + $run->count(Outcome::signal);
+        usize $failed = $run->broken();
         usize $skipped = $run->count(Outcome::skip);
         usize $flaky = $run->count(Outcome::flaky);
         usize $all = $run->tests->count();
@@ -30,6 +31,11 @@ public class TerminalReport
             $out->append(" over {$run->passes} passes");
         }
         $out->append("\n");
+
+        usize $stopped = $run->stopped();
+        if ($stopped > 0) {
+            $out->append("stopped   echoc did not reach the tests in {$stopped} of {$run->passes} passes\n");
+        }
 
         $out->append(TerminalReport::timing($run));
         $out->append(TerminalReport::checks($run));
@@ -48,6 +54,13 @@ public class TerminalReport
             }
         }
 
+        if (!$diff->empty()) {
+            $out->append("diff      {$diff}\n");
+        }
+        if (!$report->empty()) {
+            $out->append("report    {$report}\n");
+        }
+
         return $out;
     }
 
@@ -60,22 +73,14 @@ public class TerminalReport
             return '';
         }
 
-        array<int64> $ms = [];
-        foreach ($run->tests as const &$test) {
-            $ms[] = $test->ms();
-        }
-        $ms->sort();
-        int64 $median = $ms[$ms->count() / 2];
-        int64 $slow = $ms[($ms->count() * 95) / 100];
+        int64 $median = $run->percentile(50);
+        int64 $slow = $run->percentile(95);
 
         string $out = "time      p50 {$median} ms, p95 {$slow} ms\n";
 
-        array<TestRecord> $byTime = $run->tests;
-        $byTime->sort(by: (const TestRecord& $a, const TestRecord& $b) : ordering => $b->ms() <=> $a->ms());
-
-        for (usize $i = 0; $i < $byTime->count() && $i < TerminalReport::$top; $i++) {
-            int64 $took = $byTime[$i]->ms();
-            $out->append("          {$took:>6} ms  {$byTime[$i]->id}\n");
+        foreach ($run->slowest(TerminalReport::$top) as const &$test) {
+            int64 $took = $test->ms();
+            $out->append("          {$took:>6} ms  {$test->id}\n");
         }
 
         return $out;
@@ -86,22 +91,17 @@ public class TerminalReport
      */
     private static function checks(const Run& $run) : string
     {
-        int64 $total = 0;
-        usize $counted = 0;
-        array<string> $silent = [];
+        usize $counted = $run->asserting();
+        if ($counted == 0) {
+            return '';
+        }
 
+        int64 $total = $run->assertions();
+        array<string> $silent = [];
         foreach ($run->tests as const &$test) {
-            if ($test->usedEcotest) {
-                $total = $total + $test->checks;
-                $counted++;
-            }
             if ($test->outcome == Outcome::pass && $test->usedEcotest && $test->checks == 0) {
                 $silent[] = $test->id;
             }
-        }
-
-        if ($counted == 0) {
-            return '';
         }
 
         float64 $per = ($total as float64) / ($counted as float64);
@@ -129,12 +129,8 @@ public class TerminalReport
                 $why = ": {$test->skipReason}";
             }
             if ($outcome == Outcome::flaky) {
-                string $seq = '';
-                foreach ($test->attempts as const &$a) {
-                    $seq->append(' ');
-                    $seq->append($a->word());
-                }
-                $why = ":{$seq}";
+                string $seq = $test->attemptWords();
+                $why = ": {$seq}";
             }
 
             $out->append("{$label:<9} {$test->id}{$why}\n");
@@ -209,20 +205,10 @@ public class TerminalReport
         string $functions = $totals[2]->shown();
         string $out = "coverage  {$lines} lines, {$branches} branches, {$functions} functions\n";
 
-        array<FileCoverage> $worst = $files;
-        $worst->sort(key: (const FileCoverage& $f) : float64 => $f->lineTotals()->percent());
-
-        usize $shown = 0;
-        foreach ($worst as const &$file) {
-            Ratio $r = $file->lineTotals();
-            if ($r->hit == $r->total || $shown >= TerminalReport::$top) {
-                continue;
-            }
-
-            string $pct = $r->shown();
+        foreach (FileCoverage::worst($files, TerminalReport::$top) as const &$file) {
+            string $pct = $file->lineTotals()->shown();
             string $missed = Text::cut($file->missedRanges());
             $out->append("          {$pct:>6}  {$file->file}  missing {$missed}\n");
-            $shown++;
         }
 
         return $out;

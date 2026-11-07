@@ -1,0 +1,39 @@
+namespace ecotest::cli;
+
+/**
+ * Follows a file another process is still writing: each `take` answers the whole lines written
+ * since the last one. A line still being written waits for its newline.
+ */
+public class Tail
+{
+    private string $path;
+    private int64 $offset = 0;
+
+    public constructor(const string& $path)
+    {
+        $this->path = $path;
+    }
+
+    /**
+     * The lines completed since the last call, each with its newline. Empty while the file does not
+     * exist yet.
+     */
+    public function take() : string
+    {
+        std::io::file $f = guard std::io::open($this->path, .read) else {
+            return '';
+        };
+
+        result<int64, std::io::ioerror> $at = $f->seek($this->offset, .start);
+        string $more = $f->readall()->or('');
+        $f->close();
+
+        usize $end = $more->size();
+        while ($end > 0 && $more->byte($end - 1) != 10) {
+            $end--;
+        }
+
+        $this->offset = $this->offset + ($end as int64);
+        return $more->sub(0, $end);
+    }
+}
