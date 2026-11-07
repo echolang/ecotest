@@ -137,7 +137,7 @@ test flips
     }
 
     /**
-     * The echoc the outer run uses, which `ecotest run` hands down as `ECHOC`.
+     * The echoc the outer run uses, which `ecotest` hands down as `ECHOC`.
      */
     public static function compiler() : string
     {

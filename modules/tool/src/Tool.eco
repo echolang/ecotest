@@ -141,7 +141,7 @@ public class Tool
             $dir = Files::latest($this->root());
         }
         if ($dir->empty()) {
-            std::io::println('ecotest: no run yet; run `ecotest run` first');
+            std::io::println('ecotest: no run yet; run `ecotest` first');
             return 1;
         }
 
@@ -149,8 +149,9 @@ public class Tool
         array<FileCoverage> $files = [];
         array<Ratio> $totals = [];
         $this->measure($dir, $run, $files, $totals);
-        // a stored run is shown, not judged again: the gates only mark the coverage
-        Verdict $verdict = Verdict::of($run, $this->gates, []);
+        // a stored run is shown with the verdict it got, not judged again: the gates only mark the
+        // coverage
+        Verdict $verdict = Verdict::stored($dir, $run, $this->gates);
 
         if ($this->format == 'md') {
             std::io::print(MarkdownReport::render($run, $files, $totals, $verdict));
@@ -187,7 +188,7 @@ public class Tool
 
         string $dir = Files::latest($this->root());
         Coverage $c = guard $this->coverageOf($dir) else {
-            std::io::println('ecotest: the newest run has no coverage; run `ecotest run --coverage` first');
+            std::io::println('ecotest: the newest run has no coverage; run `ecotest --coverage` first');
             return 1;
         };
 
@@ -292,7 +293,7 @@ public class Tool
         int64 $line = str::int($spec->sub($colon + 1, $spec->size() - $colon - 1)) ?? 0;
 
         Coverage $c = guard $this->coverageOf(Files::latest($this->root())) else {
-            std::io::println('ecotest: the newest run has no coverage; run `ecotest run --coverage` first');
+            std::io::println('ecotest: the newest run has no coverage; run `ecotest --coverage` first');
             return 1;
         };
 
@@ -315,7 +316,7 @@ public class Tool
     public function affected() : int32
     {
         Coverage $c = guard $this->coverageOf(Files::latest($this->root())) else {
-            std::io::println('ecotest: needs a run with coverage to know which tests touch what; run `ecotest run --coverage` first');
+            std::io::println('ecotest: needs a run with coverage to know which tests touch what; run `ecotest --coverage` first');
             return 1;
         };
 

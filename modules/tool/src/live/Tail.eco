@@ -20,13 +20,7 @@ public class Tail
      */
     public function take() : string
     {
-        std::io::file $f = guard std::io::open($this->path, .read) else {
-            return '';
-        };
-
-        result<int64, std::io::ioerror> $at = $f->seek($this->offset, .start);
-        string $more = $f->readall()->or('');
-        $f->close();
+        string $more = $this->unread();
 
         usize $end = $more->size();
         while ($end > 0 && $more->byte($end - 1) != 10) {
@@ -35,5 +29,31 @@ public class Tail
 
         $this->offset = $this->offset + ($end as int64);
         return $more->sub(0, $end);
+    }
+
+    /**
+     * Everything written since the last call, a last line without its newline included. For once
+     * the writer is gone and nothing more will complete it.
+     */
+    public function rest() : string
+    {
+        string $more = $this->unread();
+        $this->offset = $this->offset + ($more->size() as int64);
+        return $more;
+    }
+
+    /**
+     * The bytes past the offset, or empty while the file does not exist yet.
+     */
+    private function unread() : string
+    {
+        std::io::file $f = guard std::io::open($this->path, .read) else {
+            return '';
+        };
+
+        result<int64, std::io::ioerror> $at = $f->seek($this->offset, .start);
+        string $more = $f->readall()->or('');
+        $f->close();
+        return $more;
     }
 }

@@ -11,10 +11,22 @@ test version_and_help_answer_zero
     expect(Cli::main(['ecotest', '--help']))->is(0);
 }
 
+test run_is_the_command_when_none_is_named
+{
+    expect(Cli::defaulted(['ecotest']))->is(['ecotest', 'run']);
+    expect(Cli::defaulted(['ecotest', '--coverage', '--html']))->is(['ecotest', 'run', '--coverage', '--html']);
+    expect(Cli::defaulted(['ecotest', 'run', '--coverage']))->is(['ecotest', 'run', '--coverage']);
+    expect(Cli::defaulted(['ecotest', 'report', 'x']))->is(['ecotest', 'report', 'x']);
+    expect(Cli::defaulted(['ecotest', '--help']))->is(['ecotest', '--help']);
+    expect(Cli::defaulted(['ecotest', '-v']))->is(['ecotest', '-v']);
+}
+
 test a_bad_command_line_answers_two
 {
     expect(Cli::main(['ecotest', 'run', '--no-such-flag']))->is(2);
     expect(Cli::main(['ecotest', 'affected']))->is(2);
+    expect(Cli::main(['ecotest', '--no-such-flag']))->is(2);
+    expect(Cli::main(['ecotest', 'history', '--coverage']))->is(2);
 }
 
 test every_command_is_dispatched

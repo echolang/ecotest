@@ -13,6 +13,11 @@ public class TestRecord
     public string $name = '';
     public string $group = '';
 
+    /**
+     * The pass this record was last folded in, counting from 1. Its events describe that pass.
+     */
+    public usize $pass = 0;
+
     public Outcome $outcome = Outcome::pass;
     public array<Outcome> $attempts = [];
     public array<int64> $durations = [];
@@ -64,49 +69,35 @@ public class TestRecord
     }
 
     /**
-     * Where the test sits as people read it: the file part of its id with the module dropped, as in
-     * `tests/a.eco`. Empty for an id without `::`.
+     * The test's id as people read it, split at `::` into the file and the test's own name, as in
+     * `tests/a.eco` and `adds`. The module is dropped from the front unless `$keepModule`, which
+     * keeps tests of different modules apart. Without `::` the suite is empty and the label is the
+     * whole id.
      */
-    public const function suite() : string
+    public const function title(bool $keepModule) : TestTitle
     {
-        string $local = $this->local();
-        usize $at = $local->find('::');
-        if ($at == $local->size()) {
-            return '';
-        }
-        return $local->sub(0, $at);
-    }
-
-    /**
-     * The test's own name: what its id has after `::`, or the whole id without one.
-     */
-    public const function label() : string
-    {
-        string $local = $this->local();
-        usize $at = $local->find('::');
-        if ($at == $local->size()) {
-            return $local;
-        }
-        return $local->sub($at + 2, $local->size() - $at - 2);
-    }
-
-    /**
-     * The id without its module in front.
-     */
-    private const function local() : string
-    {
+        usize $from = 0;
         string $prefix = "{$this->module}/";
-        if ($this->module->empty() || !$this->id->starts($prefix)) {
-            return $this->id;
+        if (!$keepModule && !$this->module->empty() && $this->id->starts($prefix)) {
+            $from = $prefix->size();
         }
-        return $this->id->sub($prefix->size(), $this->id->size() - $prefix->size());
+
+        usize $at = $this->id->find('::');
+        if ($at == $this->id->size() || $at < $from) {
+            return TestTitle('', $this->id->sub($from, $this->id->size() - $from));
+        }
+        return TestTitle($this->id->sub($from, $at - $from), $this->id->sub($at + 2, $this->id->size() - $at - 2));
     }
 
     /**
-     * How the latest pass went.
+     * How the latest pass went, or the settled outcome before any pass was recorded.
      */
     public const function latest() : Outcome
     {
+        if ($this->attempts->empty()) {
+            return $this->outcome;
+        }
+
         return $this->attempts[$this->attempts->count() - 1];
     }
 

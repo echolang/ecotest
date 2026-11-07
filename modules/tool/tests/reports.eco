@@ -238,7 +238,7 @@ test the_html_report_puts_broken_tests_first_and_says_why
         ->has('<span class="badge bad">3 failures</span><span class="badge bad">1 gate failed</span>')
         ->has('2 of 7 tests passed in 1.50 s. 3 failed and 2 were skipped. 1 gate failed.')
         ->has('<p class="callout-title">Gate failed</p><div>line coverage is below &lt;90%&gt;</div>')
-        ->has('<tr class="bad" data-group="failed"><td><span class="oc fail"><i></i>fail</span></td><td><div class="tid"><span>tests/a.eco::</span>fails</div>')
+        ->has('<tr class="bad" data-group="failed"><td><span class="oc fail"><i></i>fail</span></td><td><div class="tid"><span>m/tests/a.eco::</span>fails</div>')
         ->has('<span class="oc timeout">')
         ->has('<span class="oc signal">')
         ->has('<div class="failure-head"><span class="dot"></span>tests/a.eco:9</div><div class="failure-msg">expected 2, got 1</div><div class="failure-detail">a &lt;detail&gt; &amp; more</div>')
@@ -384,9 +384,28 @@ test a_record_without_passes_has_no_time_and_keeps_its_outcome
 {
     TestRecord $t = TestRecord('m/a.eco::x', 'm_a.eco__x');
     expect($t->ms())->is(0);
+    expect($t->latest() == Outcome::pass)->yes();
 
     $t->settle();
     expect($t->outcome == Outcome::pass)->yes();
+}
+
+test a_stored_report_keeps_the_verdict_its_run_got
+{
+    $dir = TempDir();
+    Run $run = handMade();
+    $run->tests = [record('tests/a.eco', 'passes', Outcome::pass)];
+    array<FileCoverage> $none = [];
+    array<Ratio> $noTotals = [];
+    $dir->write('run.json', JsonReport::render($run, $none, $noTotals, judged($run, ['line coverage 60.0% is below 90.0%'])));
+
+    Verdict $stored = Verdict::stored($dir->path, $run, Gates());
+    expect($stored->green)->no();
+    expect($stored->failed)->is(['line coverage 60.0% is below 90.0%']);
+
+    // a run that never finished has nothing stored and is judged on its tests
+    $empty = TempDir();
+    expect(Verdict::stored($empty->path, $run, Gates())->green)->yes();
 }
 
 test a_service_variable_keeps_upper_case_and_digits

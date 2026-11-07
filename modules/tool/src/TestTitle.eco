@@ -1,0 +1,10 @@
+namespace ecotest::cli;
+
+/**
+ * A test id split for reading: the file the test sits in and its own name.
+ */
+public struct TestTitle
+{
+    public string $suite;
+    public string $label;
+}

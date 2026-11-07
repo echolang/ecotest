@@ -5,7 +5,7 @@ use command;
 /**
  * The ecotest command line: the commands, their flags, and the hand-off to `Tool`.
  *
- *   ecotest run [--coverage] [--html] [--repeat N] [--filter ...] [--style auto|pretty|simple] [gates]
+ *   ecotest [run] [--coverage] [--html] [--repeat N] [--filter ...] [--style auto|pretty|simple] [gates]
  *   ecotest report [run] --format terminal|md|junit|lcov|html|json [--style ...]
  *   ecotest history
  *   ecotest api
@@ -21,7 +21,7 @@ public class Cli
     {
         command::Command $app = command::Command('ecotest', '0.1.0', 'run echoc tests and report on them');
 
-        command::Subcommand $run = $app->command('run', 'run the tests and report', 'Runs echoc test, merges what the tests recorded through ecotest, prints a summary and writes every report into the run directory.');
+        command::Subcommand $run = $app->command('run', 'run the tests and report (the default)', 'Runs echoc test, merges what the tests recorded through ecotest, prints a summary and writes every report into the run directory.');
         command::Subcommand $report = $app->command('report', 'render a stored run', 'Renders the newest run, or the one named, in another format.');
         command::Subcommand $history = $app->command('history', 'trends across runs', 'Duration and outcome trends from the run history.');
         command::Subcommand $api = $app->command('api', 'public API no test calls', 'Lists public functions and methods whose coverage counter never ran in the newest run.');
@@ -81,7 +81,7 @@ public class Cli
             $app->accept($project, $sub);
         }
 
-        $r = $app->parse($argv);
+        $r = $app->parse(Cli::defaulted($argv));
 
         if (Cli::refused($r, $app)) {
             return 2;
@@ -169,6 +169,26 @@ public class Cli
         }
 
         return $tool->affected();
+    }
+
+    /**
+     * `$argv` with `run` put in front when it names no command: bare `ecotest`, or `ecotest --coverage`.
+     * A lone help or version flag still reaches the root page.
+     */
+    public static function defaulted(const array<string>& $argv) : array<string>
+    {
+        if ($argv->count() > 1) {
+            string $first = $argv[1];
+            if (!$first->starts('-') || $first == '-h' || $first == '--help' || $first == '-v' || $first == '--version') {
+                return $argv;
+            }
+        }
+
+        array<string> $words = [$argv[0], 'run'];
+        for (usize $i = 1; $i < $argv->count(); $i++) {
+            $words[] = $argv[$i];
+        }
+        return $words;
     }
 
     /**

@@ -22,7 +22,7 @@ public class Api
 
     /**
      * The service ecotest started under `$name` (the `services` list of `ecotest.json`). Outside
-     * `ecotest run` its `ECOTEST_<NAME>_URL` is unset and the test is skipped, not failed.
+     * `ecotest` its `ECOTEST_<NAME>_URL` is unset and the test is skipped, not failed.
      */
     #[caller]
     public constructor(service: const string& $name)

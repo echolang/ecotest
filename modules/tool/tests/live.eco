@@ -63,6 +63,10 @@ test a_tail_answers_whole_lines_as_they_are_written
 
     $dir->write('grows.log', "one\ntwo\nthree");
     expect($tail->take())->is("two\n");
+
+    // once the writer is gone, a last line without its newline is still read
+    expect($tail->rest())->is('three');
+    expect($tail->rest())->is('');
 }
 
 test a_view_ignores_rows_before_it_began

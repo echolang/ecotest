@@ -44,7 +44,7 @@ public class History
     {
         array<json::Value> $runs = Doc::lines(Doc::read($path));
         if ($runs->empty()) {
-            return "no history yet: run `ecotest run` first\n";
+            return "no history yet: run `ecotest` first\n";
         }
 
         usize $from = 0;

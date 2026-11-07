@@ -8,7 +8,7 @@ Checks and test events for `echoc test`. Failures name the test's line, and the 
 - `context("row {$i}")` rides on every failure while the value lives.
 - Snapshots live next to the test file. `ECOTEST_CI=1` refuses to write new ones.
 - A property test shrinks a failing value and prints `ECOTEST_SEED` so you can replay it.
-- `ecotest run` wraps `echoc test` and reports coverage, gates, history and flakes.
+- `ecotest` wraps `echoc test` and reports coverage, gates, history and flakes.
 - HTTP checks against a URL, a service the tool started, or a nexus app in process. Same tests.
 
 `echoc test` still runs the checks. The events are for the tool. Without a run directory, nothing is written and every check still works.
@@ -30,7 +30,7 @@ The require belongs on the test target. The library is standard library only, so
 }
 ```
 
-Then `epm run ecotest run`. From this repo, `echoc install` puts `ecotest` on `PATH`.
+Then `epm run ecotest`. From this repo, `echoc install` puts `ecotest` on `PATH`.
 
 ## Quick start
 
@@ -48,7 +48,7 @@ test the_list_holds_both
 echoc test
 ```
 
-A failed check stops at the test's line and prints what was expected and what came instead. That is the whole loop until you want coverage, skips, snapshots in CI, or a report: then `ecotest run`.
+A failed check stops at the test's line and prints what was expected and what came instead. That is the whole loop until you want coverage, skips, snapshots in CI, or a report: then `ecotest`.
 
 ## Checks
 
@@ -245,13 +245,13 @@ ecotest::bench('add', function() : void {
 `ecotest` runs `echoc test`, reads the events the tests wrote, and turns that into one run. Runs live under `.ecotest/run-<millis>/`, with `history.jsonl` beside them, outside `ecobuild/` so `echoc clean` keeps the history.
 
 ```bash
-epm run ecotest run --coverage
-ecotest run --coverage --html --min-coverage 80
+epm run ecotest --coverage
+ecotest --coverage --html --min-coverage 80
 ```
 
 ### Commands
 
-- `run` compiles, runs, prints a summary, writes the run directory, applies the gates.
+- `run`, the default when no command is named, compiles, runs, prints a summary, writes the run directory, applies the gates.
 - `report [run] --format terminal|md|junit|lcov|html|json` renders a stored run again.
 - `history` is duration and outcome trends.
 - `api` lists public functions and methods the newest coverage run never called.
@@ -303,7 +303,7 @@ $api = Api(service: 'api');
 $api = Api(transport: $transport);
 ```
 
-`Api(service:)` reads `ECOTEST_API_URL`. Outside `ecotest run` that variable is unset and the test skips.
+`Api(service:)` reads `ECOTEST_API_URL`. Outside `ecotest` that variable is unset and the test skips.
 
 ```echo
 $api->get('/users/1')
@@ -350,7 +350,7 @@ It depends on a nexus checkout.
 ```bash
 echoc build
 echoc test
-echoc run --target ecotest -- run --coverage
+echoc run --target ecotest -- --coverage
 ```
 
 The library lives in `src/`. The runner's sources are `modules/tool/`, compiled into the public `ecotest` exe. HTTP is `modules/http`. Nexus is `modules/nexus`.

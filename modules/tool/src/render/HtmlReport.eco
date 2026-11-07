@@ -305,11 +305,13 @@ public class HtmlReport
             $bad = 'bad';
         }
 
-        string $suite = $test->suite();
-        if (!$suite->empty()) {
-            $suite = Escape::markup("{$suite}::");
+        // the module stays: the page lists every module's tests together
+        TestTitle $t = $test->title(true);
+        string $suite = '';
+        if (!$t->suite->empty()) {
+            $suite = Escape::markup("{$t->suite}::");
         }
-        string $name = Escape::markup($test->label());
+        string $name = Escape::markup($t->label);
 
         string $ms = '—';
         if ($test->outcome != Outcome::skip) {

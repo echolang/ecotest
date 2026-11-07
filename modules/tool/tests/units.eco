@@ -1,5 +1,5 @@
-use ecotest::expect;
-use ecotest::cli::{GitDiff, Glob, Coverage, ServiceSpec, Ratio, Outcome, TestRecord, Run, FileCoverage, Style, Look};
+use ecotest::{expect, TempDir};
+use ecotest::cli::{GitDiff, Glob, Coverage, ServiceSpec, Ratio, Outcome, TestRecord, TestTitle, Run, FileCoverage, Style, Look};
 
 test git_diff_hunks_become_changed_lines
 {
@@ -74,6 +74,58 @@ test a_run_folds_events_into_its_tests
     expect($t->failure)->is('expected 1, got 2');
     expect($t->failureLine)->is(7);
     expect($t->context)->is(['row 3']);
+}
+
+test a_later_pass_starts_from_a_clean_record
+{
+    $dir = TempDir();
+    $run = Run($dir->path);
+    bool $one = std::io::mkdir($dir->file('one'))->or(false);
+    bool $oneEvents = std::io::mkdir($dir->file('one/events'))->or(false);
+    bool $two = std::io::mkdir($dir->file('two'))->or(false);
+    $dir->write('one/events/m_a.eco__t.jsonl', "{\"type\":\"checks\",\"count\":5}\n{\"type\":\"skip\",\"reason\":\"no db\"}\n{\"type\":\"fail\",\"summary\":\"no\",\"file\":\"tests/a.eco\",\"line\":9}\n");
+
+    $run->passes++;
+    json::Value $row = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"pass"}');
+    $run->fold($row, $dir->file('one'));
+    expect($run->asserting(inPass: 1))->is(1);
+    expect($run->assertions(inPass: 1))->is(5);
+
+    $run->passes++;
+    json::Value $timeout = guard json::parse('{"type":"test","id":"m/a.eco::t","module":"m","status":"timeout"}');
+    TestRecord $t = guard $run->fold($timeout, $dir->file('two'));
+    expect($t->pass)->is(2);
+    expect($run->asserting(inPass: 1))->is(0);
+    expect($run->asserting(inPass: 2))->is(0);
+    expect($run->assertions())->is(0);
+
+    // nothing the first pass wrote describes the second
+    expect($t->skipReason)->is('');
+    expect($t->failure)->is('');
+    expect($t->failureFile)->is('');
+    expect($t->failureLine)->is(0);
+    expect($t->checks)->is(0);
+    expect($t->usedEcotest)->no();
+    expect($t->attemptWords())->is('skip timeout');
+
+    $run->settle();
+    expect($t->outcome == Outcome::timeout)->yes();
+    expect($run->green())->no();
+}
+
+test a_title_drops_the_module_unless_kept
+{
+    TestTitle $short = titled('m/tests/a.eco::adds', 'm')->title(false);
+    expect($short->suite)->is('tests/a.eco');
+    expect($short->label)->is('adds');
+
+    TestTitle $kept = titled('m/tests/a.eco::adds', 'm')->title(true);
+    expect($kept->suite)->is('m/tests/a.eco');
+    expect($kept->label)->is('adds');
+
+    TestTitle $loose = titled('m/loose', 'm')->title(false);
+    expect($loose->suite)->is('');
+    expect($loose->label)->is('loose');
 }
 
 test styles_are_named_and_follow_the_stream_on_auto

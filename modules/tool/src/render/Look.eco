@@ -126,12 +126,11 @@ public struct Look
      */
     public const function title(const TestRecord& $test) : string
     {
-        string $suite = $test->suite();
-        string $label = $test->label();
-        if ($suite->empty()) {
-            return $label;
+        TestTitle $t = $test->title(false);
+        if ($t->suite->empty()) {
+            return $t->label;
         }
-        return "{$suite} {$this->sep} {$label}";
+        return "{$t->suite} {$this->sep} {$t->label}";
     }
 
     /**

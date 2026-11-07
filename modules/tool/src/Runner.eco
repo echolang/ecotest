@@ -118,18 +118,20 @@ public class Runner
         Tail $report = Tail(std::env::join($passDir, 'report.jsonl'));
         Tail $output = Tail($logPath);
 
-        bool $running = true;
-        while ($running) {
-            // read once more after echoc ended, so its last rows are seen
-            $running = Runner::alive($child);
+        while (Runner::alive($child)) {
             if ($view->compiling()) {
                 $view->output($output->take());
             }
             $view->rows(Doc::lines($report->take()));
-            if ($running) {
-                std::thread::sleep(40);
-            }
+            std::thread::sleep(40);
         }
+
+        // read once more after echoc ended, so its last rows are seen, a last one without its
+        // newline too
+        if ($view->compiling()) {
+            $view->output($output->rest());
+        }
+        $view->rows(Doc::lines($report->rest()));
 
         $log->close();
         $view->end($logPath);

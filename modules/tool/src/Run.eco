@@ -54,8 +54,9 @@ public class Run
     {
         $this->passes++;
 
+        // the test a row folded into is for the live view; reading back needs only the fold
         foreach (Doc::lines(Doc::read(std::env::join($passDir, 'report.jsonl'))) as const &$row) {
-            TestRecord? $test = $this->fold($row, $passDir);
+            $this->fold($row, $passDir);
         }
     }
 
@@ -87,14 +88,20 @@ public class Run
         $test->file = Run::relative(Doc::text($row, 'file'), Run::projectOf($this->dir));
         $test->name = Doc::text($row, 'name');
         $test->group = Doc::text($row, 'group');
+        $test->pass = $this->passes;
         $test->attempts[] = Outcome::of(Doc::text($row, 'status'));
         $test->durations[] = Doc::number($row, 'ms');
         $test->output = Doc::text($row, 'output');
 
-        // reset per pass: the last pass's events describe the last pass's failure, and a note
-        // or a bench every pass wrote is reported once
+        // reset per pass: the last pass's events describe the last pass's failure, skip and
+        // assertions, and a note or a bench every pass wrote is reported once
         $test->failure = '';
+        $test->failureFile = '';
+        $test->failureLine = 0;
         $test->failureDetail = '';
+        $test->skipReason = '';
+        $test->usedEcotest = false;
+        $test->checks = 0;
         $test->context = [];
         $test->notes = [];
         $test->metricNames = [];
@@ -104,6 +111,11 @@ public class Run
         string $events = std::env::join(std::env::join($passDir, 'events'), "{$test->key}.jsonl");
         foreach (Doc::lines(Doc::read($events)) as const &$event) {
             $this->apply($test, $event);
+        }
+
+        // a test that skips itself exits cleanly, so echoc calls the pass a pass
+        if (!$test->skipReason->empty()) {
+            $test->attempts[$test->attempts->count() - 1] = Outcome::skip;
         }
 
         json::Value $crash = Doc::object($row, 'failure');
@@ -328,9 +340,20 @@ public class Run
      */
     public const function assertions() : int64
     {
+        return $this->assertions(inPass: 0);
+    }
+
+    /**
+     * How many assertions the tests last run in pass `$pass` made through ecotest. Pass 0 counts
+     * every test.
+     */
+    public const function assertions(inPass: usize $pass) : int64
+    {
         int64 $n = 0;
         foreach ($this->tests as const &$test) {
-            $n = $n + $test->checks;
+            if ($pass == 0 || $test->pass == $pass) {
+                $n = $n + $test->checks;
+            }
         }
         return $n;
     }
@@ -340,9 +363,17 @@ public class Run
      */
     public const function asserting() : usize
     {
+        return $this->asserting(inPass: 0);
+    }
+
+    /**
+     * How many of the tests last run in pass `$pass` used ecotest. Pass 0 counts every test.
+     */
+    public const function asserting(inPass: usize $pass) : usize
+    {
         usize $n = 0;
         foreach ($this->tests as const &$test) {
-            if ($test->usedEcotest) {
+            if ($test->usedEcotest && ($pass == 0 || $test->pass == $pass)) {
                 $n++;
             }
         }
