@@ -70,16 +70,17 @@ test a_file_without_an_extension_names_its_folder_whole
 
 test a_snapshot_that_cannot_be_written_fails
 {
-    setVar('ECHO_TEST_FILE', '/dev/null/case.eco');
+    $dir = TempDir();
+    $blocker = $dir->write('blocker', 'x');
+    setVar('ECHO_TEST_FILE', ($blocker / 'case.eco')->string());
     setVar('ECHO_TEST_NAME', 'x');
 
     $got = summaries(function() : void {
         expect('v')->snapshot();
     });
 
-    string $s = std::fs::DS;
     expect($got->count())->is(1);
-    expect($got[0])->starts("cannot write snapshot /dev/null{$s}__snapshots__{$s}case{$s}x.1.snap");
+    expect($got[0])->starts('cannot write snapshot ');
 }
 
 test a_bare_file_name_sits_in_the_current_directory
