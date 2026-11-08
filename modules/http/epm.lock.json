@@ -14,24 +14,24 @@
     },
     {
       "name": "echolang/libcommand",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "source": {
         "kind": "git",
         "url": "https://github.com/echolang/libcommand"
       },
-      "rev": "86ea4b9ab49483647776214f4d9e0cb8da1207cc",
-      "sha256": "4304f9f807ec254b3c9bf31c43fb5351687fe5c49b17602fd8164016ba6493e9",
+      "rev": "f008284c5f6b8d9e95b2f7709a86947562ba53d3",
+      "sha256": "99e9c8a26546dcb280f02d6e8accbd41dcb4ee0593126ca118d2a3af3cde9dbe",
       "requires": []
     },
     {
       "name": "echolang/libhttp",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "source": {
         "kind": "git",
         "url": "https://github.com/echolang/libhttp"
       },
-      "rev": "742521c3db5c2f155f037b0b7d4489ba76363360",
-      "sha256": "fbcac18af9da8cebc09914a0d50fdc203ef8f838c22e8688503977cb3dfc81fe",
+      "rev": "308637fe6eaca63d207db63d3f193577644893ec",
+      "sha256": "9897aa5f899861f327485174c0353842326edee433855b4dd4a0a3183b2c1cfa",
       "requires": []
     },
     {
