@@ -24,7 +24,7 @@ jobs:
 
       - uses: echolang/setup-echo@v1
         with:
-          version: 0.14.0
+          version: 0.14.1
 
       - name: Build and test
         run: |
@@ -45,7 +45,7 @@ jobs:
 
       - uses: echolang/setup-echo@v1
         with:
-          version: 0.14.0
+          version: 0.14.1
 
       - name: Install libcurl
         if: runner.os == 'Linux'

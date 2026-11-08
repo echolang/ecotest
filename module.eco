@@ -5,7 +5,7 @@
 
 #[module: "ecotest"]
 #[version: "0.3.0"]
-#[epm::echoc: ">=0.14.0"]
+#[epm::echoc: ">=0.14.1"]
 #[epm::license: "MIT"]
 #[epm::description: "Expressive checks and test events for echoc test"]
 
