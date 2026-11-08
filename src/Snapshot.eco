@@ -1,6 +1,6 @@
 namespace ecotest;
 
-use ecotest::{diff, paths};
+use ecotest::diff;
 
 /**
  * Snapshot files. The n-th snapshot a test takes lives at
@@ -33,21 +33,21 @@ internal class Snapshot
         Snapshot::$taken = Snapshot::$taken + 1;
         usize $n = Snapshot::$taken;
 
-        $root = std::env::join(paths::dir($file), '__snapshots__');
-        $folder = std::env::join($root, paths::stem($file));
-        $path = std::env::join($folder, "{$name}.{$n}.snap");
+        $here = std::fs::path($file);
+        $folder = $here->dirname() / '__snapshots__' / $here->stem();
+        $path = $folder / "{$name}.{$n}.snap";
 
-        $want = guard std::io::readfile($path) else {
+        $want = guard std::fs::readfile($path) else {
             if (Snapshot::flag('ECOTEST_CI')) {
                 fail("snapshot {$path} does not exist, and ECOTEST_CI forbids writing it", $at);
                 return;
             }
 
-            guard Snapshot::write($root, $folder, $path, $value) else ($e) {
+            guard Snapshot::write($folder, $path, $value) else ($e) {
                 fail("cannot write snapshot {$path}: {$e}", $at);
                 return;
             };
-            emitSnapshotNew($path, $at);
+            emitSnapshotNew($path->string(), $at);
             return;
         };
 
@@ -56,11 +56,11 @@ internal class Snapshot
         }
 
         if (Snapshot::flag('ECOTEST_UPDATE')) {
-            guard Snapshot::write($root, $folder, $path, $value) else ($e) {
+            guard Snapshot::write($folder, $path, $value) else ($e) {
                 fail("cannot write snapshot {$path}: {$e}", $at);
                 return;
             };
-            emitSnapshotUpdated($path, $at);
+            emitSnapshotUpdated($path->string(), $at);
             return;
         }
 
@@ -75,15 +75,12 @@ internal class Snapshot
      * as the file's write error.
      */
     private static function write(
-        const string& $root,
-        const string& $folder,
-        const string& $path,
+        const std::fs::path& $folder,
+        const std::fs::path& $path,
         const string& $value
     ) : status<std::io::ioerror> {
-        $made = std::io::mkdir($root);
-        $made = std::io::mkdir($folder);
-
-        guard std::io::writefile($path, $value) else ($e) {
+        $made = std::fs::mkdir($folder, recursive: true);
+        $n = guard std::fs::writefile($path, $value) else ($e) {
             return .error($e);
         };
 

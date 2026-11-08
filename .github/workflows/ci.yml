@@ -23,6 +23,8 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: echolang/setup-echo@v1
+        with:
+          version: 0.14.0
 
       - name: Build and test
         run: |
@@ -42,6 +44,8 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: echolang/setup-echo@v1
+        with:
+          version: 0.14.0
 
       - name: Install libcurl
         if: runner.os == 'Linux'

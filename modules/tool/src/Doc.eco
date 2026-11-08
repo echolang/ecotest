@@ -104,7 +104,7 @@ public function lines(const string& $text) : array<json::Value>
  */
 public function read(const string& $path) : string?
 {
-    $text = guard std::io::readfile($path) else {
+    $text = guard std::fs::readfile($path) else {
         return null;
     };
     return $text;

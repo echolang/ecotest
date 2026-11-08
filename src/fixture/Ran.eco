@@ -58,10 +58,10 @@ public function run(
     $outPath = $scratch->file('stdout');
     $errPath = $scratch->file('stderr');
 
-    $out = guard std::io::create($outPath) else ($e) {
+    $out = guard std::fs::create($outPath) else ($e) {
         die(Session::report(Failure("cannot capture the output of {$command}: {$e}", $at)), $at);
     };
-    $err = guard std::io::create($errPath) else ($e) {
+    $err = guard std::fs::create($errPath) else ($e) {
         die(Session::report(Failure("cannot capture the output of {$command}: {$e}", $at)), $at);
     };
 
@@ -81,7 +81,7 @@ public function run(
         $cmd->stdin(.discard);
     } else {
         $inPath = $scratch->write('stdin', $input);
-        $in = guard std::io::open($inPath, .read) else ($e) {
+        $in = guard std::fs::open($inPath, .read) else ($e) {
             die(Session::report(Failure("cannot hand input to {$command}: {$e}", $at)), $at);
         };
         $cmd->stdin(.file($in));
@@ -123,8 +123,8 @@ public function run(
     $out->close();
     $err->close();
 
-    $stdout = std::io::readfile($outPath)->or('');
-    $stderr = std::io::readfile($errPath)->or('');
+    $stdout = std::fs::readfile($outPath)->or('');
+    $stderr = std::fs::readfile($errPath)->or('');
 
     int32? $code = $status->code();
     if ($timedOut) {

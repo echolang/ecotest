@@ -77,7 +77,7 @@ test a_snapshot_that_cannot_be_written_fails
         expect('v')->snapshot();
     });
 
-    string $s = std::env::DS;
+    string $s = std::fs::DS;
     expect($got->count())->is(1);
     expect($got[0])->starts("cannot write snapshot /dev/null{$s}__snapshots__{$s}case{$s}x.1.snap");
 }
@@ -92,7 +92,7 @@ test a_bare_file_name_sits_in_the_current_directory
         expect('v')->snapshot();
     });
 
-    string $s = std::env::DS;
+    string $s = std::fs::DS;
     expect($got[0])->starts("snapshot .{$s}__snapshots__{$s}bare{$s}x.1.snap does not exist");
 }
 

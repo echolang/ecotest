@@ -15,8 +15,8 @@ internal class Sample
         $root = Sample::ecotestRoot();
 
         $this->dir->write('module.eco', "#[module: \"sample\"]\n#[sources: \"src/*.eco\"]\n\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[depends: \"{$root}\"]\n}\n");
-        guard std::io::mkdir($this->dir->file('src'));
-        guard std::io::mkdir($this->dir->file('tests'));
+        guard std::fs::mkdir($this->dir->file('src'));
+        guard std::fs::mkdir($this->dir->file('tests'));
 
         $this->dir->write('src/math.eco', 'public function add(int64 $a, int64 $b) : int64
 {
@@ -117,7 +117,7 @@ test flips
      */
     public const function runJson() : json::Value
     {
-        $parsed = guard json::parse(expect(doc::read(std::env::join($this->latest(), 'run.json')))->some());
+        $parsed = guard json::parse(expect(doc::read(($this->latest() / 'run.json')->string()))->some());
         return $parsed;
     }
 
@@ -148,7 +148,7 @@ test flips
      */
     public static function ecotestRoot() : string
     {
-        $here = std::env::cwd();
-        return std::env::join(std::env::join($here, '..'), '..');
+        $here = std::env::cwd()->or(std::fs::path('.'));
+        return ($here / '..' / '..')->string();
     }
 }

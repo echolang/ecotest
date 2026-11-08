@@ -1,18 +1,11 @@
 namespace ecotest;
 
-use ecotest::paths;
-
 /**
  * A fresh directory under the system temp directory, removed with everything in it when the value
  * goes. `$dir = TempDir();` at the top of a test is the whole setup.
  */
 public class TempDir
 {
-    /**
-     * How many directories this process has made, so two in one test never collide.
-     */
-    internal static usize $made = 0;
-
     /**
      * The path of the directory.
      */
@@ -30,21 +23,15 @@ public class TempDir
     public constructor()
     {
         $at = std::src::caller();
-        TempDir::$made = TempDir::$made + 1;
-
-        int32 $pid = std::env::pid();
-        usize $n = TempDir::$made;
-        int64 $stamp = std::time::timestamp::now()->unix_nanos();
-
-        $this->path = std::env::join(std::env::tmp(), "ecotest-{$pid}-{$n}-{$stamp}");
-        guard std::io::mkdir($this->path) else ($e) {
-            die(Session::report(Failure("cannot create temp directory {$this->path}: {$e}", $at)), $at);
+        $made = guard std::fs::tempdir() else ($e) {
+            die(Session::report(Failure("cannot create temp directory: {$e}", $at)), $at);
         };
+        $this->path = $made->string();
 
         // a failed check stops the test without destructors; the session removes it then
-        string $made = $this->path;
+        string $held = $this->path;
         $this->cleanup = Session::defer(function() : void {
-            $gone = paths::removeTree($made);
+            $gone = std::fs::remove_all($held);
         });
     }
 
@@ -53,7 +40,7 @@ public class TempDir
      */
     public const function file(const string& $name) : string
     {
-        return std::env::join($this->path, $name);
+        return ($this->path / $name)->string();
     }
 
     /**
@@ -65,7 +52,7 @@ public class TempDir
     {
         $at = std::src::caller();
         $to = $this->file($name);
-        guard std::io::writefile($to, $text) else ($e) {
+        $n = guard std::fs::writefile($to, $text) else ($e) {
             die(Session::report(Failure("cannot write temp file {$to}: {$e}", $at)), $at);
         };
         return $to;
@@ -76,12 +63,12 @@ public class TempDir
      */
     public const function read(const string& $name) : result<string, std::io::ioerror>
     {
-        return std::io::readfile($this->file($name));
+        return std::fs::readfile($this->file($name));
     }
 
     destructor()
     {
         Session::undefer($this->cleanup);
-        $gone = paths::removeTree($this->path);
+        $gone = std::fs::remove_all($this->path);
     }
 }

@@ -3,8 +3,8 @@
  * ratios, outcomes, events folded into a run, titles, styles, the look and the slowest tests.
  */
 
-use ecotest::{expect, paths, TempDir};
-use ecotest::cli::{GitDiff, ChangedFile, glob, ServiceSpec, Readiness, Ratio, Outcome, Attempt, Fault, TestRecord, Run, Pass, PassExit, FileCoverage, Style, Look, digest, files};
+use ecotest::{expect, TempDir};
+use ecotest::cli::{GitDiff, ChangedFile, glob, ServiceSpec, Readiness, Ratio, Outcome, Attempt, Fault, TestRecord, Run, Pass, PassExit, FileCoverage, Style, Look, files};
 
 test git_diff_hunks_keep_both_sides
 {
@@ -35,8 +35,8 @@ test quoted_git_paths_are_unquoted
 
 test a_digest_is_fnv1a_64
 {
-    expect(digest::fnv(''))->is('cbf29ce484222325');
-    expect(digest::fnv('hello'))->is('a430d84680aabd0b');
+    expect(str::hex(hash::fnv1a('')))->is('cbf29ce484222325');
+    expect(str::hex(hash::fnv1a('hello')))->is('a430d84680aabd0b');
 }
 
 test a_tree_is_removed_without_following_links
@@ -44,23 +44,23 @@ test a_tree_is_removed_without_following_links
     $dir = TempDir();
     $keep = TempDir();
     $kept = $keep->write('keep.txt', 'x');
-    guard std::io::mkdir($dir->file('a'));
-    guard std::io::mkdir($dir->file('a/b'));
+    guard std::fs::mkdir($dir->file('a'));
+    guard std::fs::mkdir($dir->file('a/b'));
     $dir->write('a/b/c.txt', 'x');
     expect(ecotest::run('ln', ['-s', $keep->path, $dir->file('a/link')]))->succeeds();
 
-    expect(paths::removeTree($dir->file('a')))->yes();
-    expect(std::io::exists($dir->file('a'))->or(true))->no();
-    expect(std::io::exists($kept)->or(false))->yes();
+    expect(std::fs::remove_all($dir->file('a')))->fine();
+    expect(std::fs::exists($dir->file('a'))->or(true))->no();
+    expect(std::fs::exists($kept)->or(false))->yes();
 }
 
 test a_sealed_file_is_written_whole
 {
     $dir = TempDir();
     $path = $dir->write('run.json', 'old');
-    expect(files::seal($path, 'new'))->fine();
+    expect(std::fs::replace($path, 'new'))->fine();
     expect(expect($dir->read('run.json'))->ok())->is('new');
-    expect(std::io::exists("{$path}.tmp")->or(true))->no();
+    expect(std::fs::exists("{$path}.tmp")->or(true))->no();
 }
 
 test globs_match_inside_and_across_directories
@@ -198,9 +198,9 @@ test a_later_pass_starts_from_a_clean_record
 {
     $dir = TempDir();
     $run = Run($dir->path);
-    guard std::io::mkdir($dir->file('one'));
-    guard std::io::mkdir($dir->file('one/events'));
-    guard std::io::mkdir($dir->file('two'));
+    guard std::fs::mkdir($dir->file('one'));
+    guard std::fs::mkdir($dir->file('one/events'));
+    guard std::fs::mkdir($dir->file('two'));
     $dir->write('one/events/m_a.eco__t.jsonl', '{"type":"checks","count":5}\n{"type":"skip","reason":"no db"}\n{"type":"fail","summary":"no","file":"tests/a.eco","line":9}\n');
 
     $run->begin($dir->file('one'));

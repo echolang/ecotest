@@ -5,8 +5,6 @@
 
 namespace ecotest::jsonl;
 
-use ecotest::utf8;
-
 /**
  * `$text` as a JSON string literal, quotes included. Control bytes become `\u00XX`, so a line of
  * events never breaks on a newline the test printed, and a byte that is not part of well-formed
@@ -17,8 +15,13 @@ internal function quote(const string& $text) : string
     string $out = '"';
     string $digits = '0123456789abcdef';
 
-    for (usize $i = 0; $i < $text->size(); $i++) {
-        uint8 $b = $text->byte($i);
+    foreach (str::chars($text) as const &$ch) {
+        if ($ch->size != 1) {
+            $out->append(string($ch));
+            continue;
+        }
+
+        uint8 $b = $ch->byte(0);
 
         if ($b == 34 || $b == 92) {
             $out->push(92);
@@ -40,13 +43,7 @@ internal function quote(const string& $text) : string
         } else if ($b < 128) {
             $out->push($b);
         } else {
-            usize $n = utf8::sequence($text, $i);
-            if ($n == 0) {
-                $out->append('\\ufffd');
-            } else {
-                $out->append($text->sub($i, $n));
-                $i = $i + $n - 1;
-            }
+            $out->append('\\ufffd');
         }
     }
 

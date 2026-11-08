@@ -1,7 +1,5 @@
 namespace ecotest::cli;
 
-use ecotest::paths;
-
 /**
  * The coverage of a run: echoc's map plus every test's counts, from every pass, merged once.
  * Answers per file totals, which tests ran a line, and whether a function was ever called. Files
@@ -42,7 +40,7 @@ public class Coverage
     public constructor(CoverageMap $map)
     {
         foreach ($map->modules as const &$module) {
-            $this->dirs->set($module->name, std::io::realpath($module->dir)->or($module->dir));
+            $this->dirs->set($module->name, std::fs::realpath($module->dir)->or(std::fs::path($module->dir))->string());
         }
 
         foreach ($map->modules as const &$module) {
@@ -78,7 +76,7 @@ public class Coverage
      */
     public const function where(const ModuleSites& $module, const CoverageSite& $site) : string
     {
-        return paths::resolve($this->dirs->get($module->name), $site->file);
+        return ($this->dirs->get($module->name) / $site->file)->string();
     }
 
     /**
@@ -90,7 +88,7 @@ public class Coverage
         if (!$this->dirs->has($module)) {
             return null;
         }
-        return paths::resolve($this->dirs->get($module), $file);
+        return ($this->dirs->get($module) / $file)->string();
     }
 
     /**
@@ -117,9 +115,9 @@ public class Coverage
         string $firstMap = '';
 
         foreach ($run->passes as const &$pass) {
-            $covDir = std::env::join($pass->dir, 'coverage');
-            $mapPath = std::env::join($covDir, 'map.json');
-            if (!std::io::exists($mapPath)->or(false)) {
+            $covDir = ($pass->dir / 'coverage')->string();
+            $mapPath = ($covDir / 'map.json')->string();
+            if (!std::fs::exists($mapPath)->or(false)) {
                 continue;
             }
 
@@ -139,7 +137,7 @@ public class Coverage
             }
 
             Coverage $into = guard $found;
-            guard $into->absorb(std::env::join($covDir, 'tests'), $run) else ($e) {
+            guard $into->absorb(($covDir / 'tests')->string(), $run) else ($e) {
                 return .error($e);
             };
         }
@@ -153,14 +151,14 @@ public class Coverage
      */
     public function absorb(const string& $dir, const Run& $run) : status<CoverageError>
     {
-        $listing = guard std::io::opendir($dir) else {
+        $listing = guard std::fs::opendir($dir) else {
             return .ok;
         };
 
         array<string> $paths = [];
         foreach ($listing as const &$entry) {
             if ($entry->name()->ends('.ecocov')) {
-                $paths[] = $entry->path();
+                $paths[] = $entry->path()->string();
             }
         }
         $listing->close();
@@ -172,7 +170,7 @@ public class Coverage
             };
 
             // the header holds at most 128 bytes of the id; the file name holds all of it
-            $key = paths::stem($path);
+            $key = std::fs::path($path)->stem();
             string $id = $run->keyed($key)?->id ?? $loaded->testId;
 
             guard $this->add($id, $loaded, $path) else ($e) {

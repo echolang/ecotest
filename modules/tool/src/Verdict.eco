@@ -37,7 +37,7 @@ public struct Verdict
         $this->stopped = $run->stopped();
         $this->green = $run->green();
 
-        $text = guard doc::read(std::env::join($dir, 'run.json')) else {
+        $text = guard doc::read(($dir / 'run.json')->string()) else {
             return;
         };
         $doc = guard json::parse($text) else {

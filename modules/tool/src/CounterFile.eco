@@ -19,7 +19,7 @@ public struct CounterFile
      */
     public static function load(const string& $path) : result<CounterFile, CounterError>
     {
-        $bytes = guard std::io::readfile($path) else ($e) {
+        $bytes = guard std::fs::readfile($path) else ($e) {
             return .error(.unreadable($path, $e));
         };
         if ($bytes->size() < 160 || $bytes->sub(0, 6) != 'ECOCOV' || CounterFile::u32($bytes, 8) != 2) {

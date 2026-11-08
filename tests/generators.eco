@@ -3,7 +3,7 @@
  */
 
 use ecotest::{expect, gen, Draws, Gen, Pair, Random};
-use ecotest::utf8;
+
 
 /**
  * The value `$g` makes from the answers `$choices`.
@@ -72,17 +72,7 @@ test text_is_made_of_whole_characters
     expect(made(gen::text(alphabet: 'äö€'), [1, 2, 1, 0, 0]))->is('€ä');
     expect(gen::text()->show("a'b"))->is("'a\\'b'");
 
-    ecotest::forAll(gen::text(alphabet: 'aä€😀'), function(const string& $s) : bool {
-        usize $i = 0;
-        while ($i < $s->size()) {
-            usize $n = utf8::sequence($s, $i);
-            if ($n == 0) {
-                return false;
-            }
-            $i = $i + $n;
-        }
-        return true;
-    });
+    ecotest::forAll(gen::text(alphabet: 'aä€😀'), (const string& $s) => str::is_utf8($s));
 }
 
 test lists_grow_one_answer_at_a_time

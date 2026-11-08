@@ -3,16 +3,16 @@
  * answers `-p decls` from a file, and a runner whose compiler leaves no coverage behind.
  */
 
-use ecotest::{expect, paths, TempDir};
+use ecotest::{expect, TempDir};
 use ecotest::cli::{Run, Runner, Invocation, Tool, Store, files, doc, queries, Services};
 
 test a_pass_folds_every_kind_of_row_and_event
 {
     $dir = TempDir();
     $pass = $dir->file('.ecotest/run-1/pass-1');
-    guard paths::mkdirs(std::env::join($pass, 'events'));
+    guard std::fs::mkdir(($pass / 'events'), recursive: true);
 
-    guard files::write(std::env::join($pass, 'report.jsonl'), '{"v":2,"type":"run","version":"9.9.9","selected":3}
+    guard files::write(($pass / 'report.jsonl')->string(), '{"v":2,"type":"run","version":"9.9.9","selected":3}
 {"v":2,"type":"note","text":"not a row the tool reads"}
 {"v":2,"type":"test","id":"m/t.eco::crashed","module":"m","file":"t.eco","name":"crashed","status":"fail","ms":3,"failure":{"headline":"fatal error","message":"boom","file":"t.eco","line":7}}
 {"v":2,"type":"test","id":"m/t.eco::checked","module":"m","file":"t.eco","name":"checked","status":"fail","ms":4}
@@ -20,7 +20,7 @@ test a_pass_folds_every_kind_of_row_and_event
 {"v":2,"type":"end","ms":9}
 ');
 
-    guard files::write(std::env::join($pass, 'events/m_t.eco__checked.jsonl'), '{"type":"fail","summary":"values differ","expected":"1","actual":"2","detail":"more","file":"t.eco","line":5,"context":["row 1"]}
+    guard files::write(($pass / 'events/m_t.eco__checked.jsonl')->string(), '{"type":"fail","summary":"values differ","expected":"1","actual":"2","detail":"more","file":"t.eco","line":5,"context":["row 1"]}
 {"type":"fail","summary":"second","expected":"","actual":"","detail":"","file":"t.eco","line":6}
 {"type":"crash","headline":"fatal error","message":"after the check","file":"t.eco","line":8}
 {"type":"snapshot-new","path":"a.snap"}
@@ -28,7 +28,7 @@ test a_pass_folds_every_kind_of_row_and_event
 {"type":"something-later","value":1}
 ');
 
-    guard files::write(std::env::join($pass, 'events/m_t.eco__plain.jsonl'), '{"type":"fail","summary":"plain","expected":"x","actual":"y","detail":"","file":"t.eco","line":2,"context":[4]}
+    guard files::write(($pass / 'events/m_t.eco__plain.jsonl')->string(), '{"type":"fail","summary":"plain","expected":"x","actual":"y","detail":"","file":"t.eco","line":2,"context":[4]}
 ');
 
     $run = Run(readFrom: $dir->file('.ecotest/run-1'));
@@ -56,10 +56,10 @@ test a_pass_folds_every_kind_of_row_and_event
 internal function stored(const TempDir& $dir, const string& $rows, const string& $exit) : Run
 {
     $pass = $dir->file('.ecotest/run-1/pass-1');
-    guard paths::mkdirs(std::env::join($pass, 'events'));
-    guard files::write(std::env::join($pass, 'report.jsonl'), $rows);
+    guard std::fs::mkdir(($pass / 'events'), recursive: true);
+    guard files::write(($pass / 'report.jsonl')->string(), $rows);
     if (!$exit->empty()) {
-        guard files::write(std::env::join($pass, 'echoc.json'), $exit);
+        guard files::write(($pass / 'echoc.json')->string(), $exit);
     }
     return Run(readFrom: $dir->file('.ecotest/run-1'));
 }
@@ -106,7 +106,7 @@ test a_compiler_without_coverage_leaves_the_pass_without_it
 
     $run = Run($dir->file('run'));
     expect(Runner()->run($echoc, $dir->file('run'), $run))->fine();
-    expect(std::io::exists($dir->file('run/pass-1/coverage/map.json'))->or(false))->no();
+    expect(std::fs::exists($dir->file('run/pass-1/coverage/map.json'))->or(false))->no();
     // nor a report: the run read back from it has no tests, and its pass never reached them
     $back = Run(readFrom: $dir->file('run'));
     expect($back->tests)->empty();
@@ -117,7 +117,7 @@ test a_failed_compile_keeps_no_coverage_of_an_earlier_run
 {
     $dir = TempDir();
     // what an earlier run left in the build directory
-    guard paths::mkdirs($dir->file('ecobuild/coverage/tests'));
+    guard std::fs::mkdir($dir->file('ecobuild/coverage/tests'), recursive: true);
     $dir->write('ecobuild/coverage/map.json', '{"hash":"old","modules":[]}');
     $dir->write('ecobuild/coverage/tests/m_t.eco__a.ecocov', 'old');
 
@@ -133,9 +133,9 @@ test a_failed_compile_keeps_no_coverage_of_an_earlier_run
     $run = Run($dir->file('run'));
     expect(Runner()->run($invocation, $dir->file('run'), $run))->fine();
 
-    expect(std::io::exists($dir->file('run/pass-1/coverage'))->or(true))->no();
-    expect(std::io::exists($dir->file('ecobuild/coverage/map.json'))->or(true))->no();
-    expect(std::io::exists($dir->file('ecobuild/coverage/tests/m_t.eco__a.ecocov'))->or(true))->no();
+    expect(std::fs::exists($dir->file('run/pass-1/coverage'))->or(true))->no();
+    expect(std::fs::exists($dir->file('ecobuild/coverage/map.json'))->or(true))->no();
+    expect(std::fs::exists($dir->file('ecobuild/coverage/tests/m_t.eco__a.ecocov'))->or(true))->no();
     expect(expect($dir->read('run/pass-1/echoc.json'))->ok())->has('"exit":1');
 }
 
@@ -161,7 +161,7 @@ test a_report_that_cannot_be_written_fails_the_run_and_a_lost_history_line_does_
     $fake = TempDir();
     $echoc = $fake->write('echoc', '#!/bin/sh\ncat rows.jsonl > "$3"\nif [ -f block ]; then mkdir "$ECOTEST_RUN_DIR/../run.json"; fi\n');
     expect(ecotest::run('chmod', ['+x', $echoc]))->succeeds();
-    guard paths::mkdirs($dir->file('.ecotest/history.jsonl'));
+    guard std::fs::mkdir($dir->file('.ecotest/history.jsonl'), recursive: true);
 
     $tool = Tool();
     $tool->echoc->project = $dir->path;
@@ -181,7 +181,7 @@ test a_report_that_cannot_be_written_fails_the_run_and_a_lost_history_line_does_
 test commands_on_a_run_without_coverage_say_so
 {
     $dir = TempDir();
-    guard paths::mkdirs($dir->file('.ecotest/run-1'));
+    guard std::fs::mkdir($dir->file('.ecotest/run-1'), recursive: true);
 
     $tool = Tool();
     $tool->echoc->project = $dir->path;
@@ -195,7 +195,7 @@ test the_newest_run_is_the_newest_finished_one
 {
     $dir = TempDir();
     foreach (['run-999', 'run-1000', 'run-1001'] as const &$name) {
-        guard paths::mkdirs($dir->file(".ecotest/{$name}"));
+        guard std::fs::mkdir($dir->file(".ecotest/{$name}"), recursive: true);
     }
     $dir->write('.ecotest/run-999/run.json', '{"complete":true}');
     $dir->write('.ecotest/run-1000/run.json', '{"complete":true}');
@@ -209,12 +209,12 @@ test old_runs_are_pruned_but_the_one_the_queries_read_stays
 {
     $dir = TempDir();
     foreach (['run-1', 'run-2', 'run-3', 'run-4'] as const &$name) {
-        guard paths::mkdirs($dir->file(".ecotest/{$name}"));
+        guard std::fs::mkdir($dir->file(".ecotest/{$name}"), recursive: true);
         $dir->write(".ecotest/{$name}/run.json", '{"complete":true}');
     }
     // abandoned long ago, and one still running
-    guard paths::mkdirs($dir->file('.ecotest/run-0'));
-    guard paths::mkdirs($dir->file('.ecotest/run-5'));
+    guard std::fs::mkdir($dir->file('.ecotest/run-0'), recursive: true);
+    guard std::fs::mkdir($dir->file('.ecotest/run-5'), recursive: true);
 
     $store = Store($dir->file('.ecotest'));
     expect($store->point($dir->file('.ecotest/run-1')))->fine();
@@ -222,10 +222,10 @@ test old_runs_are_pruned_but_the_one_the_queries_read_stays
 
     expect($gone->count())->is(2);
     foreach (['run-1', 'run-3', 'run-4', 'run-5'] as const &$name) {
-        expect(std::io::exists($dir->file(".ecotest/{$name}"))->or(false))->yes(says: $name);
+        expect(std::fs::exists($dir->file(".ecotest/{$name}"))->or(false))->yes(says: $name);
     }
-    expect(std::io::exists($dir->file('.ecotest/run-2'))->or(true))->no();
-    expect(std::io::exists($dir->file('.ecotest/run-0'))->or(true))->no();
+    expect(std::fs::exists($dir->file('.ecotest/run-2'))->or(true))->no();
+    expect(std::fs::exists($dir->file('.ecotest/run-0'))->or(true))->no();
 }
 
 test a_service_without_a_log_has_no_tail
@@ -240,7 +240,7 @@ test a_service_without_a_log_has_no_tail
     expect($services->specs[0]->command)->is(['true', '']);
     expect($services->specs[1]->env->values())->is(['']);
 
-    guard paths::mkdirs($dir->file('services'));
+    guard std::fs::mkdir($dir->file('services'), recursive: true);
     guard files::write($dir->file('services/odd.log'), '');
     expect($services->tails($dir->path, 5))->empty();
     guard files::write($dir->file('services/quiet.log'), 'one\ntwo\n');

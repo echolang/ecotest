@@ -7,6 +7,7 @@
 
 #[module: "ecotest-tool"]
 #[version: "0.3.0"]
+#[epm::echoc: ">=0.14.0"]
 #[epm::license: "MIT"]
 #[epm::description: "Runs echoc tests and reports on them: outcomes, flakiness, coverage, history"]
 

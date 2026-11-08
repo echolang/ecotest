@@ -1,6 +1,6 @@
 namespace ecotest::cli;
 
-use ecotest::cli::{digest, doc};
+use ecotest::cli::doc;
 
 /**
  * A run's coverage as it was judged: the scope it reports, the build it measured, and every file
@@ -26,7 +26,7 @@ public struct CoverageReport
 
         foreach ($r->files as &$file) {
             $file->source = doc::read($file->path) ?? '';
-            $file->hash = digest::fnv($file->source);
+            $file->hash = str::hex(hash::fnv1a($file->source));
         }
 
         return $r;
@@ -126,7 +126,7 @@ public struct CoverageReport
      */
     public static function load(const string& $dir) : CoverageReport?
     {
-        $text = guard doc::read(std::env::join($dir, 'coverage.json')) else {
+        $text = guard doc::read(($dir / 'coverage.json')->string()) else {
             return null;
         };
         $doc = guard json::parse($text) else {

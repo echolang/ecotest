@@ -103,7 +103,7 @@ test a_temp_dir_is_removed_by_the_cleanups_when_the_test_stops
         $path = $dir->path;
         // what a failed check does before its destructors could run
         Session::cleanup();
-        expect(std::io::exists($dir->path)->or(true))->no(says: 'the directory still there');
+        expect(std::fs::exists($dir->path)->or(true))->no(says: 'the directory still there');
     });
 }
 

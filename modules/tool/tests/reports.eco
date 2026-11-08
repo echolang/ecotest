@@ -3,10 +3,10 @@
  * detail and context, and coverage that is neither all hit nor all missed.
  */
 
-use ecotest::{expect, paths, TempDir};
+use ecotest::{expect, TempDir};
 use ecotest::cli::{
     Run, Pass, DiffMeasure, TestRecord, Outcome, Totals, Attempt, Fault, Metric, BenchResult, FileCoverage, BranchSite, FunctionSite, Ratio, escape, text, files, history, doc, Gates, Verdict,
-    terminal, markdown, junit, html, runjson, ServiceSpec, GitDiff, glob, pretty, Look, highlight, digest
+    terminal, markdown, junit, html, runjson, ServiceSpec, GitDiff, glob, pretty, Look, highlight
 };
 
 /**
@@ -320,7 +320,7 @@ test the_html_report_puts_broken_tests_first_and_says_why
     $totals = handTotals();
     $run = handMade();
     $out = html::render($run, handCovered(), $totals, judged($run, ['line coverage is below <90%>']));
-    $half = digest::fnv('/p/src/half.eco');
+    $half = str::hex(hash::fnv1a('/p/src/half.eco'));
 
     expect($out)
         ->has('Tests <span class="gen ">failed</span>')
@@ -551,7 +551,7 @@ test files_write_and_append_or_say_why_not
     $unwritten = expect(files::write('/dev/null/nope/file', 'x'))->fails();
     expect("{$unwritten}")->is('Not a directory');
     expect(files::appendLine('/dev/null/nope/file', 'x'))->fails();
-    expect(files::seal('/dev/null/nope/file', 'x'))->fails();
+    expect(std::fs::replace('/dev/null/nope/file', 'x'))->fails();
 }
 
 test history_shows_the_window_flips_and_slowdowns
@@ -590,10 +590,10 @@ test history_shows_the_window_flips_and_slowdowns
 
 test a_run_relative_path_is_cut_at_its_project
 {
-    expect(paths::relative('/p/tests/a.eco', '/p'))->is('tests/a.eco');
-    expect(paths::relative('/elsewhere/a.eco', '/p'))->is('/elsewhere/a.eco');
+    expect(expect(std::fs::path('/p/tests/a.eco')->relative('/p'))->some()->string())->is('tests/a.eco');
+    expect(std::fs::path('/elsewhere/a.eco')->relative('/p'))->none();
     expect(Run::projectOf('/p/.ecotest/run-1'))->is('/p');
-    expect(Run::projectOf('/somewhere/else'))->is(std::env::cwd());
+    expect(Run::projectOf('/somewhere/else'))->is(std::env::cwd()->or(std::fs::path('.'))->string());
 }
 
 test doc_reads_mistyped_fields_as_empty

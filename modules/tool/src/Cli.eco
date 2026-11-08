@@ -12,7 +12,6 @@
 
 namespace ecotest::cli;
 
-use ecotest::paths;
 use ecotest::cli::{files, interrupt};
 use command;
 
@@ -193,7 +192,8 @@ internal struct Flags
 internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flags& $f) : status<ConfigError>
 {
     Invocation& $invocation = $tool->echoc;
-    $invocation->project = paths::resolve(std::env::cwd(), $parsed->value($f->project));
+    $cwd = std::env::cwd()->or(std::fs::path('.'));
+    $invocation->project = ($cwd / $parsed->value($f->project))->string();
     $invocation->program = $parsed->value($f->echoc);
     if ($invocation->program->empty()) {
         $invocation->program = string(std::env::var('ECHOC', 'echoc'));

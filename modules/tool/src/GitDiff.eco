@@ -1,7 +1,5 @@
 namespace ecotest::cli;
 
-use ecotest::paths;
-
 /**
  * What changed since a git ref, read from `git diff -U0`: per file, every hunk with both its old
  * and its new side, so a query can map the change onto coverage measured before or after it. New
@@ -40,7 +38,7 @@ public struct GitDiff
                     continue;
                 }
 
-                $changed = ChangedFile(paths::resolve($top, $relative), $relative);
+                $changed = ChangedFile(($top / $relative)->string(), $relative);
                 $changed->added = $old->empty();
                 $changed->deleted = $new->empty();
                 $this->files[] = mv $changed;
@@ -201,7 +199,7 @@ public struct GitDiff
         };
         // trimmed text shares the buffer git wrote; a path handed to the system needs its own
         string $root = str::trim($top)->clone();
-        $root = std::io::realpath($root)->or($root);
+        $root = std::fs::realpath($root)->or(std::fs::path($root))->string();
 
         $text = guard GitDiff::git($git, $dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-renames', '-U0', '--src-prefix=a/', '--dst-prefix=b/', $ref, '--'], $ref) else ($e) {
             return .error($e);
@@ -216,11 +214,11 @@ public struct GitDiff
             if ($relative->empty()) {
                 continue;
             }
-            $path = paths::resolve($root, $relative);
+            $path = ($root / $relative)->string();
             $changed = ChangedFile($path, $relative);
             $changed->added = true;
             $changed->untracked = true;
-            int64 $lines = str::lines(std::io::readfile($path)->or(''))->count() as int64;
+            int64 $lines = str::lines(std::fs::readfile($path)->or(''))->count() as int64;
             $changed->hunks[] = Hunk(0, 0, 1, $lines);
             $diff->files[] = mv $changed;
         }

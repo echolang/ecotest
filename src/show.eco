@@ -6,8 +6,6 @@
 
 namespace ecotest::show;
 
-use ecotest::utf8;
-
 /**
  * How many bytes of a value a one-line summary shows before cutting.
  */
@@ -49,14 +47,18 @@ internal function text(const string& $text) : string
 {
     string $out = "'";
 
-    for (usize $i = 0; $i < $text->size(); $i++) {
-        uint8 $b = $text->byte($i);
-
-        if ($out->size() > WIDTH && !utf8::continues($b)) {
+    foreach (str::chars($text) as const &$ch) {
+        if ($out->size() > WIDTH) {
             $out->append('...');
             break;
         }
 
+        if ($ch->size != 1) {
+            $out->append(string($ch));
+            continue;
+        }
+
+        uint8 $b = $ch->byte(0);
         if ($b == 39 || $b == 92) {
             $out->push(92);
             $out->push($b);
@@ -78,7 +80,7 @@ public function cut(const string& $text) : string
         return $text;
     }
 
-    string $out = $text->sub(0, utf8::boundary($text, WIDTH));
+    string $out = $text->sub(0, str::boundary($text, WIDTH));
     $out->append('...');
     return $out;
 }
@@ -181,7 +183,7 @@ internal function lead(const string& $text, usize $k) : usize
     if ($k <= LEAD) {
         return 0;
     }
-    return utf8::boundary($text, $k - LEAD);
+    return str::boundary($text, $k - LEAD);
 }
 
 /**

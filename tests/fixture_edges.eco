@@ -11,18 +11,18 @@ test a_temp_dir_removes_what_is_nested_in_it
     {
         $dir = TempDir();
         $path = $dir->path;
-        $made = std::io::mkdir($dir->file('sub'));
+        $made = std::fs::mkdir($dir->file('sub'));
         $dir->write('sub/inner.txt', 'x');
         expect($dir->read('missing.txt'))->fails();
     }
 
-    expect(std::io::exists($path)->or(false))->no();
+    expect(std::fs::exists($path)->or(false))->no();
 }
 
 test a_temp_dir_already_gone_is_fine
 {
     $dir = TempDir();
-    $gone = std::io::rmdir($dir->path);
+    $gone = std::fs::rmdir($dir->path);
 }
 
 #[tests: expects death]

@@ -47,7 +47,7 @@ public class Tail
      */
     private const function unread() : string
     {
-        $f = guard std::io::open($this->path, .read) else {
+        $f = guard std::fs::open($this->path, .read) else {
             return '';
         };
 

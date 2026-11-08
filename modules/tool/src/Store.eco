@@ -1,6 +1,5 @@
 namespace ecotest::cli;
 
-use ecotest::paths;
 use ecotest::cli::{doc, files};
 
 /**
@@ -22,8 +21,8 @@ public struct Store
 
         while (true) {
             $dir = $this->dir($stamp);
-            if (!std::io::exists($dir)->or(false)) {
-                guard paths::mkdirs($dir) else ($e) {
+            if (!std::fs::exists($dir)->or(false)) {
+                guard std::fs::mkdir($dir, recursive: true) else ($e) {
                     return .error(.cannotWrite($dir, $e));
                 };
                 return .ok($dir);
@@ -39,7 +38,7 @@ public struct Store
      */
     public static function finished(const string& $dir) : bool
     {
-        $text = guard doc::read(std::env::join($dir, 'run.json')) else {
+        $text = guard doc::read(($dir / 'run.json')->string()) else {
             return false;
         };
         $parsed = guard json::parse($text) else {
@@ -60,7 +59,7 @@ public struct Store
             return .ok($newest);
         }
 
-        if (!std::io::exists($given)->or(false)) {
+        if (!std::fs::exists($given)->or(false)) {
             return .error(.missing($given));
         }
         if (!Store::finished($given)) {
@@ -104,7 +103,7 @@ public struct Store
      */
     public const function covered() : result<string, StoreError>
     {
-        $text = guard doc::read(std::env::join($this->root, 'coverage-run')) else {
+        $text = guard doc::read(($this->root / 'coverage-run')->string()) else {
             return .error(.noCoverage($this->root));
         };
         $dir = str::trim($text)->clone();
@@ -119,8 +118,8 @@ public struct Store
      */
     public function point(const string& $dir) : status<StoreError>
     {
-        $path = std::env::join($this->root, 'coverage-run');
-        guard files::seal($path, $dir) else ($e) {
+        $path = ($this->root / 'coverage-run')->string();
+        guard std::fs::replace($path, $dir) else ($e) {
             return .error(.cannotWrite($path, $e));
         };
         return .ok;
@@ -155,7 +154,7 @@ public struct Store
             if ($dir == $pointed || $dir == $current) {
                 continue;
             }
-            if (paths::removeTree($dir)) {
+            if (!std::fs::remove_all($dir)->failed()) {
                 $gone[] = $dir;
             }
         }
@@ -164,7 +163,7 @@ public struct Store
         int64 $bound = $done[$drop];
         foreach ($open as $stamp) {
             $dir = $this->dir($stamp);
-            if ($stamp < $bound && $dir != $current && paths::removeTree($dir)) {
+            if ($stamp < $bound && $dir != $current && !std::fs::remove_all($dir)->failed()) {
                 $gone[] = $dir;
             }
         }
@@ -180,7 +179,7 @@ public struct Store
     {
         array<int64> $stamps = [];
 
-        $listing = guard std::io::opendir($this->root) else {
+        $listing = guard std::fs::opendir($this->root) else {
             return $stamps;
         };
         foreach ($listing as const &$entry) {
@@ -204,6 +203,6 @@ public struct Store
      */
     private const function dir(int64 $stamp) : string
     {
-        return std::env::join($this->root, "run-{$stamp}");
+        return ($this->root / "run-{$stamp}")->string();
     }
 }

@@ -1,7 +1,7 @@
 namespace ecotest::gen;
 
 use ecotest::{Draws, Failure, Gen, Pair, Session};
-use ecotest::{show, utf8};
+use ecotest::show;
 
 /**
  * An integer in `[$low, $high]` from one answer, where answer 0 is `$target` and larger answers
@@ -158,7 +158,7 @@ public function bools() : Gen<bool>
  */
 public function text(alphabet: const string& $alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789 ', max: usize $max = 32) : Gen<string>
 {
-    $characters = utf8::characters($alphabet);
+    $characters = str::chars($alphabet)->owned();
 
     return Gen<string>(
         function(Draws& $d) : string {

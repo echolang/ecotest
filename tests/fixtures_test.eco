@@ -9,10 +9,10 @@ test a_temp_dir_holds_files_and_goes_away
         $where = $dir->path;
         $file = $dir->write('a.txt', 'hello');
         expect($dir->read('a.txt'))->ok('hello');
-        expect(std::io::exists($file))->ok(true);
+        expect(std::fs::exists($file))->ok(true);
     }
 
-    expect(std::io::exists($where))->ok(false);
+    expect(std::fs::exists($where))->ok(false);
 }
 
 test calls_are_recorded_and_checked

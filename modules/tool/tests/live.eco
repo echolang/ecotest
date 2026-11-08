@@ -3,7 +3,7 @@
  * runs of the sample module in pretty style, on a terminal and on a stream that cannot be redrawn.
  */
 
-use ecotest::{expect, paths, TempDir};
+use ecotest::{expect, TempDir};
 use ecotest::cli::{Tail, LiveView, Tool, Runner, Invocation, doc, Run, Gates, Verdict, runjson};
 
 internal function terminal() : command::CLIContext
@@ -29,7 +29,7 @@ internal function rows(const command::CLIContext& $ctx) : string
 internal function passDir(const string& $events) : TempDir
 {
     $dir = TempDir();
-    guard std::io::mkdir($dir->file('events'));
+    guard std::fs::mkdir($dir->file('events'));
     $dir->write('events/m_a.eco__adds.jsonl', $events);
     return $dir;
 }
@@ -178,7 +178,7 @@ test a_pretty_run_draws_the_tests_live_and_keeps_echocs_log
     expect($tool->run())->is(1);
 
     expect(everything($live))->has('compiled in')->has('halves_wrongly')->has('crashes');
-    expect(std::io::exists(std::env::join($sample->latest(), 'pass-1/echoc.log'))->or(false))->yes();
+    expect(std::fs::exists(($sample->latest() / 'pass-1/echoc.log'))->or(false))->yes();
 }
 
 test a_pretty_run_on_a_pipe_writes_rows_and_names_each_pass
@@ -234,7 +234,7 @@ test a_run_directory_that_cannot_be_written_fails_a_pretty_run
 {
     $sample = Sample();
     $root = $sample->dir->file('.ecotest');
-    guard std::io::mkdir($root);
+    guard std::fs::mkdir($root);
     expect(ecotest::run('chmod', ['555', $root]))->succeeds();
 
     int32 $code = pretty($sample, pipe())->run();
@@ -244,7 +244,7 @@ test a_run_directory_that_cannot_be_written_fails_a_pretty_run
     // a pass directory that is there but closed keeps echoc's log out
     $dir = TempDir();
     $pass = $dir->file('run/pass-1');
-    guard paths::mkdirs(std::env::join($pass, 'events'));
+    guard std::fs::mkdir(($pass / 'events'), recursive: true);
     expect(ecotest::run('chmod', ['555', $pass]))->succeeds();
     $echoc = Invocation();
     $echoc->project = $dir->path;

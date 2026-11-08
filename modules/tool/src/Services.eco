@@ -1,7 +1,6 @@
 namespace ecotest::cli;
 
-use ecotest::paths;
-use ecotest::cli::{doc, proc};
+use ecotest::cli::doc;
 
 /**
  * The services a run needs, started before echoc and stopped after it. Each one's output goes to
@@ -66,8 +65,8 @@ public class Services
             return .ok;
         }
 
-        $logs = std::env::join($runDir, 'services');
-        guard paths::mkdirs($logs) else ($e) {
+        $logs = ($runDir / 'services')->string();
+        guard std::fs::mkdir($logs, recursive: true) else ($e) {
             return .error(.cannotWrite($logs, $e));
         };
 
@@ -81,12 +80,13 @@ public class Services
                 $args[] = $spec->command[$i];
             }
 
-            $logPath = std::env::join($logs, "{$spec->name}.log");
-            $log = guard std::io::create($logPath) else ($e) {
+            $logPath = ($logs / "{$spec->name}.log")->string();
+            $log = guard std::fs::create($logPath) else ($e) {
                 return .error(.cannotWrite($logPath, $e));
             };
 
             $cmd = std::process::command($spec->command[0], $args);
+            $cmd->group();
             $cmd->dir($project);
             foreach ($spec->env as $name => const &$value) {
                 $cmd->env($name, $value);
@@ -127,10 +127,9 @@ public class Services
      */
     public function stop() : void
     {
-        // what a service started goes too: a server behind `sh -c` or `npm` is a grandchild, and
-        // killing the child alone would leave it holding its port
+        // grouped at spawn, so a server behind `sh -c` or `npm` stops with the child
         foreach ($this->running as &$child) {
-            proc::stop($child, 2000);
+            $stopped = $child->stop();
         }
 
         $this->running->clear();
@@ -145,7 +144,7 @@ public class Services
         $out = '';
 
         foreach ($this->specs as const &$spec) {
-            $path = std::env::join(std::env::join($dir, 'services'), "{$spec->name}.log");
+            $path = ($dir / 'services' / "{$spec->name}.log")->string();
             $text = guard doc::read($path) else {
                 continue;
             };

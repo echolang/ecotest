@@ -11,7 +11,7 @@ test a_service_ready_by_delay_runs_beside_the_tests
     $sample->dir->write('ecotest.json', '{"services": [{"name": "idle", "run": ["sleep", "30"], "ready": {"ms": 20}, "url": "http://127.0.0.1:1", "env": {"MODE": "test"}}]}');
 
     expect($sample->tool()->run())->is(0);
-    expect(expect(doc::read(std::env::join($sample->latest(), 'services/idle.log')))->some())->empty();
+    expect(expect(doc::read(($sample->latest() / 'services/idle.log')->string()))->some())->empty();
 }
 
 test a_service_ready_over_http_hands_its_check_to_the_tests

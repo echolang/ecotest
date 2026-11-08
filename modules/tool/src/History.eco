@@ -5,7 +5,6 @@
 
 namespace ecotest::cli::history;
 
-use ecotest::paths;
 use ecotest::cli::{doc, files};
 
 /**
@@ -76,7 +75,7 @@ public function render(const string& $path, usize $last) : string
     $out = 'run                         pass  fail  skip flaky      ms  lines\n';
     for (usize $i = $from; $i < $runs->count(); $i++) {
         const json::Value& $r = $runs[$i];
-        $name = paths::base(doc::text($r, 'run'));
+        $name = std::fs::path(doc::text($r, 'run'))->basename();
 
         int64 $pass = doc::number($r, 'pass');
         int64 $fail = doc::number($r, 'fail');

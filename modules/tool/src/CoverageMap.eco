@@ -15,7 +15,7 @@ public struct CoverageMap
      */
     public static function load(const string& $path) : result<CoverageMap, CoverageMapError>
     {
-        $text = guard std::io::readfile($path) else ($e) {
+        $text = guard std::fs::readfile($path) else ($e) {
             return .error(.unreadable($path, $e));
         };
 

@@ -1,6 +1,6 @@
 namespace ecotest::cli;
 
-use ecotest::{paths, protocol};
+use ecotest::protocol;
 use ecotest::cli::doc;
 
 /**
@@ -64,8 +64,8 @@ public class Run
 
         usize $pass = 1;
         while (true) {
-            $passDir = std::env::join($dir, "pass-{$pass}");
-            $there = std::io::exists($passDir)->or(false);
+            $passDir = ($dir / "pass-{$pass}")->string();
+            $there = std::fs::exists($passDir)->or(false);
             if (!$there) {
                 break;
             }
@@ -84,7 +84,7 @@ public class Run
      */
     private function recall() : void
     {
-        $kept = guard doc::read(std::env::join($this->dir, 'run.json')) else {
+        $kept = guard doc::read(($this->dir / 'run.json')->string()) else {
             return;
         };
         $facts = guard json::parse($kept) else {
@@ -110,12 +110,12 @@ public class Run
         $this->begin($passDir);
 
         // the test a row folded into is for the live view; reading back needs only the fold
-        foreach (doc::lines(doc::read(std::env::join($passDir, 'report.jsonl')) ?? '') as const &$row) {
+        foreach (doc::lines(doc::read(($passDir / 'report.jsonl')->string()) ?? '') as const &$row) {
             $folded = $this->fold($row);
         }
 
         // a pass stored before echoc's exit was kept has none, and is judged on its rows
-        $exit = guard doc::read(std::env::join($passDir, 'echoc.json')) else {
+        $exit = guard doc::read(($passDir / 'echoc.json')->string()) else {
             return;
         };
         $parsed = guard json::parse($exit) else {
@@ -178,7 +178,8 @@ public class Run
         $pass->rows++;
         $test = $this->find(doc::text($row, 'id'));
         $test->module = doc::text($row, 'module');
-        $test->file = paths::relative(doc::text($row, 'file'), Run::projectOf($this->dir));
+        $file = std::fs::path(doc::text($row, 'file'));
+        $test->file = ($file->relative(Run::projectOf($this->dir)) ?? $file)->string();
         $test->name = doc::text($row, 'name');
         $test->group = doc::text($row, 'group');
         $test->output = doc::text($row, 'output');
@@ -186,7 +187,7 @@ public class Run
         // the last pass's events describe the last pass's failure, skip and assertions, and a note
         // or a bench every pass wrote is reported once
         $test->events = Events();
-        $events = std::env::join(std::env::join($pass->dir, 'events'), "{$test->key}.jsonl");
+        $events = ($pass->dir / 'events' / "{$test->key}.jsonl")->string();
         // a test that wrote nothing through ecotest has no events file
         foreach (doc::lines(doc::read($events) ?? '') as const &$event) {
             $test->events->apply($event);
@@ -243,24 +244,19 @@ public class Run
      */
     public static function projectOf(const string& $dir) : string
     {
-        $parts = paths::split($dir);
-        for (usize $i = $parts->count(); $i > 0; $i--) {
-            if ($parts[$i - 1] != '.ecotest') {
-                continue;
+        $here = std::fs::path($dir);
+        while (true) {
+            if ($here->basename() == '.ecotest') {
+                return $here->dirname()->string();
             }
-
-            string $out = paths::root($dir);
-            for (usize $k = 0; $k + 1 < $i; $k++) {
-                if ($out->empty()) {
-                    $out = $parts[$k];
-                } else {
-                    $out = std::env::join($out, $parts[$k]);
-                }
+            $parent = $here->dirname();
+            if ($parent == $here) {
+                break;
             }
-            return $out;
+            $here = $parent;
         }
 
-        return std::env::cwd();
+        return std::env::cwd()->or(std::fs::path($dir))->string();
     }
 
     /**

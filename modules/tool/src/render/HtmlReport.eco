@@ -6,8 +6,7 @@
 
 namespace ecotest::cli::html;
 
-use ecotest::paths;
-use ecotest::cli::{digest, escape, highlight, text};
+use ecotest::cli::{escape, highlight, text};
 
 /**
  * The page for `$run`. The verdict's gates mark the line and branch thresholds on the coverage
@@ -87,7 +86,7 @@ private function side(string& $out, const Run& $run, const array<FileCoverage>& 
                 $tone = 'bad';
             }
             $id = anchor($file);
-            $base = escape::markup(paths::base($file->file));
+            $base = escape::markup(std::fs::path($file->file)->basename());
             $out->append("<a class=\"side-link\" href=\"#{$id}\"><span class=\"fname\"><span class=\"dot {$low}\"></span>{$base}</span><span class=\"count {$tone}\">{$r}</span></a>");
         }
         $out->append('</div>');
@@ -529,7 +528,7 @@ private function low(const Ratio& $r, float64? $min) : string
  */
 private function anchor(const FileCoverage& $file) : string
 {
-    $key = digest::fnv($file->path);
+    $key = str::hex(hash::fnv1a($file->path));
     return "file-{$key}";
 }
 

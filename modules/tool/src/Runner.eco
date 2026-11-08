@@ -1,7 +1,7 @@
 namespace ecotest::cli;
 
-use ecotest::{paths, protocol};
-use ecotest::cli::{doc, files, interrupt, proc};
+use ecotest::protocol;
+use ecotest::cli::{doc, files, interrupt};
 
 /**
  * Runs `echoc test` once per pass into a run directory and folds what each pass reports into the
@@ -33,12 +33,12 @@ public class Runner
      */
     public function run(const Invocation& $echoc, const string& $dir, Run& $run) : status<RunError>
     {
-        $coverage = std::env::join(paths::resolve($echoc->project, $echoc->buildDir), 'coverage');
+        $coverage = ($echoc->project / $echoc->buildDir / 'coverage')->string();
 
         for (usize $pass = 1; $pass <= $echoc->repeat; $pass++) {
-            $passDir = std::env::join($dir, "pass-{$pass}");
-            $events = std::env::join($passDir, 'events');
-            guard paths::mkdirs($events) else ($e) {
+            $passDir = ($dir / "pass-{$pass}")->string();
+            $events = ($passDir / 'events')->string();
+            guard std::fs::mkdir($events, recursive: true) else ($e) {
                 return .error(.cannotWrite($events, $e));
             };
 
@@ -47,12 +47,13 @@ public class Runner
                 Runner::clearCoverage($coverage);
             }
 
-            array<string> $args = ['test', '--report', std::env::join($passDir, 'report.jsonl')];
+            array<string> $args = ['test', '--report', ($passDir / 'report.jsonl')->string()];
             if ($echoc->coverage) {
                 $args[] = '--coverage';
             }
 
             $test = $echoc->command(mv $args);
+            $test->group();
             foreach ($echoc->forwarded as const &$word) {
                 $test->arg($word);
             }
@@ -105,7 +106,7 @@ public class Runner
                 return .error($e);
             };
 
-            foreach (doc::lines(doc::read(std::env::join($passDir, 'report.jsonl')) ?? '') as const &$row) {
+            foreach (doc::lines(doc::read(($passDir / 'report.jsonl')->string()) ?? '') as const &$row) {
                 $folded = $run->fold($row);
             }
             return .ok($exit);
@@ -126,8 +127,8 @@ public class Runner
         LiveView $view,
         Run& $run
     ) : result<PassExit, RunError> {
-        $logPath = std::env::join($passDir, 'echoc.log');
-        $log = guard std::io::create($logPath) else ($e) {
+        $logPath = ($passDir / 'echoc.log')->string();
+        $log = guard std::fs::create($logPath) else ($e) {
             return .error(.cannotWrite($logPath, $e));
         };
 
@@ -145,12 +146,12 @@ public class Runner
         };
 
         $view->begin($pass, $echoc->repeat);
-        $report = Tail(std::env::join($passDir, 'report.jsonl'));
+        $report = Tail(($passDir / 'report.jsonl')->string());
         $output = Tail($logPath);
 
         while (Runner::alive($child)) {
             if (interrupt::requested()) {
-                proc::stop($child, 2000);
+                $stopped = $child->stop();
                 $log->close();
                 return .error(.interrupted);
             }
@@ -196,7 +197,7 @@ public class Runner
     {
         while (Runner::alive($child)) {
             if (interrupt::requested()) {
-                proc::stop($child, 2000);
+                $stopped = $child->stop();
                 return .error(.interrupted);
             }
             std::thread::sleep(40);
@@ -233,7 +234,7 @@ public class Runner
         if ($exit->signal != null) {
             $doc['signal'] = json::int(($exit->signal ?? 0) as int64);
         }
-        $written = files::write(std::env::join($passDir, 'echoc.json'), json::dump($doc));
+        $written = files::write(($passDir / 'echoc.json')->string(), json::dump($doc));
     }
 
     /**
@@ -242,22 +243,22 @@ public class Runner
      */
     private static function clearCoverage(const string& $from) : void
     {
-        $gone = std::io::remove(std::env::join($from, 'map.json'));
+        $gone = std::fs::remove(($from / 'map.json'));
 
-        $tests = std::env::join($from, 'tests');
-        $listing = guard std::io::opendir($tests) else {
+        $tests = ($from / 'tests');
+        $listing = guard std::fs::opendir($tests) else {
             return;
         };
         array<string> $stale = [];
         foreach ($listing as const &$entry) {
             if ($entry->name()->ends('.ecocov')) {
-                $stale[] = $entry->path();
+                $stale[] = $entry->path()->string();
             }
         }
         $listing->close();
 
         foreach ($stale as const &$path) {
-            $removed = std::io::remove($path);
+            $removed = std::fs::remove($path);
         }
     }
 
@@ -266,26 +267,27 @@ public class Runner
      */
     private static function keepCoverage(const string& $from, const string& $passDir) : status<RunError>
     {
-        $to = std::env::join($passDir, 'coverage');
-        $tests = std::env::join($to, 'tests');
-        guard paths::mkdirs($tests) else ($e) {
+        $to = ($passDir / 'coverage')->string();
+        $tests = ($to / 'tests')->string();
+        guard std::fs::mkdir($tests, recursive: true) else ($e) {
             return .error(.cannotWrite($tests, $e));
         };
 
-        $map = std::env::join($from, 'map.json');
-        guard std::io::copy($map, std::env::join($to, 'map.json')) else ($e) {
+        $map = ($from / 'map.json')->string();
+        guard std::fs::copy($map, ($to / 'map.json')) else ($e) {
             return .error(.cannotKeep($map, $e));
         };
 
-        $counters = std::env::join($from, 'tests');
-        $listing = guard std::io::opendir($counters) else ($e) {
+        $counters = ($from / 'tests')->string();
+        $listing = guard std::fs::opendir($counters) else ($e) {
             return .error(.cannotKeep($counters, $e));
         };
 
         foreach ($listing as const &$entry) {
-            guard std::io::copy($entry->path(), std::env::join($tests, $entry->name())) else ($e) {
+            $src = $entry->path();
+            guard std::fs::copy($src, ($tests / $entry->name())) else ($e) {
                 $listing->close();
-                return .error(.cannotKeep($entry->path(), $e));
+                return .error(.cannotKeep($src->string(), $e));
             };
         }
 

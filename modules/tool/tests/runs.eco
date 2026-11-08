@@ -18,10 +18,10 @@ test a_green_run_with_coverage_writes_every_report
     $dir = $sample->latest();
     expect($dir)->has('run-');
     foreach (['run.json', 'junit.xml', 'report.html'] as const &$name) {
-        expect(expect(doc::read(std::env::join($dir, $name)))->some())->has('halves');
+        expect(expect(doc::read(($dir / $name)->string()))->some())->has('halves');
     }
-    expect(expect(doc::read(std::env::join($dir, 'summary.md')))->some())->has('## Tests passed');
-    expect(expect(doc::read(std::env::join($dir, 'lcov.info')))->some())->has('SF:')->has('math.eco');
+    expect(expect(doc::read(($dir / 'summary.md')->string()))->some())->has('## Tests passed');
+    expect(expect(doc::read(($dir / 'lcov.info')->string()))->some())->has('SF:')->has('math.eco');
     $history = doc::lines(expect(doc::read($sample->dir->file('.ecotest/history.jsonl')))->some());
     expect($history->count())->is(1);
     expect(doc::number($history[0], 'pass'))->is(4);
@@ -54,8 +54,8 @@ test a_green_run_with_coverage_writes_every_report
     // the run is finished, kept whole, and the one the queries read
     expect(doc::object($sample->runJson(), 'complete')->asBool() ?? false)->yes();
     expect(expect(Store($sample->dir->file('.ecotest'))->covered())->ok())->is($dir);
-    expect(std::io::exists(std::env::join($dir, 'coverage.json'))->or(false))->yes();
-    expect(std::io::exists(std::env::join($dir, 'decls'))->or(true))->no();
+    expect(std::fs::exists(($dir / 'coverage.json'))->or(false))->yes();
+    expect(std::fs::exists(($dir / 'decls'))->or(true))->no();
 }
 
 test a_red_run_fails_and_names_the_failures
@@ -65,7 +65,7 @@ test a_red_run_fails_and_names_the_failures
     $tool->echoc->forwarded = ['--define', 'BROKEN'];
 
     expect($tool->run())->is(1);
-    expect(std::io::exists(std::env::join($sample->latest(), 'report.html'))->or(true))->no();
+    expect(std::fs::exists(($sample->latest() / 'report.html'))->or(true))->no();
 
     $wrong = doc::object($sample->result('halves_wrongly'), 'failure');
     expect(doc::text($wrong, 'summary'))->is('expected 2, got 1');

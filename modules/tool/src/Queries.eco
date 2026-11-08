@@ -7,8 +7,7 @@
 
 namespace ecotest::cli::queries;
 
-use ecotest::paths;
-use ecotest::cli::{Coverage, CoverageReport, GitDiff, Ratio, Run, Tool, digest, doc, files, text};
+use ecotest::cli::{Coverage, CoverageReport, GitDiff, Ratio, Run, Tool, doc, files, text};
 
 /**
  * The tests `affected` runs: their ids and names, or everything when a new source file has no
@@ -73,7 +72,7 @@ internal function now(const string& $path) : string
     $text = guard doc::read($path) else {
         return '';
     };
-    return digest::fnv($text);
+    return str::hex(hash::fnv1a($text));
 }
 
 /**
@@ -82,12 +81,13 @@ internal function now(const string& $path) : string
  */
 internal function locate(const Tool& $tool, const string& $path) : string
 {
-    $inProject = paths::resolve($tool->echoc->project, $path);
-    if (std::io::exists($inProject)->or(false)) {
-        return std::io::realpath($inProject)->or($inProject);
+    $inProject = $tool->echoc->project / $path;
+    if (std::fs::exists($inProject)->or(false)) {
+        return std::fs::realpath($inProject)->or($inProject)->string();
     }
-    $inCwd = paths::resolve(std::env::cwd(), $path);
-    return std::io::realpath($inCwd)->or($inCwd);
+    $cwd = std::env::cwd()->or(std::fs::path('.'));
+    $inCwd = $cwd / $path;
+    return std::fs::realpath($inCwd)->or($inCwd)->string();
 }
 
 /**
@@ -183,14 +183,14 @@ public function judged(const Tool& $tool) : result<ApiFindings, QueryError>
     // `build` writes a binary before it prints; a scratch directory takes it, never the run
     int32 $pid = std::env::pid();
     int64 $stamp = std::time::timestamp::now()->unix_millis();
-    $scratch = std::env::join(std::env::tmp(), "ecotest-decls-{$pid}-{$stamp}");
-    guard paths::mkdirs($scratch) else ($e) {
+    $scratch = (std::env::tmp() / "ecotest-decls-{$pid}-{$stamp}")->string();
+    guard std::fs::mkdir($scratch, recursive: true) else ($e) {
         return .error(.none("cannot write {$scratch}: {$e}"));
     };
 
-    $decls = $tool->echoc->command(['build', '-p', 'decls', '-o', std::env::join($scratch, 'decls')]);
+    $decls = $tool->echoc->command(['build', '-p', 'decls', '-o', ($scratch / 'decls')->string()]);
     $o = $decls->output();
-    $removed = paths::removeTree($scratch);
+    $gone = std::fs::remove_all($scratch);
     $out = guard $o else {
         return .error(.none("cannot run {$tool->echoc->program}"));
     };
@@ -342,7 +342,7 @@ public function select(const Tool& $tool) : result<Selection, QueryError>
             $lines = $changed->newLines();
         } else {
             $old = GitDiff::old($tool->git, $tool->echoc->project, $tool->since, $changed->relative)->or('');
-            if (digest::fnv($old) != $kept->hash) {
+            if (str::hex(hash::fnv1a($old)) != $kept->hash) {
                 return .error(.none("the coverage of {$changed->relative} in {$m->dir} is from another version of it; run `ecotest --coverage` again"));
             }
             $lines = $changed->oldLines();
@@ -379,7 +379,7 @@ public function select(const Tool& $tool) : result<Selection, QueryError>
 internal function inside(const string& $path, const array<string>& $dirs) : bool
 {
     foreach ($dirs as const &$dir) {
-        if (paths::relative($path, $dir) != $path) {
+        if (std::fs::path($path)->relative($dir) != null) {
             return true;
         }
     }

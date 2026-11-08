@@ -49,11 +49,11 @@ public class Session
 
         $dir = string(std::env::var(protocol::RUN_DIR, ''));
         if (!$dir->empty() && !Session::$id->empty()) {
-            $folder = std::env::join($dir, 'events');
-            $made = std::io::mkdir($folder);
+            $folder = std::fs::path($dir) / 'events';
+            $made = std::fs::mkdir($folder, recursive: true);
             $name = protocol::key(Session::$id);
             $name->append('.jsonl');
-            Session::$events = std::env::join($folder, $name);
+            Session::$events = ($folder / $name)->string();
             // a static's field is not a place; the handle is
             $tally = Session::$tally;
             $tally->path = Session::$events;
@@ -92,7 +92,7 @@ public class Session
      */
     internal static function append(const string& $path, const string& $line) : void
     {
-        $f = guard std::io::append($path) else {
+        $f = guard std::fs::append($path) else {
             return;
         };
 

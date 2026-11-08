@@ -6,16 +6,11 @@ namespace ecotest::http;
  * a log file, which a failure to get ready shows. For services shared by many tests, list them in
  * `ecotest.json` and use `live(service:)` instead.
  *
- * Only the direct child is killed. A wrapper script that starts the real server has to `exec` it,
- * or the server outlives the test.
+ * The child is started in its own process group, so a wrapper that launches a grandchild is
+ * stopped with it.
  */
 public class Service
 {
-    /**
-     * How many services this process has started, so two logs never collide.
-     */
-    internal static usize $started = 0;
-
     /**
      * The base URL tests use.
      */
@@ -64,11 +59,12 @@ public class Service
             ecotest::Session::stop(ecotest::Failure("something already answers at {$ready}", $at));
         }
 
-        $file = guard std::io::open($this->log, .write) else ($e) {
+        $file = guard std::fs::open($this->log, .write) else ($e) {
             die(ecotest::Session::report(ecotest::Failure("cannot create the log {$this->log}: {$e}", $at)), $at);
         };
 
         $cmd = std::process::command($program, $arguments);
+        $cmd->group();
         $cmd->stdin(.discard);
         $cmd->stdout(.file($file));
         $cmd->stderr(.merge);
@@ -125,7 +121,7 @@ public class Service
      */
     public const function output() : string
     {
-        $text = guard std::io::readfile($this->log) else {
+        $text = guard std::fs::readfile($this->log) else {
             return '';
         };
         return $text;
@@ -154,8 +150,7 @@ public class Service
      */
     private static function reap(std::process::child $child, const string& $log) : void
     {
-        $killed = $child->kill();
-        $waited = $child->wait();
+        $stopped = $child->stop();
         Service::forget($log);
     }
 
@@ -164,7 +159,7 @@ public class Service
      */
     private static function forget(const string& $log) : void
     {
-        $removed = std::io::remove($log);
+        $removed = std::fs::remove($log);
     }
 
     /**
@@ -172,11 +167,10 @@ public class Service
      */
     private static function logPath() : string
     {
-        Service::$started = Service::$started + 1;
-        int32 $pid = std::env::pid();
-        usize $n = Service::$started;
-        int64 $stamp = std::time::timestamp::now()->unix_nanos();
-        return std::env::join(std::env::tmp(), "ecotest-service-{$pid}-{$n}-{$stamp}.log");
+        $made = guard std::fs::tempfile() else {
+            return (std::env::tmp() / 'ecotest-service.log')->string();
+        };
+        return $made->string();
     }
 
     /**

@@ -66,7 +66,7 @@ public class Tool
      */
     public const function root() : string
     {
-        return std::env::join($this->echoc->project, '.ecotest');
+        return ($this->echoc->project / '.ecotest')->string();
     }
 
     /**
@@ -90,7 +90,7 @@ public class Tool
         }
         $this->configured = true;
 
-        $path = std::env::join($this->echoc->project, 'ecotest.json');
+        $path = ($this->echoc->project / 'ecotest.json')->string();
         // no ecotest.json is no configuration, and so is an empty one
         $text = guard doc::read($path) else {
             return .ok;
@@ -272,7 +272,7 @@ public class Tool
      */
     public const function history() : int32
     {
-        std::io::print(history::render(std::env::join($this->root(), 'history.jsonl'), 15));
+        std::io::print(history::render(($this->root() / 'history.jsonl')->string(), 15));
         return 0;
     }
 
@@ -379,7 +379,7 @@ public class Tool
                 if ($found != null) {
                     Coverage $c = guard $found;
                     $r = CoverageReport::measure($c, $this->scope($run));
-                    Tool::store(std::env::join($dir, 'coverage.json'), $r->json(), $unwritten);
+                    Tool::store(($dir / 'coverage.json')->string(), $r->json(), $unwritten);
                     $totals = $r->totals();
                     $files = mv $r->files;
                 }
@@ -391,28 +391,28 @@ public class Tool
 
         // every report is attempted, each rendered as it is written; one that could not be written
         // fails the run once it is shown
-        Tool::store(std::env::join($dir, 'summary.md'), markdown::render($run, $files, $totals, $verdict), $unwritten);
-        Tool::store(std::env::join($dir, 'junit.xml'), junit::render($run, $verdict), $unwritten);
+        Tool::store(($dir / 'summary.md')->string(), markdown::render($run, $files, $totals, $verdict), $unwritten);
+        Tool::store(($dir / 'junit.xml')->string(), junit::render($run, $verdict), $unwritten);
         if (!$files->empty()) {
-            Tool::store(std::env::join($dir, 'lcov.info'), lcov::render($files), $unwritten);
+            Tool::store(($dir / 'lcov.info')->string(), lcov::render($files), $unwritten);
         }
 
         $report = '';
         if ($this->html) {
-            $report = std::env::join($dir, 'report.html');
+            $report = ($dir / 'report.html')->string();
             Tool::store($report, html::render($run, $files, $totals, $verdict), $unwritten);
         }
 
         // a run the history misses is still a run: said, but not failed
-        $historyPath = std::env::join($this->root(), 'history.jsonl');
+        $historyPath = ($this->root() / 'history.jsonl')->string();
         $kept = history::append($historyPath, $dir, $run, $totals);
         if ($kept->failed()) {
             files::warn("cannot write {$historyPath}: {$kept->failure()}");
         }
 
         // written whole and last: a run without it never finished
-        $runJson = std::env::join($dir, 'run.json');
-        $sealed = files::seal($runJson, runjson::render($run, $files, $totals, $verdict));
+        $runJson = ($dir / 'run.json')->string();
+        $sealed = std::fs::replace($runJson, runjson::render($run, $files, $totals, $verdict));
         if ($sealed->failed()) {
             files::warn("cannot write {$runJson}: {$sealed->failure()}");
             $unwritten++;
