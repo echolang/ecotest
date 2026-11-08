@@ -1,0 +1,2 @@
+# snapshots compare byte for byte; a CRLF checkout on Windows would change every one
+*.snap text eol=lf
