@@ -2,17 +2,6 @@
   "lockVersion": 2,
   "packages": [
     {
-      "name": "echolang/libcurl",
-      "version": "1.0.0",
-      "source": {
-        "kind": "git",
-        "url": "https://github.com/echolang/libcurl"
-      },
-      "rev": "d97b4ab414ac6f2c7da0ff60dba472e532efedc6",
-      "sha256": "d0b53517150a5e265e8f8b77cf5eb0eb38eb104016a36baeef0d54388657a7a7",
-      "requires": []
-    },
-    {
       "name": "echolang/libjson",
       "version": "0.1.3",
       "source": {
@@ -43,6 +32,17 @@
       },
       "rev": "742521c3db5c2f155f037b0b7d4489ba76363360",
       "sha256": "fbcac18af9da8cebc09914a0d50fdc203ef8f838c22e8688503977cb3dfc81fe",
+      "requires": []
+    },
+    {
+      "name": "echolang/libcurl",
+      "version": "1.0.1",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/echolang/libcurl"
+      },
+      "rev": "169745d9e37218aecefa04b413ed7a48884663af",
+      "sha256": "d1073a31a444a3a644e18a9eb69c469d0c3f7d06517d83c1951ddac929ebdd47",
       "requires": []
     }
   ]

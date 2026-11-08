@@ -2,17 +2,6 @@
   "lockVersion": 2,
   "packages": [
     {
-      "name": "echolang/libcurl",
-      "version": "1.0.0",
-      "source": {
-        "kind": "git",
-        "url": "https://github.com/echolang/libcurl"
-      },
-      "rev": "d97b4ab414ac6f2c7da0ff60dba472e532efedc6",
-      "sha256": "d0b53517150a5e265e8f8b77cf5eb0eb38eb104016a36baeef0d54388657a7a7",
-      "requires": []
-    },
-    {
       "name": "echolang/libjson",
       "version": "0.1.3",
       "source": {
