@@ -294,7 +294,7 @@ The tool starts each service, waits until it is ready, exports `ECOTEST_<NAME>_U
 `modules/http` is a second package in this git repo. Same tests talk to a deployed URL, a service the tool started, or an app dispatched in process.
 
 ```echo
-#[requires: "echolang/ecotest/modules/http" { version: "^0.2", source: git "https://github.com/echolang/ecotest" }]
+#[requires: "echolang/ecotest/modules/http" { version: "^0.3", source: git "https://github.com/echolang/ecotest" }]
 ```
 
 One `Api`, plus `live` for a service the tool started:

@@ -30,6 +30,36 @@ test an_event_renders_one_json_line
     expect($lines[0])->is('{"v":1,"type":"metric","name":"rows","value":12}');
 }
 
+test check_counts_and_fails
+{
+    int64 $before = Session::checkCount();
+    ecotest::check(true, 'should not fail', std::src::here());
+    expect(Session::checkCount())->is($before + 1);
+
+    $got = summaries(function() : void {
+        ecotest::check(false, 'it failed', std::src::here());
+    });
+    expect($got)->is(['it failed']);
+}
+
+test checked_counts_a_check
+{
+    int64 $before = Session::checkCount();
+    ecotest::checked();
+    expect(Session::checkCount())->is($before + 1);
+}
+
+test a_fail_event_lists_every_context
+{
+    $lines = eventsOf(function() : void {
+        $outer = ecotest::context('file a');
+        $inner = ecotest::context('row 2');
+        $text = Session::report(Failure('values differ', std::src::here()));
+    });
+
+    expect($lines[0])->has('"context":["file a","row 2"]');
+}
+
 test equal_texts_have_no_diff
 {
     expect(diff::lines("a\nb", "a\nb"))->empty();

@@ -40,6 +40,24 @@ test a_missing_variable_skips
     expect($url)->is('unreachable');
 }
 
+test leaving_a_scope_that_is_not_open_is_fine
+{
+    Session::leaveSoft();
+    $none = Session::leaveCaught();
+    expect($none)->empty();
+}
+
+#[tests: expects death]
+test an_inner_soft_scope_merges_into_the_outer
+{
+    $outer = ecotest::soft();
+    {
+        $inner = ecotest::soft();
+        expect(1)->is(2);
+    }
+    expect('a')->is('b');
+}
+
 test caught_leaves_an_enclosing_scopes_failures_alone
 {
     $outer = ecotest::caught(function() : void {

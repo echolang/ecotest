@@ -13,6 +13,11 @@ test result_status_and_nullable_checks_pass
     expect(check(true))->fine();
     expect(check(false))->fails(.bad);
 
+    $held = summaries(function() : void {
+        expect(check(false))->fine();
+    });
+    expect($held)->is(['expected success, got error bad']);
+
     int32 $three = expect(find(true))->some();
     expect($three)->is(3);
     expect(find(true))->some(3);

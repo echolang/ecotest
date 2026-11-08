@@ -135,3 +135,13 @@ private function scrub(const string& $raw, bool $upper, bool $dotHyphen) : strin
 
     return $out;
 }
+
+namespace str;
+
+/**
+ * The word an event line carries as `"type"`.
+ */
+public function from(ecotest::protocol::Kind $kind) : string
+{
+    return $kind->value();
+}

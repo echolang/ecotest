@@ -4,7 +4,8 @@
  */
 
 use ecotest::{expect, TempDir};
-use ecotest::cli::{GitDiff, ChangedFile, glob, ServiceSpec, Readiness, Ratio, Outcome, Attempt, Fault, TestRecord, Run, Pass, PassExit, FileCoverage, Style, Look, files};
+use ecotest::cli::{GitDiff, ChangedFile, glob, ServiceSpec, Readiness, Ratio, Outcome, Attempt, Fault, TestRecord, Run, Pass, PassExit, FileCoverage, Style, Look, files, CoverageError, CoverageMapError, RunError, Format};
+use ecotest::cli::interrupt;
 
 test git_diff_hunks_keep_both_sides
 {
@@ -245,6 +246,43 @@ test a_title_drops_the_module_unless_kept
     $loose = titled('m/loose', 'm')->title(false);
     expect($loose->suite)->is('');
     expect($loose->label)->is('loose');
+}
+
+test coverage_errors_print_every_case
+{
+    $gone = expect(std::fs::readfile('/no-such-ecotest-map.json'))->fails();
+    CoverageError $fromMap = .map(.unreadable('map.json', $gone));
+    expect("{$fromMap}")->has('cannot read map.json:');
+
+    CoverageError $mixed = .mixedBuilds('a.json', 'b.json');
+    expect("{$mixed}")->is('the passes measured different builds (a.json and b.json)');
+}
+
+test run_errors_print_an_interrupt
+{
+    $gone = expect(std::fs::readfile('/no-such-ecotest-cov'))->fails();
+    RunError $keep = .cannotKeep('/cov', $gone);
+    expect("{$keep}")->has('cannot keep the coverage at /cov:');
+
+    RunError $e = .interrupted;
+    expect("{$e}")->is('interrupted');
+}
+
+test a_format_word_that_names_none_is_null
+{
+    Format $terminal = guard Format::of('');
+    expect($terminal == Format::terminal)->yes();
+    Format $json = guard Format::of('json');
+    expect($json == Format::json)->yes();
+    expect(Format::of('nope') == null)->yes();
+}
+
+test an_interrupt_is_remembered
+{
+    interrupt::caught(2);
+    expect(interrupt::requested())->yes();
+    interrupt::caught(0);
+    expect(interrupt::requested())->no();
 }
 
 test styles_are_named_and_follow_the_stream_on_auto

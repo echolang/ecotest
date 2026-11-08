@@ -82,6 +82,22 @@ test a_crash_runs_the_cleanups_once
     expect($ran->seen)->is(['gone']);
 }
 
+test a_cleanup_that_forgets_another_skips_it
+{
+    $ran = Calls<string>();
+    $lines = eventsOf(function() : void {
+        usize $first = 0;
+        $first = Session::defer(function() : void { $ran->record('first'); });
+        Session::defer(function() : void {
+            Session::undefer($first);
+            $ran->record('second');
+        });
+        Session::cleanup();
+    });
+
+    expect($ran->seen)->is(['second']);
+}
+
 test an_undeferred_cleanup_does_not_run
 {
     $ran = Calls<string>();

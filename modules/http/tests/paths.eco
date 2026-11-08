@@ -81,6 +81,7 @@ test steps_refuse_malformed_paths
     expect(spelled('$a'))->is('error: unexpected text at byte 1');
     expect(spelled("$['a'x]"))->is('error: unexpected text at byte 5');
     expect(spelled('$.a]'))->is('error: unexpected text at byte 3');
+    expect(spelled('a]'))->is('error: unexpected text at byte 1');
 }
 
 test keys_that_look_like_brackets_are_addressable
@@ -118,8 +119,32 @@ test replace_counts_what_it_changed
     expect(replaced($doc, '$.gone', $mark))->is(0);
     expect(dumped($doc))->is('{"l":[{"id":"r"},{"id":"r"},{"x":"r"}],"n":"r"}');
 
+    $items = guard json::parse('[1,2,3]');
+    expect(replaced($items, '$[1]', $mark))->is(1);
+    expect(replaced($items, '$[*]', $mark))->is(3);
+    expect(dumped($items))->is('["r","r","r"]');
+
     expect(replaced($doc, '$', $mark))->is(1);
     expect(dumped($doc))->is('"r"');
+}
+
+test same_json_compares_by_value
+{
+    $a = guard json::parse('{"a":1,"b":[1,2],"ok":true,"s":"x"}');
+    $b = guard json::parse('{"b":[1,2.0],"a":1,"ok":true,"s":"x"}');
+    expect(jsonpath::same($a, $b))->yes();
+
+    $short = guard json::parse('[1]');
+    $long = guard json::parse('[1,2]');
+    expect(jsonpath::same($short, $long))->no();
+
+    $keys = guard json::parse('{"a":1,"c":2}');
+    $other = guard json::parse('{"a":1,"b":2}');
+    expect(jsonpath::same($keys, $other))->no();
+
+    $num = guard json::parse('1');
+    $text = guard json::parse('"1"');
+    expect(jsonpath::same($num, $text))->no();
 }
 
 test replace_never_writes_into_libjsons_shared_null

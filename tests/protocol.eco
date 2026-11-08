@@ -20,6 +20,26 @@ test a_service_variable_is_upper_case
     expect(protocol::serviceVar('my-db.2'))->is('ECOTEST_MY_DB_2_URL');
 }
 
+test every_kind_has_a_word
+{
+    expect(protocol::Kind::of('fail'))->some(.fail);
+    expect(protocol::Kind::of('crash'))->some(.crash);
+    expect(protocol::Kind::of('skip'))->some(.skip);
+    expect(protocol::Kind::of('note'))->some(.note);
+    expect(protocol::Kind::of('metric'))->some(.metric);
+    expect(protocol::Kind::of('bench'))->some(.bench);
+    expect(protocol::Kind::of('checks'))->some(.checks);
+    expect(protocol::Kind::of('snapshot-new'))->some(.snapshotNew);
+    expect(protocol::Kind::of('snapshot-updated'))->some(.snapshotUpdated);
+}
+
+test an_unknown_word_is_no_kind
+{
+    expect(protocol::Kind::of('nope'))->none();
+    protocol::Kind $fail = .fail;
+    expect("{$fail}")->is('fail');
+}
+
 test the_version_is_the_manifests
 {
     expect(ecotest::version())->is('0.3.0');
