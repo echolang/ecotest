@@ -3,6 +3,7 @@
  *
  *   ecotest [run] [--coverage] [--html] [--repeat N] [--filter ...] [--style auto|pretty|simple] [gates]
  *   ecotest report [run] --format terminal|md|junit|lcov|html|json [--style ...]
+ *   ecotest [run] ... [--seed N] [--keep N]
  *   ecotest history
  *   ecotest api
  *   ecotest who <file:line>
@@ -11,7 +12,8 @@
 
 namespace ecotest::cli;
 
-use ecotest::cli::files;
+use ecotest::paths;
+use ecotest::cli::{files, interrupt};
 use command;
 
 /**
@@ -19,7 +21,7 @@ use command;
  */
 public function main(const array<string>& $argv) : int32
 {
-    $app = command::Command('ecotest', '0.2.0', 'run echoc tests and report on them');
+    $app = command::Command('ecotest', ecotest::version(), 'run echoc tests and report on them');
 
     $run = $app->command('run', 'run the tests and report (the default)', 'Runs echoc test, merges what the tests recorded through ecotest, prints a summary and writes every report into the run directory.');
     $report = $app->command('report', 'render a stored run', 'Renders the newest run, or the one named, in another format.');
@@ -46,7 +48,9 @@ public function main(const array<string>& $argv) : int32
     $minDiff = $app->arg('min-diff-coverage', '', '<percent>', 'fail below this coverage of changed lines');
     $maxFlaky = $app->arg('max-flaky', '', '<n>', 'fail with more flaky tests');
     $since = $app->arg('since', '', '<ref>', 'git ref for diff coverage and affected');
-    $format = $app->arg('format', '', '<name>', 'terminal, md, junit, lcov, html or json');
+    $format = $app->arg('format', '', '<terminal|md|junit|lcov|html|json>', 'what to render a stored run as');
+    $seed = $app->arg('seed', '', '<n>', 'the seed handed to the tests, to replay a property failure');
+    $keep = $app->arg('keep', '', '<n>', 'how many finished runs to keep, 20 by default');
     $project = $app->arg('project', '', '<dir>', 'the module to test, the current directory by default');
     $style = $app->arg('style', '', '<auto|pretty|simple>', 'live progress and a styled summary, or plain text');
 
@@ -57,19 +61,27 @@ public function main(const array<string>& $argv) : int32
     ];
     $app->values($style, $styles);
     $app->fallback($style, 'auto');
+    $app->values($format, [
+        command::OptionValue('terminal', 'the summary', 'The summary run prints, styled when the terminal takes it.'),
+        command::OptionValue('md', 'Markdown', 'For a CI step summary or a pull request comment.'),
+        command::OptionValue('junit', 'JUnit XML', 'What CI servers read.'),
+        command::OptionValue('lcov', 'an LCOV tracefile', 'What editors, genhtml and coverage services read.'),
+        command::OptionValue('html', 'one HTML page', 'The verdict, every test and the source shaded by coverage.'),
+        command::OptionValue('json', 'run.json', 'The run as one JSON document, for other tools.'),
+    ]);
+    $app->fallback($format, 'terminal');
     $app->fallback($buildDir, 'ecobuild');
 
     foreach ([$coverage, $html] as $f) {
         $app->accept($f, $run);
         $app->accept($f, $affected);
     }
-    foreach ([$repeat, $filter, $target, $define, $timeout, $echoc, $buildDir, $minCoverage, $minBranches, $minDiff, $maxFlaky] as $a) {
+    foreach ([$repeat, $filter, $target, $define, $timeout, $echoc, $buildDir, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep] as $a) {
         $app->accept($a, $run);
         $app->accept($a, $affected);
     }
     $app->accept($module, $run);
-    $app->accept($module, $report);
-    $app->accept($module, $api);
+    $app->accept($module, $affected);
     $app->accept($since, $run);
     $app->accept($since, $affected);
     $app->require($since, $affected);
@@ -102,45 +114,15 @@ public function main(const array<string>& $argv) : int32
     }
 
     $tool = Tool();
-    Invocation& $invocation = $tool->echoc;
-    $invocation->project = files::resolve(std::env::cwd(), $parsed->value($project));
-    $invocation->program = $parsed->value($echoc);
-    if ($invocation->program->empty()) {
-        $invocation->program = string(std::env::var('ECHOC', 'echoc'));
-    }
-    $invocation->buildDir = $parsed->value($buildDir);
-    $invocation->coverage = $parsed->stated($coverage);
-    $invocation->repeat = (str::uint($parsed->value($repeat)) ?? 1) as usize;
-    $tool->html = $parsed->stated($html);
-    $tool->modules = $parsed->values($module);
-    $tool->since = $parsed->value($since);
-    $tool->format = $parsed->value($format);
-    $tool->style = .of($parsed->value($style));
+    guard settle($tool, $parsed, Flags($project, $echoc, $buildDir, $coverage, $html, $repeat, $module, $since, $format, $style, $filter, $define, $target, $timeout, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep)) else ($why) {
+        files::warn($why);
+        return 2;
+    };
     $tool->live = .from($parsed, $app, .stderr);
     $tool->page = .from($parsed, $app, .stdout);
 
-    foreach ($parsed->values($filter) as const &$spec) {
-        $invocation->forwarded[] = '--filter';
-        $invocation->forwarded[] = $spec;
-    }
-    foreach ($parsed->values($define) as const &$name) {
-        $invocation->forwarded[] = '--define';
-        $invocation->forwarded[] = $name;
-    }
-    if ($parsed->stated($target)) {
-        $invocation->forwarded[] = '--target';
-        $invocation->forwarded[] = $parsed->value($target);
-    }
-    if ($parsed->stated($timeout)) {
-        $invocation->forwarded[] = '--timeout';
-        $invocation->forwarded[] = $parsed->value($timeout);
-    }
-
-    // a gate not given is off; ecotest.json may still set the line gate
-    $tool->gates->minLines = str::float($parsed->value($minCoverage));
-    $tool->gates->minBranches = str::float($parsed->value($minBranches));
-    $tool->gates->minDiff = str::float($parsed->value($minDiff));
-    $tool->gates->maxFlaky = str::int($parsed->value($maxFlaky));
+    // from here an interrupt stops what runs and leaves the run unfinished, not orphaned
+    interrupt::install();
 
     $subject = $parsed->subject($app);
 
@@ -169,6 +151,163 @@ public function main(const array<string>& $argv) : int32
     }
 
     return $tool->affected();
+}
+
+/**
+ * The flags `main` declared, handed to `settle` by name.
+ */
+internal struct Flags
+{
+    public command::Arg $project;
+    public command::Arg $echoc;
+    public command::Arg $buildDir;
+    public command::Flag $coverage;
+    public command::Flag $html;
+    public command::Arg $repeat;
+    public command::Arg $module;
+    public command::Arg $since;
+    public command::Arg $format;
+    public command::Arg $style;
+    public command::Arg $filter;
+    public command::Arg $define;
+    public command::Arg $target;
+    public command::Arg $timeout;
+    public command::Arg $minCoverage;
+    public command::Arg $minBranches;
+    public command::Arg $minDiff;
+    public command::Arg $maxFlaky;
+    public command::Arg $seed;
+    public command::Arg $keep;
+}
+
+/**
+ * Sets `$tool` up from the parsed command line, or answers why a value is refused: a number that
+ * is not one, a percentage outside 0 to 100, a repeat count of 0, a ref git would read as an
+ * option. A flag that is wrong never quietly turns into a default or switches a gate off.
+ */
+internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flags& $f) : status<string>
+{
+    Invocation& $invocation = $tool->echoc;
+    $invocation->project = paths::resolve(std::env::cwd(), $parsed->value($f->project));
+    $invocation->program = $parsed->value($f->echoc);
+    if ($invocation->program->empty()) {
+        $invocation->program = string(std::env::var('ECHOC', 'echoc'));
+    }
+    $invocation->buildDir = $parsed->value($f->buildDir);
+    $invocation->coverage = $parsed->stated($f->coverage);
+    $tool->html = $parsed->stated($f->html);
+    $tool->modules = $parsed->values($f->module);
+    $tool->since = $parsed->value($f->since);
+    $tool->format = Format::of($parsed->value($f->format)) ?? Format::terminal;
+    $tool->style = .of($parsed->value($f->style));
+
+    if ($parsed->stated($f->repeat)) {
+        $n = guard count('--repeat', $parsed->value($f->repeat), 1) else ($why) {
+            return .error($why);
+        };
+        $invocation->repeat = $n;
+    }
+
+    if ($parsed->stated($f->keep)) {
+        $n = guard count('--keep', $parsed->value($f->keep), 1) else ($why) {
+            return .error($why);
+        };
+        $tool->keep = $n;
+    }
+
+    if ($parsed->stated($f->seed)) {
+        $n = guard str::uint($parsed->value($f->seed)) else {
+            return .error("--seed takes a whole number, not '{$parsed->value($f->seed)}'");
+        };
+        $tool->seed = $n;
+    }
+
+    if ($parsed->stated($f->since)) {
+        $ref = $parsed->value($f->since);
+        if ($ref->empty() || $ref->starts('-')) {
+            return .error("--since takes a git ref, not '{$ref}'");
+        }
+    }
+
+    foreach ($parsed->values($f->filter) as const &$spec) {
+        $invocation->forwarded[] = '--filter';
+        $invocation->forwarded[] = $spec;
+    }
+    foreach ($parsed->values($f->define) as const &$name) {
+        $invocation->forwarded[] = '--define';
+        $invocation->forwarded[] = $name;
+    }
+    if ($parsed->stated($f->target)) {
+        $invocation->forwarded[] = '--target';
+        $invocation->forwarded[] = $parsed->value($f->target);
+    }
+    if ($parsed->stated($f->timeout)) {
+        $ms = guard count('--timeout', $parsed->value($f->timeout), 1) else ($why) {
+            return .error($why);
+        };
+        $invocation->forwarded[] = '--timeout';
+        $invocation->forwarded[] = "{$ms}";
+    }
+
+    // a gate not given is off; ecotest.json may still set the line gate
+    if ($parsed->stated($f->minCoverage)) {
+        $p = guard percent('--min-coverage', $parsed->value($f->minCoverage)) else ($why) {
+            return .error($why);
+        };
+        $tool->gates->minLines = $p;
+    }
+    if ($parsed->stated($f->minBranches)) {
+        $p = guard percent('--min-branch-coverage', $parsed->value($f->minBranches)) else ($why) {
+            return .error($why);
+        };
+        $tool->gates->minBranches = $p;
+    }
+    if ($parsed->stated($f->minDiff)) {
+        $p = guard percent('--min-diff-coverage', $parsed->value($f->minDiff)) else ($why) {
+            return .error($why);
+        };
+        $tool->gates->minDiff = $p;
+    }
+
+    if ($parsed->stated($f->maxFlaky)) {
+        $n = guard count('--max-flaky', $parsed->value($f->maxFlaky), 0) else ($why) {
+            return .error($why);
+        };
+        if ($invocation->repeat < 2) {
+            return .error('--max-flaky needs --repeat 2 or more: a single pass finds no flaky test');
+        }
+        $tool->gates->maxFlaky = $n as int64;
+    }
+
+    return .ok;
+}
+
+/**
+ * The whole number `$raw` given to `$flag`, at least `$min`, or why it is refused.
+ */
+internal function count(const string& $flag, const string& $raw, usize $min) : result<usize, string>
+{
+    $n = guard str::uint($raw) else {
+        return .error("{$flag} takes a whole number, not '{$raw}'");
+    };
+    if ($n < ($min as uint64)) {
+        return .error("{$flag} takes at least {$min}, not {$n}");
+    }
+    return .ok($n as usize);
+}
+
+/**
+ * The percentage `$raw` given to `$flag`, or why it is refused.
+ */
+internal function percent(const string& $flag, const string& $raw) : result<float64, string>
+{
+    $p = guard str::float($raw) else {
+        return .error("{$flag} takes a percentage, not '{$raw}'");
+    };
+    if ($p < 0.0 || $p > 100.0) {
+        return .error("{$flag} takes a percentage from 0 to 100, not {$raw}");
+    }
+    return .ok($p);
 }
 
 /**

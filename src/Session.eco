@@ -1,12 +1,15 @@
 namespace ecotest;
 
-use ecotest::show;
+use ecotest::{show, protocol};
 
 /**
  * What one test process knows about itself: which test it is, where its events go, the open
- * `soft()` and `context()` scopes, and the failures held until a soft scope ends. Started by the
- * first ecotest call in the process; without `ECHO_TEST_ID` and `ECOTEST_RUN_DIR` nothing is
- * written and every check still works.
+ * `soft()` and `context()` scopes, the failures held until a soft scope ends, and the cleanups to
+ * run when the test stops early. Started by the first ecotest call in the process; without
+ * `ECHO_TEST_ID` and `ECOTEST_RUN_DIR` nothing is written and every check still works.
+ *
+ * Every way a test can end goes through here, so held failures and cleanups are never lost: a
+ * soft scope closing, a check that stops, a crash, and a skip.
  */
 public class Session
 {
@@ -18,6 +21,8 @@ public class Session
     internal static array<string> $context = [];
     internal static bool $reported = false;
     internal static Tally $tally = Tally();
+    internal static map<usize, function<void()>> $cleanups = [];
+    internal static usize $nextCleanup = 0;
 
     /**
      * Reads the test's identity, opens its event file and installs the crash hook. Safe to call
@@ -32,11 +37,11 @@ public class Session
         Session::$started = true;
         Session::$id = string(std::env::var('ECHO_TEST_ID', ''));
 
-        $dir = string(std::env::var('ECOTEST_RUN_DIR', ''));
+        $dir = string(std::env::var(protocol::RUN_DIR, ''));
         if (!$dir->empty() && !Session::$id->empty()) {
             $folder = std::env::join($dir, 'events');
             $made = std::io::mkdir($folder);
-            $name = Session::key(Session::$id);
+            $name = protocol::key(Session::$id);
             $name->append('.jsonl');
             Session::$events = std::env::join($folder, $name);
             // a static's field is not a place; the handle is
@@ -45,31 +50,6 @@ public class Session
         }
 
         crash::set_hook(&crashed);
-    }
-
-    /**
-     * The file-name form of a test id: every byte outside `[A-Za-z0-9_.-]` becomes `_`, the same
-     * rule echoc uses for the test's coverage file, so both join on one key.
-     */
-    public static function key(const string& $id) : string
-    {
-        string $out = '';
-
-        for (usize $i = 0; $i < $id->size(); $i++) {
-            uint8 $b = $id->byte($i);
-            bool $plain = ($b >= 97 && $b <= 122)
-                || ($b >= 65 && $b <= 90)
-                || ($b >= 48 && $b <= 57)
-                || $b == 95 || $b == 45 || $b == 46;
-
-            if ($plain) {
-                $out->push($b);
-            } else {
-                $out->push(95);
-            }
-        }
-
-        return $out;
     }
 
     /**
@@ -111,6 +91,52 @@ public class Session
     }
 
     /**
+     * Runs `$undo` if the test stops early: a failed check, a crash or a skip. A test that ends
+     * normally runs its destructors instead, so the owner calls `undefer` from there. Answers the
+     * handle `undefer` takes.
+     */
+    public static function defer(function<void()> $undo) : usize
+    {
+        Session::start();
+        usize $id = Session::$nextCleanup;
+        Session::$nextCleanup = $id + 1;
+        Session::$cleanups[$id] = $undo;
+        return $id;
+    }
+
+    /**
+     * Forgets a cleanup that `defer` registered, once its owner has cleaned up by itself.
+     */
+    public static function undefer(usize $id) : void
+    {
+        if (Session::$cleanups->has($id)) {
+            Session::$cleanups->remove($id);
+        }
+    }
+
+    /**
+     * Runs every registered cleanup, newest first, and forgets them.
+     */
+    internal static function cleanup() : void
+    {
+        array<usize> $ids = [];
+        foreach (Session::$cleanups as $id => const &$undo) {
+            $ids[] = $id;
+        }
+        $ids->sort();
+
+        while (!$ids->empty()) {
+            usize $id = $ids->pop();
+            if (!Session::$cleanups->has($id)) {
+                continue;
+            }
+            $undo = Session::$cleanups->get($id);
+            Session::$cleanups->remove($id);
+            $undo();
+        }
+    }
+
+    /**
      * Takes a failure: held while a `soft()` scope is open, otherwise the test stops here.
      */
     public static function fail(Failure $failure) : void
@@ -127,8 +153,8 @@ public class Session
     }
 
     /**
-     * Writes the failure's event and stops the test at the failure's own line, whatever scope is
-     * open.
+     * Stops the test at the failure's own line, whatever scope is open. Failures a soft scope
+     * holds are reported with it.
      */
     public static function stop(Failure $failure) : void
     {
@@ -136,8 +162,8 @@ public class Session
     }
 
     /**
-     * Writes the failure's event as the test's last word and answers the report to stop with. For
-     * a `guard ... else` that has to end in its own `die`.
+     * Writes the failure's event, after any held ones, as the test's last word and answers the
+     * report to stop with. For a `guard ... else` that has to end in its own `die`.
      */
     public static function report(Failure $failure) : string
     {
@@ -147,10 +173,37 @@ public class Session
             $failure->context = Session::$context;
         }
 
+        Session::$held[] = mv $failure;
+        return Session::flush();
+    }
+
+    /**
+     * Writes a `fail` event for every held failure, then the check count, and answers the report
+     * that stops the test: the one failure as it reads, or each one under its line.
+     */
+    internal static function flush() : string
+    {
         Session::$reported = true;
-        $failure->event()->emit();
+        usize $count = Session::$held->count();
+        string $text = '';
+
+        if ($count == 1) {
+            const Failure& $only = Session::$held[0];
+            $only->event()->emit();
+            $text = "{$only}";
+        } else {
+            $text = "{$count} checks failed";
+            foreach (Session::$held as const &$failure) {
+                $failure->event()->emit();
+                $at = $failure->at;
+                $text->append("\n\n{$at->file}:{$at->line}\n");
+                $text->append(show::indent("{$failure}", 2));
+            }
+        }
+
+        Session::$held->clear();
         Session::$tally->flush();
-        return "{$failure}";
+        return $text;
     }
 
     /**
@@ -174,38 +227,66 @@ public class Session
             return;
         }
 
-        Session::$reported = true;
-        usize $count = Session::$held->count();
-        string $text = "{$count} checks failed";
+        $at = Session::$held[0]->at;
+        die(Session::flush(), $at);
+    }
 
-        foreach (Session::$held as const &$failure) {
-            $failure->event()->emit();
+    /**
+     * Ends the test as skipped, unless a soft scope already holds failures: a test that failed is
+     * not skipped. Answers the report to stop with in that case, null when the skip stands.
+     */
+    internal static function skipping(const string& $reason, const std::src::location& $at) : string?
+    {
+        Session::start();
 
-            $at = $failure->at;
-            $text->append("\n\n{$at->file}:{$at->line}\n");
-            $text->append(show::indent("{$failure}", 2));
+        if (!Session::$held->empty()) {
+            return Session::flush();
         }
 
+        Session::$reported = true;
+        Event(protocol::SKIP)->text('reason', $reason)->at($at)->emit();
         Session::$tally->flush();
-        die($text, Session::$held[0]->at);
+        Session::cleanup();
+        return null;
+    }
+
+    /**
+     * A stop that no check reported, as the crash hook sees it: the held failures, then a `crash`
+     * event, then the cleanups. After a reported stop only the cleanups run.
+     */
+    internal static function wreck(
+        const string& $headline,
+        const string& $message,
+        const string& $file,
+        int64 $line
+    ) : void {
+        if (!Session::$reported) {
+            // the default report names only the crash; the held failures print first
+            if (!Session::$held->empty()) {
+                std::io::eprintln(Session::flush());
+            }
+
+            Event(protocol::CRASH)
+                ->text('headline', $headline)
+                ->text('message', $message)
+                ->text('file', $file)
+                ->number('line', $line)
+                ->emit();
+            Session::$tally->flush();
+            Session::$reported = true;
+        }
+
+        Session::cleanup();
     }
 }
 
 /**
- * The crash hook ecotest installs. A plain `assert`, `die` or `guard` stop that no check reported
- * becomes a `crash` event, then the default report prints as usual.
+ * The crash hook ecotest installs. Every stop, a check's or not, runs the cleanups; a plain
+ * `assert`, `die` or `guard` stop that no check reported also becomes a `crash` event. Then the
+ * default report prints as usual.
  */
 internal function crashed(const crash::info& $info) : void
 {
-    if (!Session::$reported) {
-        Event('crash')
-            ->text('headline', string($info->headline))
-            ->text('message', string($info->message))
-            ->text('file', string($info->file))
-            ->number('line', $info->line as int64)
-            ->emit();
-        Session::$tally->flush();
-    }
-
+    Session::wreck(string($info->headline), string($info->message), string($info->file), $info->line as int64);
     crash::default_hook($info);
 }

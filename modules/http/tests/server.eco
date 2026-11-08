@@ -26,13 +26,54 @@ internal class TestServer
             $auth = $r->header('Authorization') ?? 'nobody';
             return http::Response(text: $auth);
         });
+
+        // the method in the body and in X-Method; a HEAD reaches the GET route
+        $verb = function(http::Request $r) : http::Response {
+            string $name = "{$r->method}";
+            $res = http::Response(ok: $name);
+            $res->header('X-Method', $name);
+            return $res;
+        };
+        $this->app->get('/verb', $verb);
+        $this->app->post('/verb', $verb);
+        $this->app->put('/verb', $verb);
+        $this->app->patch('/verb', $verb);
+        $this->app->del('/verb', $verb);
+
+        $this->app->get('/moved', function(http::Request $r) : http::Response {
+            $res = http::Response(302, '');
+            $res->header('Location', '/plain');
+            return $res;
+        });
+
+        // the headers a client added on its own
+        $seen = function(http::Request $r) : http::Response {
+            $host = $r->header('Host') ?? '';
+            $accept = $r->header('Accept') ?? '';
+            $agent = $r->header('User-Agent') ?? '';
+            $encoding = $r->header('Accept-Encoding') ?? '';
+            $length = $r->header('Content-Length') ?? '';
+            return http::Response(ok: "host={$host}\naccept={$accept}\nagent={$agent}\nencoding={$encoding}\nlength={$length}");
+        };
+        $this->app->get('/headers', $seen);
+        $this->app->post('/headers', $seen);
+
+        $this->app->get('/slow', function(http::Request $r) : http::Response {
+            std::time::sleep(.millis(800));
+            return http::Response(ok: 'late');
+        });
     }
 
     /**
-     * Starts listening and returns the base URL once the port is bound.
+     * Starts listening and returns the base URL once the port is bound. A second call returns the
+     * same URL.
      */
     public function start() : string
     {
+        if ($this->thread != null) {
+            return "http://127.0.0.1:{$this->port}";
+        }
+
         http::Server $app = $this->app;
         // a port that cannot be bound stops here, not as a timeout in eventually() below
         $spawned = guard thread::spawn(function() : void {

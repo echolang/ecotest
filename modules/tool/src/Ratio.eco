@@ -9,12 +9,12 @@ public struct Ratio
     public usize $total = 0;
 
     /**
-     * The percentage hit, 100 when there is nothing to hit.
+     * The percentage hit, or null when there is nothing to hit: no code is not full coverage.
      */
-    public const function percent() : float64
+    public const function percent() : float64?
     {
         if ($this->total == 0) {
-            return 100.0;
+            return null;
         }
 
         return 100.0 * ($this->hit as float64) / ($this->total as float64);
@@ -24,11 +24,13 @@ public struct Ratio
 namespace str;
 
 /**
- * `$r` as a percentage with one decimal: `81.4%`.
+ * `$r` as a percentage with one decimal, `81.4%`, or `n/a` when there was nothing to hit.
  */
 public function from(const ecotest::cli::Ratio& $r) : string
 {
-    $p = $r->percent();
+    $p = guard $r->percent() else {
+        return 'n/a';
+    };
     return "{$p:.1f}%";
 }
 

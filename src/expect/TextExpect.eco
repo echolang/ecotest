@@ -31,9 +31,19 @@ public class TextExpect
             return $this;
         }
 
+        // two long lines would both cut to the same start: show where they part
+        if ($want->size() > show::WIDTH || $this->value->size() > show::WIDTH) {
+            usize $k = show::parting($want, $this->value);
+            usize $from = show::lead($want, $k);
+            $w = show::from($want, $from);
+            $g = show::from($this->value, $from);
+            fail("texts part at byte {$k}: expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+            return $this;
+        }
+
         $w = show::text($want);
         $g = show::text($this->value);
-        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g);
+        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
         return $this;
     }
 
@@ -167,7 +177,7 @@ public class TextExpect
     #[caller]
     public const function snapshot() : TextExpect
     {
-        Snapshot::check($this->value, std::src::caller());
+        ecotest::snapshot($this->value, at: std::src::caller());
         return $this;
     }
 }

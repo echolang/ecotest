@@ -50,3 +50,31 @@ internal function unsetVar(const string& $name) : void
     int32 $done = c_unsetenv($name->cstr());
 #[end]
 }
+
+/**
+ * The event lines `$body` writes, read from a file of its own. The session's state is put back
+ * afterwards, so a body may hold failures, report them or run cleanups without ending the test.
+ */
+internal function eventsOf(function<void()> $body) : array<string>
+{
+    ecotest::Session::start();
+    // not a TempDir: the body may run the cleanups, which would take it away
+    int32 $pid = std::env::pid();
+    int64 $stamp = std::time::timestamp::now()->unix_nanos();
+    $path = std::env::join(std::env::tmp(), "ecotest-events-{$pid}-{$stamp}.jsonl");
+
+    string $kept = ecotest::Session::$events;
+    int32 $soft = ecotest::Session::$soft;
+    ecotest::Session::$events = $path;
+
+    $body();
+
+    ecotest::Session::$events = $kept;
+    ecotest::Session::$soft = $soft;
+    ecotest::Session::$reported = false;
+    ecotest::Session::$held->clear();
+
+    $text = std::io::readfile($path)->or('');
+    $gone = std::io::remove($path);
+    return str::lines($text)->owned();
+}

@@ -1,12 +1,14 @@
 namespace ecotest;
 
+use ecotest::protocol;
+
 /**
  * The seed property tests start from: `ECOTEST_SEED` when the run sets one (the tool does, and a
  * failure prints it for replaying), otherwise the clock.
  */
 internal function seed() : uint64
 {
-    $given = string(std::env::var('ECOTEST_SEED', ''));
+    $given = string(std::env::var(protocol::SEED, ''));
 
     return str::uint($given) ?? (std::time::timestamp::now()->unix_nanos() as uint64);
 }

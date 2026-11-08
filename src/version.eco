@@ -1,0 +1,27 @@
+namespace ecotest;
+
+/**
+ * The manifest, read when ecotest is compiled. Its `#[version]` is the one place the version is
+ * written.
+ */
+internal const string MANIFEST = std::embed::text("../module.eco");
+
+/**
+ * ecotest's version, as `module.eco` states it.
+ */
+public function version() : string
+{
+    $mark = '#[version: "';
+    usize $at = MANIFEST->find($mark);
+    if ($at >= MANIFEST->size()) {
+        return 'unknown';
+    }
+
+    usize $from = $at + $mark->size();
+    usize $to = $from;
+    while ($to < MANIFEST->size() && MANIFEST->byte($to) != 34) {
+        $to++;
+    }
+
+    return MANIFEST->sub($from, $to - $from);
+}

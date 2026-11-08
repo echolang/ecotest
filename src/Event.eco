@@ -1,6 +1,6 @@
 namespace ecotest;
 
-use ecotest::jsonl;
+use ecotest::{jsonl, protocol};
 
 /**
  * One line of the test's event file, built field by field. `emit()` hands it to the session, which
@@ -15,7 +15,9 @@ public class Event
 
     public constructor(const string& $type)
     {
-        $this->line = '{"type":';
+        $this->line = '{"v":';
+        $this->line->append(str::from(protocol::VERSION));
+        $this->line->append(',"type":');
         $this->line->append(jsonl::quote($type));
     }
 
@@ -36,6 +38,20 @@ public class Event
     {
         $this->key($key);
         $this->line->append("{$value}");
+        return $this;
+    }
+
+    /**
+     * Adds a `true` or `false` field.
+     */
+    public function flag(const string& $key, bool $value) : Event
+    {
+        $this->key($key);
+        if ($value) {
+            $this->line->append('true');
+        } else {
+            $this->line->append('false');
+        }
         return $this;
     }
 

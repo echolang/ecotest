@@ -1,11 +1,12 @@
 /**
- * `ecobuild/ecotest/history.jsonl`: one line per run with its totals and every test's outcome and
+ * `.ecotest/history.jsonl`: one line per run with its totals and every test's outcome and
  * duration, so trends need no old run directories.
  */
 
 namespace ecotest::cli::history;
 
-use ecotest::cli::{doc, files, text};
+use ecotest::paths;
+use ecotest::cli::{doc, files};
 
 /**
  * Appends `$run` to the history at `$path`.
@@ -36,8 +37,8 @@ public function append(const string& $path, const string& $runDir, const Run& $r
 }
 
 /**
- * Sets the line and branch percentages of `$totals` on the history line `$line`, when the run
- * measured coverage.
+ * Sets the line and branch percentages of `$totals` on the history line `$line`, each only when the
+ * run measured some: a run that measured nothing has no percentage, not 100.
  */
 private function coverage(json::Value& $line, Totals? $totals) : void
 {
@@ -45,8 +46,15 @@ private function coverage(json::Value& $line, Totals? $totals) : void
         return;
     };
 
-    $line['lines'] = json::float($t->lines->percent());
-    $line['branches'] = json::float($t->branches->percent());
+    $lines = guard $t->lines->percent() else {
+        return;
+    };
+    $line['lines'] = json::float($lines);
+
+    $branches = guard $t->branches->percent() else {
+        return;
+    };
+    $line['branches'] = json::float($branches);
 }
 
 /**
@@ -68,7 +76,7 @@ public function render(const string& $path, usize $last) : string
     $out = 'run                         pass  fail  skip flaky      ms  lines\n';
     for (usize $i = $from; $i < $runs->count(); $i++) {
         const json::Value& $r = $runs[$i];
-        $name = text::base(doc::text($r, 'run'));
+        $name = paths::base(doc::text($r, 'run'));
 
         int64 $pass = doc::number($r, 'pass');
         int64 $fail = doc::number($r, 'fail');

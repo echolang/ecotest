@@ -25,25 +25,59 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
 
     coverage($out, $totals);
 
+    foreach ($verdict->stopped as const &$reason) {
+        $out->append("- :x: run incomplete: {$reason}\n");
+    }
     foreach ($verdict->failed as const &$gate) {
         $out->append("- :x: {$gate}\n");
     }
-    if (!$verdict->failed->empty()) {
+    if (!$verdict->failed->empty() || !$verdict->stopped->empty()) {
         $out->append('\n');
     }
 
+    listing($out, $run, 'Failures', false);
+    listing($out, $run, 'Flaky', true);
+
+    $skipHead = false;
+    foreach ($run->tests as const &$test) {
+        if ($test->outcome != Outcome::skip) {
+            continue;
+        }
+        if (!$skipHead) {
+            $out->append('\n### Skipped\n\n');
+            $skipHead = true;
+        }
+        $out->append("- `{$test->id}`: {$test->events->skipReason}\n");
+    }
+
+    return $out;
+}
+
+/**
+ * A section headed `$heading` listing the broken tests, or the flaky ones when `$flaky`, each with
+ * where it stopped. Nothing when there are none.
+ */
+private function listing(string& $out, const Run& $run, const string& $heading, bool $flaky) : void
+{
     $headed = false;
     foreach ($run->tests as const &$test) {
-        if (!$test->outcome->broken() && $test->outcome != Outcome::flaky) {
+        if ($flaky != ($test->outcome == Outcome::flaky)) {
+            continue;
+        }
+        if (!$flaky && !$test->outcome->broken()) {
             continue;
         }
         if (!$headed) {
-            $out->append('### Failures\n\n');
+            $out->append("### {$heading}\n\n");
             $headed = true;
         }
 
         $out->append("- **{$test->outcome}** `{$test->id}`");
-        $fault = guard $test->events->fault else {
+        if ($flaky) {
+            $words = $test->attemptWords();
+            $out->append(" ({$words})");
+        }
+        $fault = guard $test->fault() else {
             $out->append('\n');
             continue;
         };
@@ -63,19 +97,9 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
         }
     }
 
-    $skipHead = false;
-    foreach ($run->tests as const &$test) {
-        if ($test->outcome != Outcome::skip) {
-            continue;
-        }
-        if (!$skipHead) {
-            $out->append('\n### Skipped\n\n');
-            $skipHead = true;
-        }
-        $out->append("- `{$test->id}`: {$test->events->skipReason}\n");
+    if ($headed) {
+        $out->append('\n');
     }
-
-    return $out;
 }
 
 /**

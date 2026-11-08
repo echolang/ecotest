@@ -1,6 +1,6 @@
 /**
- * Replies built in memory, the summaries of what checks on them failed, and an environment
- * variable set for the rest of one test process.
+ * Replies built in memory, the summaries of what checks on them failed, an environment variable
+ * set for the rest of one test process, and a free loopback port.
  */
 
 use ecotest::http::{Header, Reply, Request, Response};
@@ -25,7 +25,7 @@ internal function reply(int64 $status, const string& $body, const array<Header>&
  */
 internal function lost() : Reply
 {
-    return Reply(Request(.get, 'http://app/x'), .error(.refused('refused')));
+    return Reply(Request(.get, 'http://app/x'), .error(.failed('refused')));
 }
 
 /**
@@ -41,9 +41,46 @@ internal function said(function<void()> $body) : array<string>
 }
 
 /**
+ * Why `$reply` got no response, in words, or `answered` when it got one.
+ */
+internal function why(const Reply& $reply) : string
+{
+    return match ($reply->response) {
+        .ok($res) => 'answered',
+        .error($e) => "{$e}",
+    };
+}
+
+/**
+ * The response `$reply` got. Stops the test when there is none.
+ */
+internal function answer(const Reply& $reply) : Response
+{
+    return match ($reply->response) {
+        .ok($res) => $res,
+        .error($e) => die("no response: {$e}"),
+    };
+}
+
+/**
  * Sets `$name` for the rest of this test's process.
  */
 internal function setVar(const string& $name, const string& $value) : void
 {
     int32 $done = c_setenv($name->cstr(), $value->cstr(), 1);
+}
+
+/**
+ * A loopback port nothing listens on right now, picked by the system.
+ */
+internal function freePort() : int32
+{
+    std::process::command $cmd = std::process::command('python3', [
+        '-c',
+        'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])',
+    ]);
+    $out = guard $cmd->output();
+    string $text = str::trim($out->stdout);
+    int64 $port = guard str::int($text);
+    return $port as int32;
 }

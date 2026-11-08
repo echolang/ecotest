@@ -14,15 +14,16 @@ test a_service_ready_by_delay_runs_beside_the_tests
     expect(expect(doc::read(std::env::join($sample->latest(), 'services/idle.log')))->some())->empty();
 }
 
-test a_service_ready_over_http_gets_its_url_from_the_probe
+test a_service_ready_over_http_hands_its_check_to_the_tests
 {
+    // nothing answers the ready URL: the tool does not ask it, `Api(service:)` in the tests does
     $sample = Sample();
-    $sample->dir->write('ecotest.json', '{"services": [{"name": "web", "run": ["python3", "-m", "http.server", "18734", "--bind", "127.0.0.1"], "ready": {"http": "http://127.0.0.1:18734/", "timeout_ms": 10000}}]}');
+    $sample->dir->write('ecotest.json', '{"services": [{"name": "web", "run": ["sleep", "30"], "ready": {"http": "http://127.0.0.1:9/health", "timeout_ms": 300}}]}');
 
     $tool = $sample->tool();
     expect($tool->run())->is(0);
-    expect($tool->services->env->keys())->is(['ECOTEST_WEB_URL']);
-    expect($tool->services->env->values())->is(['http://127.0.0.1:18734']);
+    expect($tool->services->env->keys())->is(['ECOTEST_WEB_URL', 'ECOTEST_WEB_READY', 'ECOTEST_WEB_READY_MS']);
+    expect($tool->services->env->values())->is(['http://127.0.0.1:9', 'http://127.0.0.1:9/health', '300']);
 }
 
 test a_failing_run_prints_the_end_of_each_service_log
@@ -42,9 +43,7 @@ test a_service_that_cannot_start_stops_the_run
     foreach ([
         '{"services": [{"name": "nothing", "ready": {"ms": 1}}]}',
         '{"services": [{"name": "missing", "run": ["/nonexistent/server"]}]}',
-        '{"services": [{"name": "deaf", "run": ["sleep", "30"], "ready": {"http": "http://127.0.0.1:9", "timeout_ms": 300}}]}',
         '{"services": [{"name": "a/b", "run": ["sleep", "30"]}]}',
-        '{"services": [{"name": "lost", "run": ["python3", "-m", "http.server", "18735", "--bind", "127.0.0.1"], "ready": {"http": "http://127.0.0.1:18735/missing", "timeout_ms": 1500}}]}',
     ] as const &$config) {
         $sample = Sample();
         $sample->dir->write('ecotest.json', $config);
@@ -62,7 +61,6 @@ test a_service_that_cannot_start_says_why
     foreach ([
         ['{"name": "nothing"}', 'service nothing has no `run` command'],
         ['{"name": "missing", "run": ["/nonexistent/server"]}', 'cannot start service missing: No such file or directory'],
-        ['{"name": "deaf", "run": ["sleep", "30"], "ready": {"http": "http://127.0.0.1:9", "timeout_ms": 100}}', "service deaf was not ready within 100 ms; see {$dir->path}/services/deaf.log"],
     ] as const &$pair) {
         $at = ecotest::context($pair[0]);
         $doc = guard json::parse("[{$pair[0]}]");

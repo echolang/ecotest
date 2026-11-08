@@ -1,0 +1,116 @@
+/**
+ * Every way a test can end reports what a soft scope holds and runs the deferred cleanups: a check
+ * that stops, a crash, a skip, and the soft scope itself.
+ */
+
+use ecotest::{expect, Calls, Failure, Session};
+
+test a_stop_reports_the_failures_a_soft_scope_holds
+{
+    string $text = '';
+    $lines = eventsOf(function() : void {
+        Session::enterSoft();
+        Session::fail(Failure('held one', std::src::here()));
+        $text = Session::report(Failure('the stop', std::src::here()));
+    });
+
+    expect($lines->count())->is(2);
+    expect($lines[0])->has('"summary":"held one"');
+    expect($lines[1])->has('"summary":"the stop"');
+}
+
+test a_stop_alone_reads_as_its_own_report
+{
+    $lines = eventsOf(function() : void {
+        $text = Session::report(Failure('only this', std::src::here()));
+        expect($text)->is('only this');
+    });
+
+    expect($lines->count())->is(1);
+}
+
+test a_crash_reports_held_failures_before_the_crash
+{
+    $lines = eventsOf(function() : void {
+        Session::enterSoft();
+        Session::fail(Failure('held one', std::src::here()));
+        Session::wreck('assertion failed', 'boom', 'x.eco', 3);
+    });
+
+    expect($lines->count())->is(2);
+    expect($lines[0])->has('"type":"fail"');
+    expect($lines[1])->has('"type":"crash"')->has('"message":"boom"');
+}
+
+test a_skip_with_held_failures_fails_instead
+{
+    string? $stop = null;
+    $lines = eventsOf(function() : void {
+        Session::enterSoft();
+        Session::fail(Failure('held one', std::src::here()));
+        $failed = Session::skipping('no database', std::src::here());
+        expect($failed == null)->no(says: 'a skip over a held failure');
+    });
+
+    expect($lines->count())->is(1);
+    expect($lines[0])->has('"type":"fail"');
+}
+
+test a_skip_runs_the_cleanups
+{
+    $ran = Calls<string>();
+    $lines = eventsOf(function() : void {
+        $id = Session::defer(function() : void { $ran->record('first'); });
+        $other = Session::defer(function() : void { $ran->record('second'); });
+        $failed = Session::skipping('no database', std::src::here());
+        expect($failed == null)->yes(says: 'a plain skip');
+    });
+
+    expect($lines[0])->has('"type":"skip"');
+    expect($ran->seen)->is(['second', 'first']);
+}
+
+test a_crash_runs_the_cleanups_once
+{
+    $ran = Calls<string>();
+    $lines = eventsOf(function() : void {
+        $id = Session::defer(function() : void { $ran->record('gone'); });
+        Session::wreck('fatal error', 'stopped', 'x.eco', 1);
+        Session::wreck('fatal error', 'stopped', 'x.eco', 1);
+    });
+
+    expect($ran->seen)->is(['gone']);
+}
+
+test an_undeferred_cleanup_does_not_run
+{
+    $ran = Calls<string>();
+    $lines = eventsOf(function() : void {
+        $id = Session::defer(function() : void { $ran->record('gone'); });
+        Session::undefer($id);
+        Session::undefer($id);
+        Session::cleanup();
+    });
+
+    expect($ran)->never();
+}
+
+test a_temp_dir_is_removed_by_the_cleanups_when_the_test_stops
+{
+    string $path = '';
+    $lines = eventsOf(function() : void {
+        $dir = ecotest::TempDir();
+        $path = $dir->path;
+        // what a failed check does before its destructors could run
+        Session::cleanup();
+        expect(std::io::exists($dir->path)->or(true))->no(says: 'the directory still there');
+    });
+}
+
+#[tests: expects death]
+test skipping_inside_a_failed_soft_scope_stops_the_test
+{
+    $all = ecotest::soft();
+    expect(1)->is(2);
+    ecotest::skip('later');
+}

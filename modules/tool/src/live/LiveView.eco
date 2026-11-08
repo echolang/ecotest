@@ -4,9 +4,10 @@ use ecotest::cli::doc;
 use command::element;
 
 /**
- * One pass as it happens: echoc's output in a short scrolling window under a spinner while the
- * tests compile, then a bar over the tests as their report rows arrive. A passing test scrolls
- * through the window; a broken one is printed above it and stays.
+ * One pass as it happens, drawn from the rows the runner folds into the run: echoc's output in a
+ * short scrolling window under a spinner while the tests compile, then a bar over the tests as
+ * their report rows arrive. A passing test scrolls through the window; a broken one is printed
+ * above it and stays.
  *
  * On a stream that cannot be redrawn, libcommand writes every row as a plain line instead.
  */
@@ -41,14 +42,9 @@ public class LiveView
     private string $pass = '';
 
     /**
-     * The pass being watched, where its tests left their events. Empty until one begins.
+     * True once a pass began. A row before that belongs to none.
      */
-    private string $passDir = '';
-
-    /**
-     * The run as far as it got, every row folded in as it arrived, so it need not be read again.
-     */
-    public Run $run = Run('');
+    private bool $begun = false;
 
     public constructor(command::CLIContext $ctx)
     {
@@ -59,12 +55,11 @@ public class LiveView
     }
 
     /**
-     * Pass `$pass` of `$passes` starts in `$passDir`: the spinner over the compile, with its window.
+     * Pass `$pass` of `$passes` starts: the spinner over the compile, with its window.
      */
-    public function begin(usize $pass, usize $passes, const string& $passDir) : void
+    public function begin(usize $pass, usize $passes) : void
     {
-        $this->run->begin();
-        $this->passDir = $passDir;
+        $this->begun = true;
         $this->passed = 0;
         $this->failed = 0;
         $this->asserting = 0;
@@ -104,37 +99,15 @@ public class LiveView
     }
 
     /**
-     * Rows of echoc's report, read together: the bar is drawn once for all of them.
+     * One row of echoc's report, with the test the run folded it into, without drawing the bar:
+     * `advance` draws it once for a batch of rows.
      */
-    public function rows(const array<json::Value>& $rows) : void
+    public function take(const json::Value& $row, TestRecord? $folded) : void
     {
-        foreach ($rows as const &$row) {
-            $this->take($row);
-        }
-        $this->advance();
-    }
-
-    /**
-     * One row of echoc's report: the run starting, a test finishing, or the end.
-     */
-    public function row(const json::Value& $row) : void
-    {
-        $this->take($row);
-        $this->advance();
-    }
-
-    /**
-     * One row folded in without drawing the bar.
-     */
-    private function take(const json::Value& $row) : void
-    {
-        // a row before any pass began belongs to none
-        if ($this->passDir->empty()) {
+        if (!$this->begun) {
             return;
         }
 
-        // a test's row comes once it has exited, so its events are all written
-        $folded = $this->run->fold($row, $this->passDir);
         $type = doc::text($row, 'type');
 
         if ($type == 'run') {
@@ -218,7 +191,7 @@ public class LiveView
             $this->failed++;
 
             $lines = $this->look->headline($outcome, $title);
-            $lines->append($this->stop($test->events));
+            $lines->append($this->stop($test));
             $this->window->print($lines);
         } else {
             $this->passed++;
@@ -241,9 +214,9 @@ public class LiveView
      * The row under a broken test's headline: where `$events` failed and the first line of what
      * they said. Nothing when they did not fail.
      */
-    private const function stop(const Events& $events) : string
+    private const function stop(const TestRecord& $test) : string
     {
-        $fault = guard $events->fault else {
+        $fault = guard $test->fault() else {
             return '';
         };
 
@@ -257,7 +230,7 @@ public class LiveView
     /**
      * The bar moves to the tests finished so far, if any finished since it was last drawn.
      */
-    private function advance() : void
+    public function advance() : void
     {
         element::Progress $bar = guard $this->bar else {
             return;

@@ -14,7 +14,7 @@ internal class FakeTransport : Transport
         $this->sent[] = $request;
 
         if ($this->broken) {
-            return .error(.refused('wire cut'));
+            return .error(.failed('wire cut'));
         }
         return .ok($this->answer);
     }
@@ -40,11 +40,23 @@ internal class FakeTransport : Transport
         foreach ($this->sent as const &$request) {
             string $type = '';
             foreach ($request->headers as const &$h) {
-                if ($h->name == 'Content-Type') {
+                if (str::iequals($h->name->view(), 'content-type')) {
                     $type = $h->value;
                 }
             }
             $out[] = $type;
+        }
+        return $out;
+    }
+
+    /**
+     * Every header of request `$i` as `name: value`, in order.
+     */
+    public const function headers(usize $i) : array<string>
+    {
+        array<string> $out = [];
+        foreach ($this->sent[$i]->headers as const &$h) {
+            $out[] = "{$h->name}: {$h->value}";
         }
         return $out;
     }

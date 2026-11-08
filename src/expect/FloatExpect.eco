@@ -1,7 +1,10 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
- * Checks on a float. `is` compares exactly; use `near` for anything computed.
+ * Checks on a float. `is` compares exactly; use `near` for anything computed. Values print with
+ * every digit it takes to tell them apart, so `0.1 + 0.2` never reads as `0.3`.
  */
 public class FloatExpect
 {
@@ -22,7 +25,9 @@ public class FloatExpect
             return $this;
         }
 
-        fail("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}");
+        $w = show::float($want);
+        $g = show::float($this->value);
+        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
         return $this;
     }
 
@@ -34,11 +39,12 @@ public class FloatExpect
     {
         Session::checked();
 
-        if ($this->value != $other) {
+        if (!($this->value == $other)) {
             return $this;
         }
 
-        fail("expected anything but {$other}", std::src::caller());
+        $o = show::float($other);
+        fail("expected anything but {$o}", std::src::caller());
         return $this;
     }
 
@@ -54,7 +60,9 @@ public class FloatExpect
             return $this;
         }
 
-        fail("expected more than {$bound}, got {$this->value}", std::src::caller());
+        $b = show::float($bound);
+        $g = show::float($this->value);
+        fail("expected more than {$b}, got {$g}", std::src::caller());
         return $this;
     }
 
@@ -70,7 +78,9 @@ public class FloatExpect
             return $this;
         }
 
-        fail("expected less than {$bound}, got {$this->value}", std::src::caller());
+        $b = show::float($bound);
+        $g = show::float($this->value);
+        fail("expected less than {$b}, got {$g}", std::src::caller());
         return $this;
     }
 
@@ -86,28 +96,50 @@ public class FloatExpect
             return $this;
         }
 
-        fail("expected {$low} to {$high}, got {$this->value}", std::src::caller());
+        $l = show::float($low);
+        $h = show::float($high);
+        $g = show::float($this->value);
+        fail("expected {$l} to {$h}, got {$g}", std::src::caller());
         return $this;
     }
 
     /**
-     * The number is within `$within` of `$want`: `1e-9` unless stated.
+     * The number is close to `$want`: off by no more than `within`, or by no more than `relative`
+     * times the larger magnitude, whichever allows more. Both default to `1e-9`, so a computed
+     * `1e12` passes against its exact value as a computed `0.1` does. Two infinities of one sign
+     * are close; NaN is never close to anything.
      */
     #[caller]
-    public const function near(float64 $want, float64 $within = 0.000000001) : FloatExpect
-    {
+    public const function near(
+        float64 $want,
+        within: float64 $within = 0.000000001,
+        relative: float64 $relative = 0.000000001
+    ) : FloatExpect {
         Session::checked();
 
-        float64 $off = $this->value - $want;
-        if ($off < 0.0) {
-            $off = 0.0 - $off;
-        }
-
-        if ($off <= $within) {
+        if (show::nan($this->value) || show::nan($want)) {
+            $w = show::float($want);
+            $g = show::float($this->value);
+            fail("expected {$w} within {$within}, got {$g}: NaN is never near", std::src::caller());
             return $this;
         }
 
-        fail("expected {$want} within {$within}, got {$this->value} (off by {$off})", std::src::caller());
+        if ($this->value == $want) {
+            return $this;
+        }
+
+        float64 $off = std::math::abs($this->value - $want);
+        float64 $scale = std::math::max(std::math::abs($this->value), std::math::abs($want));
+        float64 $allowed = std::math::max($within, $relative * $scale);
+
+        if ($off <= $allowed) {
+            return $this;
+        }
+
+        $w = show::float($want);
+        $g = show::float($this->value);
+        $o = show::float($off);
+        fail("expected {$w} within {$within}, got {$g} (off by {$o})", std::src::caller());
         return $this;
     }
 }

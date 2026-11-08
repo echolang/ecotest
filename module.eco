@@ -4,7 +4,7 @@
  */
 
 #[module: "ecotest"]
-#[version: "0.2.0"]
+#[version: "0.3.0"]
 #[epm::license: "MIT"]
 #[epm::description: "Expressive checks and test events for echoc test"]
 
@@ -13,15 +13,15 @@
 /*
  * The runner. In a module that requires ecotest it runs as `epm run ecotest --coverage` (epm runs
  * only dependencies' tools); here, as `echoc run --target ecotest -- --coverage`. Its sources are
- * ecotest-tool's (modules/tool, where its tests measure them), and its CLI, JSON and HTTP libraries
- * are compiled into the tool, never into a consumer's tests.
+ * ecotest-tool's (modules/tool, where its tests measure them), compiled on top of ecotest's own:
+ * the tool reads the event protocol, the path rules and the version from them. Its CLI and JSON
+ * libraries are compiled into the tool, never into a consumer's tests.
  */
 #[target: exe { name: "ecotest", entry: "cli/main.eco", public: true }] {
     #[sources: "cli/*.eco"]
     #[sources: "modules/tool/src/**/*.eco"]
     #[requires: "echolang/libcommand" { version: "^0.1", source: git "https://github.com/echolang/libcommand" }]
     #[requires: "echolang/libjson" { version: "^0.1", source: git "https://github.com/echolang/libjson" }]
-    #[requires: "echolang/libcurl" { version: "^1.0", source: git "https://github.com/echolang/libcurl" }]
 }
 
 #[target: test] {

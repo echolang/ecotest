@@ -22,7 +22,7 @@ public class NumberExpect
             return $this;
         }
 
-        fail("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}");
+        fail("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}", $inline: true);
         return $this;
     }
 

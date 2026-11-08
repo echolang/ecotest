@@ -1,6 +1,6 @@
 namespace ecotest;
 
-use ecotest::diff;
+use ecotest::{diff, paths, protocol};
 
 /**
  * Snapshot files. The n-th snapshot a test takes lives at
@@ -33,8 +33,8 @@ internal class Snapshot
         Snapshot::$taken = Snapshot::$taken + 1;
         usize $n = Snapshot::$taken;
 
-        $root = std::env::join(Snapshot::directory($file), '__snapshots__');
-        $folder = std::env::join($root, Snapshot::stem($file));
+        $root = std::env::join(paths::dir($file), '__snapshots__');
+        $folder = std::env::join($root, paths::stem($file));
         $path = std::env::join($folder, "{$name}.{$n}.snap");
 
         $want = guard std::io::readfile($path) else {
@@ -47,7 +47,7 @@ internal class Snapshot
                 fail("cannot write snapshot {$path}: {$e}", $at);
                 return;
             };
-            Event('snapshot-new')->text('path', $path)->at($at)->emit();
+            Event(protocol::SNAPSHOT_NEW)->text('path', $path)->at($at)->emit();
             return;
         };
 
@@ -60,7 +60,7 @@ internal class Snapshot
                 fail("cannot write snapshot {$path}: {$e}", $at);
                 return;
             };
-            Event('snapshot-updated')->text('path', $path)->at($at)->emit();
+            Event(protocol::SNAPSHOT_UPDATED)->text('path', $path)->at($at)->emit();
             return;
         }
 
@@ -97,66 +97,5 @@ internal class Snapshot
     {
         $value = string(std::env::var($name, ''));
         return !$value->empty() && $value != '0';
-    }
-
-    /**
-     * Everything before the last `/` of `$path`, or `.` when there is none.
-     */
-    private static function directory(const string& $path) : string
-    {
-        $cut = guard Snapshot::lastSlash($path) else {
-            return '.';
-        };
-
-        return $path->sub(0, $cut);
-    }
-
-    /**
-     * The file name of `$path` without its extension.
-     */
-    private static function stem(const string& $path) : string
-    {
-        $base = Snapshot::base($path);
-        usize $dot = $base->size();
-        for (usize $i = 0; $i < $base->size(); $i++) {
-            if ($base->byte($i) == 46) {
-                $dot = $i;
-            }
-        }
-
-        return $base->sub(0, $dot);
-    }
-
-    /**
-     * The file name of `$path`: everything after the last `/`, or all of it when there is none.
-     */
-    private static function base(const string& $path) : string
-    {
-        $cut = guard Snapshot::lastSlash($path) else {
-            return $path;
-        };
-
-        return $path->sub($cut + 1, $path->size() - $cut - 1);
-    }
-
-    /**
-     * The index of the last `/` in `$path`, or null when there is none. On Windows a `\` counts
-     * the same.
-     */
-    private static function lastSlash(const string& $path) : usize?
-    {
-        usize? $cut = null;
-        for (usize $i = 0; $i < $path->size(); $i++) {
-            if ($path->byte($i) == 47) {
-                $cut = $i;
-            }
-#[if: os == windows]
-            if ($path->byte($i) == 92) {
-                $cut = $i;
-            }
-#[end]
-        }
-
-        return $cut;
     }
 }

@@ -6,7 +6,8 @@
 
 namespace ecotest::cli::html;
 
-use ecotest::cli::{doc, escape, highlight, text};
+use ecotest::paths;
+use ecotest::cli::{digest, escape, highlight, text};
 
 /**
  * The page for `$run`. The verdict's gates mark the line and branch thresholds on the coverage
@@ -86,7 +87,7 @@ private function side(string& $out, const Run& $run, const array<FileCoverage>& 
                 $tone = 'bad';
             }
             $id = anchor($file);
-            $base = escape::markup(text::base($file->file));
+            $base = escape::markup(paths::base($file->file));
             $out->append("<a class=\"side-link\" href=\"#{$id}\"><span class=\"fname\"><span class=\"dot {$low}\"></span>{$base}</span><span class=\"count {$tone}\">{$r}</span></a>");
         }
         $out->append('</div>');
@@ -168,7 +169,7 @@ private function hero(string& $out, const Run& $run, Totals? $totals, const Verd
     usize $failed = $c->failed();
     usize $skipped = $c->skip;
     usize $flaky = $c->flaky;
-    usize $stopped = $run->stopped();
+    usize $stopped = $verdict->stopped->count();
     $secs = $run->seconds();
 
     $word = 'failed';
@@ -240,8 +241,8 @@ private function hero(string& $out, const Run& $run, Totals? $totals, const Verd
 
     cards($out, $totals, $verdict->gates);
 
-    if ($stopped > 0) {
-        $out->append(callout('Run stopped', "echoc stopped before the tests ran in {$stopped} of {$run->passes} passes."));
+    foreach ($verdict->stopped as const &$reason) {
+        $out->append(callout('Run incomplete', escape::markup($reason)));
     }
     foreach ($verdict->failed as const &$gate) {
         $out->append(callout('Gate failed', escape::markup($gate)));
@@ -348,9 +349,9 @@ private function row(string& $out, const TestRecord& $test) : void
     $out->append("<tr class=\"{$bad}\" data-group=\"{$group}\"><td><span class=\"oc {$test->outcome}\"><i></i>{$test->outcome}</span></td><td><div class=\"tid\"><span>{$suite}</span>{$name}</div>");
 
     if ($test->outcome != Outcome::pass) {
-        $out->append(fault($test->events));
+        $out->append(fault($test));
     }
-    if (!$test->events->skipReason->empty()) {
+    if ($test->events->skipped && !$test->events->skipReason->empty()) {
         $out->append(why($test->events->skipReason));
     }
     foreach ($test->events->notes as const &$note) {
@@ -361,11 +362,11 @@ private function row(string& $out, const TestRecord& $test) : void
 }
 
 /**
- * Where `$events` failed and what they said, or nothing when they did not fail.
+ * Where `$test` stopped and what it said, or nothing when no pass failed.
  */
-private function fault(const Events& $events) : string
+private function fault(const TestRecord& $test) : string
 {
-    $f = guard $events->fault else {
+    $f = guard $test->fault() else {
         return '';
     };
 
@@ -430,7 +431,7 @@ private function ratio(const Ratio& $r, const string& $low) : string
  */
 private function bar(const string& $kind, const Ratio& $r, const string& $low, float64? $min) : string
 {
-    $p = $r->percent();
+    $p = $r->percent() ?? 0.0;
     $out = "<div class=\"{$kind} {$low}\"><i style=\"width: {$p:.1f}%\"></i>";
     $out->append(marker($min));
     $out->append('</div>');
@@ -483,8 +484,8 @@ private function source(string& $out, const FileCoverage& $file, const string& $
     $out->append("<details class=\"code surface\" id=\"{$id}\"><summary class=\"code-head\"><span class=\"code-file\"><svg class=\"chev\" width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 6l6 6-6 6\"></path></svg><span class=\"dot {$low}\"></span>{$name}</span>");
     $out->append("<span class=\"code-stats\"><span>lines <b class=\"{$low}\">{$lines}</b></span><span>{$missed} missed</span></span></summary><div class=\"rows\"><div class=\"rows-inner\">");
 
-    // a source gone since the run shows empty
-    $text = doc::read($file->path) ?? '';
+    // the source as the run measured it, kept with its coverage: never today's file
+    const string& $text = $file->source;
     $words = highlight::WORDS;
     int64 $number = 0;
 
@@ -523,11 +524,12 @@ private function low(const Ratio& $r, float64? $min) : string
 }
 
 /**
- * The id a file's source view carries, safe in an attribute and a URL fragment.
+ * The id a file's source view carries, safe in an attribute and a URL fragment, and unique on the
+ * page: two modules' `src/a.eco`, or `a-b.eco` beside `a_b.eco`, get different ones.
  */
 private function anchor(const FileCoverage& $file) : string
 {
-    $key = slug($file->file);
+    $key = digest::fnv($file->path);
     return "file-{$key}";
 }
 

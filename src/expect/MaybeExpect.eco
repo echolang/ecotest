@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
  * Checks on a `T?`. `some()` hands back the value and stops the test when there is none, even
  * inside `soft()`.
@@ -35,12 +37,15 @@ public class MaybeExpect<T>
         Session::checked();
 
         $got = guard $this->value else {
-            fail("expected {$want}, got null", std::src::caller(), $expected: "{$want}", $actual: 'null');
+            $w = show::item($want);
+            fail("expected {$w}, got null", std::src::caller(), $expected: $w, $actual: 'null', $inline: true);
             return $this;
         };
 
         if (!($got == $want)) {
-            fail("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}");
+            $w = show::item($want);
+            $g = show::item($got);
+            fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
         }
 
         return $this;

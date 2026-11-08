@@ -1,11 +1,15 @@
 namespace ecotest::cli;
 
 /**
- * One counter echoc planted: where it is and what it counts (`fn`, `line` or `branch`, with the
- * branch edge such as `then` or `arm`).
+ * One counter echoc planted: its index among the module's counts, where it is, and what it counts
+ * (`fn`, `line` or `branch`, with the branch edge such as `then` or `arm`).
  */
 public struct CoverageSite
 {
+    /**
+     * Where the counter's count sits in a test's counts for the module.
+     */
+    public usize $local;
     public string $file;
     public int64 $line;
     public int64 $column;

@@ -41,7 +41,7 @@ test unsigned_failures_name_both_values
 test float_failures_name_both_values
 {
     $got = summaries(function() : void {
-        expect(1.5)->is(2.5)->isNot(1.5)->above(5.0)->below(0.0)->between(2.0, 3.0)->near(1.0, $within: 0.25);
+        expect(1.5)->is(2.5)->isNot(1.5)->above(5.0)->below(0.0)->between(2.0, 3.0)->near(1.0, within: 0.25);
     });
 
     expect($got)->is([
@@ -107,9 +107,9 @@ test list_failures_point_at_the_item
         'expected no items, got 3',
         'expected the list to contain 9',
         'expected the list not to contain 2, found at index 1',
-        'expected ascending order, item 1 comes before item 0',
-        'item 0 failed the test',
-        'item 0 is not big',
+        'expected ascending order, item 1 (1) is less than item 0 (3)',
+        'item 0 (1) failed the test',
+        'item 0 (1) is not big',
         'no item passed the test',
         'no item is huge',
         'expected the same items in any order, 3 is missing',
@@ -143,9 +143,9 @@ test map_failures_name_the_key
     });
 
     expect($got)->is([
-        'expected key b',
-        'expected key b',
-        'at a: expected 2, got 1',
+        "expected key 'b'",
+        "expected key 'b'",
+        "at 'a': expected 2, got 1",
         'expected 3 keys, got 1',
         'expected no keys, got 1',
         'maps differ (- missing, + extra, ~ changed)',
@@ -237,8 +237,8 @@ test call_failures_count_the_calls
         'expected 2 calls, got 1',
         'expected no calls, got 1',
         'expected a call number 3, only 1 were made',
-        'call 0: expected b, got a',
-        'expected a call with z among 1 calls',
+        "call 0: expected 'b', got 'a'",
+        "expected a call with 'z' among 1 calls",
     ]);
 }
 
@@ -279,4 +279,84 @@ test a_fake_never_called_passes_never
 {
     $calls = Calls<string>();
     expect($calls)->never()->times(0);
+}
+
+test floats_that_print_alike_show_every_digit
+{
+    $got = summaries(function() : void {
+        expect(0.1 + 0.2)->is(0.3);
+    });
+
+    expect($got)->is(['expected 0.3, got 0.30000000000000004']);
+}
+
+test near_allows_a_relative_error_for_large_values
+{
+    expect(1000000000000.0 + 0.001)->near(1000000000000.0);
+
+    $got = summaries(function() : void {
+        expect(1.0 + 0.001)->near(1.0);
+        expect(0.0 / 0.0)->near(1.0);
+    });
+
+    expect($got->count())->is(2);
+    expect($got[0])->starts('expected 1 within 1e-09, got 1.001');
+    expect($got[1])->has('NaN is never near');
+}
+
+test long_texts_show_where_they_part
+{
+    $base = str::repeat('x', 300);
+    $want = str::concat($base, 'tail-a');
+    $got = str::concat($base, 'tail-b');
+
+    $failed = ecotest::caught(function() : void {
+        expect($got)->is($want);
+    });
+
+    expect($failed[0]->summary)->starts('texts part at byte 305: ')->has("tail-a'")->has("tail-b'");
+}
+
+test a_diff_shows_what_cannot_be_seen
+{
+    $failed = ecotest::caught(function() : void {
+        expect("a\r\nb \nc")->is("a\nb\nc");
+    });
+
+    expect($failed[0]->detail)->has('+ a\\r')->has('+ b·');
+}
+
+test a_cut_never_splits_a_character
+{
+    $long = str::repeat('é', 100);
+    $shown = ecotest::show::text($long);
+    $cut = ecotest::show::cut($long);
+
+    expect(ecotest::jsonl::quote($shown))->lacks('\\ufffd');
+    expect(ecotest::jsonl::quote($cut))->lacks('\\ufffd');
+}
+
+test an_event_line_is_valid_utf8_whatever_the_test_printed
+{
+    string $broken = 'a';
+    $broken->push(255);
+    $broken->append('b');
+
+    expect(ecotest::jsonl::quote($broken))->is('"a\\ufffdb"');
+    expect(ecotest::jsonl::quote('ä€😀'))->is('"ä€😀"');
+}
+
+test a_summary_that_names_both_values_says_them_once
+{
+    $f = ecotest::Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2', $inline: true);
+    $g = ecotest::Failure('lists differ: 1 vs 2', std::src::here(), $expected: '1', $actual: '2');
+
+    expect("{$f}")->is('expected 1, got 2');
+    expect("{$g}")->is("lists differ: 1 vs 2\n  expected: 1\n       got: 2");
+}
+
+test nan_differs_from_everything
+{
+    float64 $nan = 0.0 / 0.0;
+    expect($nan)->isNot(1.0)->isNot($nan);
 }

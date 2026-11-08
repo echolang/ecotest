@@ -41,16 +41,22 @@ public class ListExpect<T>
         } else if ($k == $m) {
             $summary = "expected {$n} items, got {$m}: missing items from index {$k}";
         } else {
-            $w = $want[$k];
-            $g = $this->value[$k];
+            $w = show::item($want[$k]);
+            $g = show::item($this->value[$k]);
             $summary = "lists differ at index {$k}: expected {$w}, got {$g}";
+        }
+
+        // both lists from a little before where they part, so the difference is on screen
+        usize $from = 0;
+        if ($k > 2) {
+            $from = $k - 2;
         }
 
         fail(
             $summary,
             std::src::caller(),
-            $expected: $this->show($want),
-            $actual: $this->show($this->value)
+            $expected: $this->show($want, $from),
+            $actual: $this->show($this->value, $from)
         );
         return $this;
     }
@@ -103,7 +109,8 @@ public class ListExpect<T>
             }
         }
 
-        fail("expected the list to contain {$item}", std::src::caller(), $actual: $this->show($this->value));
+        $i = show::item($item);
+        fail("expected the list to contain {$i}", std::src::caller(), $actual: $this->show($this->value));
         return $this;
     }
 
@@ -117,7 +124,8 @@ public class ListExpect<T>
 
         for (usize $k = 0; $k < $this->value->count(); $k++) {
             if ($this->value[$k] == $item) {
-                fail("expected the list not to contain {$item}, found at index {$k}", std::src::caller());
+                $i = show::item($item);
+                fail("expected the list not to contain {$i}, found at index {$k}", std::src::caller());
                 return $this;
             }
         }
@@ -135,9 +143,10 @@ public class ListExpect<T>
 
         for (usize $k = 0; $k < $this->value->count(); $k++) {
             if (!$test($this->value[$k])) {
-                string $summary = "item {$k} failed the test";
+                $i = show::item($this->value[$k]);
+                string $summary = "item {$k} ({$i}) failed the test";
                 if (!$what->empty()) {
-                    $summary = "item {$k} is not {$what}";
+                    $summary = "item {$k} ({$i}) is not {$what}";
                 }
 
                 fail($summary, std::src::caller());
@@ -182,7 +191,9 @@ public class ListExpect<T>
         for (usize $k = 1; $k < $this->value->count(); $k++) {
             if ($this->value[$k] < $this->value[$k - 1]) {
                 usize $before = $k - 1;
-                fail("expected ascending order, item {$k} comes before item {$before}", std::src::caller());
+                $a = show::item($this->value[$before]);
+                $b = show::item($this->value[$k]);
+                fail("expected ascending order, item {$k} ({$b}) is less than item {$before} ({$a})", std::src::caller());
                 return $this;
             }
         }
@@ -215,8 +226,9 @@ public class ListExpect<T>
             }
 
             if (!$found) {
+                $i = show::item($item);
                 fail(
-                    "expected the same items in any order, {$item} is missing",
+                    "expected the same items in any order, {$i} is missing",
                     std::src::caller(),
                     $expected: $this->show($want),
                     $actual: $this->show($this->value)
@@ -227,9 +239,9 @@ public class ListExpect<T>
 
         for (usize $k = 0; $k < $this->value->count(); $k++) {
             if (!$used[$k]) {
-                $item = $this->value[$k];
+                $i = show::item($this->value[$k]);
                 fail(
-                    "expected the same items in any order, {$item} is extra",
+                    "expected the same items in any order, {$i} is extra",
                     std::src::caller(),
                     $expected: $this->show($want),
                     $actual: $this->show($this->value)
@@ -242,13 +254,17 @@ public class ListExpect<T>
     }
 
     /**
-     * `$items` as `[a, b, c]`, ending in `, ...]` once a line is full.
+     * `$items` as `[a, b, c]` from index `$from` on, starting `[..., ` when that is not the first
+     * and ending in `, ...]` once a line is full.
      */
-    private const function show(const array<T>& $items) : string
+    private const function show(const array<T>& $items, usize $from = 0) : string
     {
         string $out = '[';
+        if ($from > 0) {
+            $out->append('...');
+        }
 
-        for (usize $k = 0; $k < $items->count(); $k++) {
+        for (usize $k = $from; $k < $items->count(); $k++) {
             if ($k > 0) {
                 $out->append(', ');
             }
@@ -258,8 +274,7 @@ public class ListExpect<T>
                 break;
             }
 
-            $item = $items[$k];
-            $out->append("{$item}");
+            $out->append(show::item($items[$k]));
         }
 
         $out->append(']');

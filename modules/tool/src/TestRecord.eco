@@ -1,5 +1,7 @@
 namespace ecotest::cli;
 
+use ecotest::protocol;
+
 /**
  * Everything known about one test after a run: echoc's report rows, one per pass, and the events
  * the test wrote through ecotest.
@@ -9,8 +11,8 @@ public class TestRecord
     public const string $id;
 
     /**
-     * The id in file-name form, as `slug` writes it. echoc names the test's coverage file this way
-     * and ecotest its event file, so all three join on it.
+     * The id in file-name form, as `ecotest::protocol::key` writes it. echoc names the test's
+     * coverage file this way and ecotest its event file, so all three join on it.
      */
     public const string $key;
     public string $module = '';
@@ -37,7 +39,7 @@ public class TestRecord
     public constructor(const string& $id)
     {
         $this->id = $id;
-        $this->key = slug($id);
+        $this->key = protocol::key($id);
     }
 
     /**
@@ -110,6 +112,24 @@ public class TestRecord
     }
 
     /**
+     * Where the test stopped: in its last pass, or for a flaky test in the last pass that broke, so
+     * a test that failed once is never reported without why. Null when no pass failed.
+     */
+    public const function fault() : Fault?
+    {
+        if ($this->outcome == Outcome::flaky) {
+            for (usize $i = $this->attempts->count(); $i > 0; $i--) {
+                const Attempt& $attempt = $this->attempts[$i - 1];
+                if ($attempt->outcome->broken()) {
+                    return $attempt->fault;
+                }
+            }
+        }
+
+        return $this->events->fault;
+    }
+
+    /**
      * True for a passing test that used ecotest and checked nothing through it.
      */
     public const function silent() : bool
@@ -123,7 +143,7 @@ public class TestRecord
      */
     public function settle() : void
     {
-        if (!$this->events->skipReason->empty()) {
+        if ($this->events->skipped) {
             $this->outcome = .skip;
             return;
         }
@@ -150,29 +170,4 @@ public class TestRecord
 
         $this->outcome = $this->attempts[$this->attempts->count() - 1]->outcome;
     }
-}
-
-/**
- * `$text` safe as a file name: every byte outside `[A-Za-z0-9_.-]` becomes `_`. A test's key, and
- * the anchor of a file in the HTML report.
- */
-public function slug(const string& $text) : string
-{
-    $out = '';
-
-    for (usize $i = 0; $i < $text->size(); $i++) {
-        uint8 $b = $text->byte($i);
-        $plain = ($b >= 97 && $b <= 122)
-            || ($b >= 65 && $b <= 90)
-            || ($b >= 48 && $b <= 57)
-            || $b == 95 || $b == 45 || $b == 46;
-
-        if ($plain) {
-            $out->push($b);
-        } else {
-            $out->push(95);
-        }
-    }
-
-    return $out;
 }

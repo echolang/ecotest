@@ -14,10 +14,7 @@ public function from(const ecotest::Failure& $failure) : string
 {
     string $out = $failure->summary;
 
-    // a summary that already quotes both values says it once
-    bool $quoted = $failure->summary->contains($failure->expected) && $failure->summary->contains($failure->actual);
-
-    if ((!$failure->expected->empty() || !$failure->actual->empty()) && !$quoted) {
+    if ((!$failure->expected->empty() || !$failure->actual->empty()) && !$failure->inline) {
         $out->append("\n  expected: {$failure->expected}");
         $out->append("\n       got: {$failure->actual}");
     }

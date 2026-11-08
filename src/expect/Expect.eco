@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
  * Checks on any other value: your structs, classes and enums. Reached through the labelled
  * `expect(value: $x)`, because an unlabelled catch-all would leave `expect($list)` with two equally
@@ -24,8 +26,9 @@ public class Expect<T>
             return $this;
         }
 
-        $got = $this->value;
-        fail("expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}");
+        $w = show::item($want);
+        $g = show::item($this->value);
+        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
         return $this;
     }
 
@@ -41,7 +44,8 @@ public class Expect<T>
             return $this;
         }
 
-        fail("expected anything but {$other}", std::src::caller());
+        $o = show::item($other);
+        fail("expected anything but {$o}", std::src::caller());
         return $this;
     }
 
@@ -57,13 +61,13 @@ public class Expect<T>
             return $this;
         }
 
-        $got = $this->value;
+        $got = show::item($this->value);
         string $summary = "{$got} failed the test";
         if (!$what->empty()) {
             $summary = "expected {$what}, got {$got}";
         }
 
-        fail($summary, std::src::caller(), $actual: "{$got}");
+        fail($summary, std::src::caller(), $actual: $got, $inline: true);
         return $this;
     }
 }

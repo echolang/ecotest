@@ -1,0 +1,24 @@
+use ecotest::{expect, protocol, Event};
+
+test the_key_is_echocs_coverage_file_rule
+{
+    expect(protocol::key('mylib/date.eco::parses_iso'))->is('mylib_date.eco__parses_iso');
+    expect(protocol::key('a b-c.d_e'))->is('a_b-c.d_e');
+}
+
+test every_event_carries_the_version
+{
+    $event = Event(protocol::NOTE)->text('text', 'hi');
+    expect("{$event}")->starts('{"v":1,"type":"note"');
+}
+
+test a_service_variable_is_upper_case
+{
+    expect(protocol::serviceVar('api'))->is('ECOTEST_API_URL');
+    expect(protocol::serviceVar('my-db.2'))->is('ECOTEST_MY_DB_2_URL');
+}
+
+test the_version_is_the_manifests
+{
+    expect(ecotest::version())->is('0.3.0');
+}

@@ -1,0 +1,214 @@
+namespace ecotest::cli;
+
+use ecotest::paths;
+use ecotest::cli::{doc, files};
+
+/**
+ * Where runs live: `.ecotest/run-<millis>/` in the project. A run counts once it finished, which
+ * its `run.json` says, written last; one interrupted or killed is left out of `latest` and of every
+ * query. `coverage-run` names the last finished run that measured the whole suite's coverage, the
+ * one `who`, `api` and `affected` read, so a filtered run never narrows what they see.
+ */
+public class Store
+{
+    public const string $root;
+
+    public constructor(const string& $root)
+    {
+        $this->root = $root;
+    }
+
+    /**
+     * A fresh run directory, named for now and never one that exists.
+     */
+    public function create() : result<string, StoreError>
+    {
+        int64 $stamp = std::time::timestamp::now()->unix_millis();
+
+        while (true) {
+            $dir = $this->dir($stamp);
+            if (!std::io::exists($dir)->or(false)) {
+                guard paths::mkdirs($dir) else ($e) {
+                    return .error(.cannotWrite($dir, $e));
+                };
+                return .ok($dir);
+            }
+            $stamp++;
+        }
+
+        return .error(.missing($this->root));
+    }
+
+    /**
+     * True when the run at `$dir` finished.
+     */
+    public static function finished(const string& $dir) : bool
+    {
+        $text = guard doc::read(std::env::join($dir, 'run.json')) else {
+            return false;
+        };
+        $parsed = guard json::parse($text) else {
+            return false;
+        };
+        return doc::object($parsed, 'complete')->asBool() ?? false;
+    }
+
+    /**
+     * The run `$given` names, or the newest finished one when it names none.
+     */
+    public const function open(const string& $given) : result<string, StoreError>
+    {
+        if ($given->empty()) {
+            $newest = guard $this->latest() else {
+                return .error(.missing($this->root));
+            };
+            return .ok($newest);
+        }
+
+        if (!std::io::exists($given)->or(false)) {
+            return .error(.missing($given));
+        }
+        if (!Store::finished($given)) {
+            return .error(.unfinished($given));
+        }
+        return .ok($given);
+    }
+
+    /**
+     * Every finished run, oldest first.
+     */
+    public const function runs() : array<string>
+    {
+        array<string> $out = [];
+        foreach ($this->stamps() as $stamp) {
+            $dir = $this->dir($stamp);
+            if (Store::finished($dir)) {
+                $out[] = $dir;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The newest finished run, or null.
+     */
+    public const function latest() : string?
+    {
+        $stamps = $this->stamps();
+        for (usize $i = $stamps->count(); $i > 0; $i--) {
+            $dir = $this->dir($stamps[$i - 1]);
+            if (Store::finished($dir)) {
+                return $dir;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The run the queries read: the last finished run with coverage of every test.
+     */
+    public const function covered() : result<string, StoreError>
+    {
+        $text = guard doc::read(std::env::join($this->root, 'coverage-run')) else {
+            return .error(.noCoverage($this->root));
+        };
+        $dir = str::trim($text)->clone();
+        if (!Store::finished($dir)) {
+            return .error(.noCoverage($this->root));
+        }
+        return .ok($dir);
+    }
+
+    /**
+     * Makes `$dir` the run the queries read.
+     */
+    public function point(const string& $dir) : status<StoreError>
+    {
+        $path = std::env::join($this->root, 'coverage-run');
+        guard files::seal($path, $dir) else ($e) {
+            return .error(.cannotWrite($path, $e));
+        };
+        return .ok;
+    }
+
+    /**
+     * Removes all but the newest `$keep` finished runs, sparing the one the queries read and
+     * `$current`. A run that never finished goes once it is older than every run kept, so one
+     * still running beside this one is left alone. Answers what was removed.
+     */
+    public function prune(usize $keep, const string& $current) : array<string>
+    {
+        array<string> $gone = [];
+        array<int64> $done = [];
+        array<int64> $open = [];
+        foreach ($this->stamps() as $stamp) {
+            if (Store::finished($this->dir($stamp))) {
+                $done[] = $stamp;
+            } else {
+                $open[] = $stamp;
+            }
+        }
+
+        if ($done->count() <= $keep) {
+            return $gone;
+        }
+
+        $pointed = $this->covered()->or('');
+        usize $drop = $done->count() - $keep;
+        for (usize $i = 0; $i < $drop; $i++) {
+            $dir = $this->dir($done[$i]);
+            if ($dir == $pointed || $dir == $current) {
+                continue;
+            }
+            if (paths::removeTree($dir)) {
+                $gone[] = $dir;
+            }
+        }
+
+        // an unfinished run older than the oldest kept one is abandoned
+        int64 $bound = $done[$drop];
+        foreach ($open as $stamp) {
+            $dir = $this->dir($stamp);
+            if ($stamp < $bound && $dir != $current && paths::removeTree($dir)) {
+                $gone[] = $dir;
+            }
+        }
+
+        return $gone;
+    }
+
+    /**
+     * The number of every `run-<n>` directory, finished or not, by number: run-999 is older than
+     * run-1000.
+     */
+    private const function stamps() : array<int64>
+    {
+        array<int64> $stamps = [];
+
+        $listing = guard std::io::opendir($this->root) else {
+            return $stamps;
+        };
+        foreach ($listing as const &$entry) {
+            $name = $entry->name();
+            if (!$entry->is_directory() || !$name->starts('run-')) {
+                continue;
+            }
+            $stamp = guard str::int($name->sub(4, $name->size() - 4)) else {
+                continue;
+            };
+            $stamps[] = $stamp;
+        }
+        $listing->close();
+
+        $stamps->sort();
+        return $stamps;
+    }
+
+    /**
+     * The directory of run `$stamp`.
+     */
+    private const function dir(int64 $stamp) : string
+    {
+        return std::env::join($this->root, "run-{$stamp}");
+    }
+}

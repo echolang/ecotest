@@ -1,91 +1,137 @@
 namespace ecotest::gen;
 
-use ecotest::{Gen, Pair, Random};
-use ecotest::show;
+use ecotest::{Draws, Gen, Pair};
+use ecotest::{show, utf8};
+
+/**
+ * An integer in `[$low, $high]` from one answer, where answer 0 is `$target` and larger answers
+ * step away from it on alternating sides: target, +1, -1, +2, -2, and on along the longer side
+ * once the shorter one runs out. Recording favours the target, its neighbours and both ends.
+ */
+internal function zigzag(Draws& $d, int64 $low, int64 $high, int64 $target) : int64
+{
+    // wrapping subtraction: the spans fit an unsigned 64-bit number even for the full range
+    uint64 $up = ($high - $target) as uint64;
+    uint64 $down = ($target - $low) as uint64;
+    uint64 $span = $up + $down;
+
+    uint64 $m = $up;
+    if ($down < $up) {
+        $m = $down;
+    }
+
+    array<uint64> $edges = [0, 1, 2, $span];
+    if ($m > 0) {
+        if ($m == $up) {
+            $edges[] = $m * 2 - 1;
+        } else {
+            $edges[] = $m * 2;
+        }
+    }
+
+    uint64 $c = $d->draw($span, $edges);
+
+    if ($c == 0) {
+        return $target;
+    }
+
+    if ($c <= $m * 2) {
+        uint64 $k = ($c + 1) / 2;
+        if ($c % 2 == 1) {
+            return $target + ($k as int64);
+        }
+        return $target - ($k as int64);
+    }
+
+    uint64 $far = $c - $m;
+    if ($up > $down) {
+        return $target + ($far as int64);
+    }
+    return $target - ($far as int64);
+}
 
 /**
  * Integers in `[$low, $high]`. A failing one shrinks towards 0, or towards the end of the range
- * nearest to it.
+ * nearest to it. Both ends come up far more often than chance.
  */
 public function ints(int64 $low, int64 $high) : Gen<int64>
 {
+    int64 $target = 0;
+    if ($low > 0) {
+        $target = $low;
+    }
+    if ($high < 0) {
+        $target = $high;
+    }
+
     return Gen<int64>(
-        (Random& $r) => $r->range($low, $high),
-        function(const int64& $v) : array<int64> {
-            int64 $target = 0;
-            if ($low > 0) {
-                $target = $low;
+        function(Draws& $d) : int64 {
+            if ($high <= $low) {
+                return $low;
             }
-            if ($high < 0) {
-                $target = $high;
-            }
-
-            array<int64> $out = [];
-            if ($v == $target) {
-                return $out;
-            }
-
-            $out[] = $target;
-
-            int64 $half = $target + ($v - $target) / 2;
-            if ($half != $v && $half != $target) {
-                $out[] = $half;
-            }
-
-            int64 $step = $v - 1;
-            if ($v < $target) {
-                $step = $v + 1;
-            }
-            if ($step != $target && $step != $half) {
-                $out[] = $step;
-            }
-
-            return $out;
+            return zigzag($d, $low, $high, $target);
         },
         (const int64& $v) => "{$v}"
     );
 }
 
 /**
- * Floats in `[$low, $high)`. A failing one shrinks towards 0 and towards whole numbers.
+ * Floats in `[$low, $high)`. A failing one shrinks towards a whole number near 0, then towards
+ * no fraction at all.
  */
 public function floats(float64 $low, float64 $high) : Gen<float64>
 {
     return Gen<float64>(
-        (Random& $r) => $low + $r->unit() * ($high - $low),
-        function(const float64& $v) : array<float64> {
-            float64 $target = 0.0;
-            if ($low > 0.0) {
-                $target = $low;
-            }
-            if ($high < 0.0) {
-                $target = $high;
+        function(Draws& $d) : float64 {
+            if (!($high > $low)) {
+                return $low;
             }
 
-            array<float64> $out = [];
-            if ($v == $target) {
-                return $out;
+            // past 2^52 a float has no fraction to draw: spread one answer over the range
+            float64 $limit = 4503599627370496.0;
+            bool $small = $low > 0.0 - $limit && $high < $limit;
+            int64 $first = std::math::floor($low) as int64;
+            int64 $last = std::math::ceil($high) as int64 - 1;
+
+            if (!$small || $last < $first) {
+                uint64 $c = $d->draw(9007199254740991, [0]);
+                float64 $v = $low + (($c as float64) / 9007199254740992.0) * ($high - $low);
+                if ($v >= $high) {
+                    return $low;
+                }
+                return $v;
             }
 
-            $out[] = $target;
-
-            float64 $whole = ($v as int64) as float64;
-            if ($whole != $v && $whole >= $low && $whole < $high) {
-                $out[] = $whole;
+            int64 $target = 0;
+            if ($first > 0) {
+                $target = $first;
+            }
+            if ($last < 0) {
+                $target = $last;
             }
 
-            float64 $half = $target + ($v - $target) / 2.0;
-            float64 $gap = $half - $v;
-            if ($gap < 0.0) {
-                $gap = 0.0 - $gap;
-            }
-            if ($gap > 0.000001) {
-                $out[] = $half;
+            int64 $whole = $target;
+            if ($last > $first) {
+                $whole = zigzag($d, $first, $last, $target);
             }
 
-            return $out;
+            uint64 $c = $d->draw(4294967295, [0]);
+            float64 $part = ($c as float64) / 4294967296.0;
+            float64 $v = ($whole as float64) + $part;
+
+            if ($v < $low) {
+                // the bit of the range below its first whole number
+                return $low + $part * (std::math::ceil($low) - $low);
+            }
+            if ($v >= $high) {
+                if (($whole as float64) >= $low) {
+                    return $whole as float64;
+                }
+                return $low;
+            }
+            return $v;
         },
-        (const float64& $v) => "{$v}"
+        (const float64& $v) => show::float($v)
     );
 }
 
@@ -95,14 +141,7 @@ public function floats(float64 $low, float64 $high) : Gen<float64>
 public function bools() : Gen<bool>
 {
     return Gen<bool>(
-        (Random& $r) => ($r->next() & 1) == 1,
-        function(const bool& $v) : array<bool> {
-            array<bool> $out = [];
-            if ($v) {
-                $out[] = false;
-            }
-            return $out;
-        },
+        (Draws& $d) => $d->draw(1) == 1,
         function(const bool& $v) : string {
             if ($v) {
                 return 'true';
@@ -113,52 +152,27 @@ public function bools() : Gen<bool>
 }
 
 /**
- * Strings of up to `max` bytes drawn from `alphabet`. A failing one shrinks by dropping bytes and
- * by replacing them with the first byte of the alphabet.
+ * Strings of up to `max` characters drawn from `alphabet`, which is read as UTF-8 characters, not
+ * bytes, so every string it makes is valid UTF-8. A failing one shrinks by dropping characters and
+ * by moving each one towards the start of the alphabet.
  */
-public function text(alphabet: string $alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789 ', max: usize $max = 32) : Gen<string>
+public function text(alphabet: const string& $alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789 ', max: usize $max = 32) : Gen<string>
 {
+    $characters = utf8::characters($alphabet);
+
     return Gen<string>(
-        function(Random& $r) : string {
+        function(Draws& $d) : string {
             string $out = '';
-            usize $n = $r->below(($max + 1) as uint64) as usize;
-
-            for (usize $i = 0; $i < $n && !$alphabet->empty(); $i++) {
-                usize $at = $r->below($alphabet->size() as uint64) as usize;
-                $out->push($alphabet->byte($at));
-            }
-
-            return $out;
-        },
-        function(const string& $v) : array<string> {
-            array<string> $out = [];
-            if ($v->empty()) {
+            if ($characters->empty()) {
                 return $out;
             }
 
-            $out[] = '';
-            if ($v->size() > 1) {
-                $out[] = $v->sub(0, $v->size() / 2);
+            usize $n = 0;
+            uint64 $last = ($characters->count() - 1) as uint64;
+            while ($d->more($n, $max)) {
+                $out->append($characters[$d->draw($last, [0]) as usize]);
+                $n++;
             }
-
-            for (usize $i = 0; $i < $v->size() && $i < 16; $i++) {
-                string $dropped = $v->sub(0, $i);
-                $dropped->append($v->sub($i + 1, $v->size() - $i - 1));
-                $out[] = mv $dropped;
-            }
-
-            if (!$alphabet->empty()) {
-                uint8 $simplest = $alphabet->byte(0);
-                for (usize $i = 0; $i < $v->size() && $i < 16; $i++) {
-                    if ($v->byte($i) != $simplest) {
-                        string $plain = $v->sub(0, $i);
-                        $plain->push($simplest);
-                        $plain->append($v->sub($i + 1, $v->size() - $i - 1));
-                        $out[] = mv $plain;
-                    }
-                }
-            }
-
             return $out;
         },
         (const string& $v) => show::text($v)
@@ -166,64 +180,17 @@ public function text(alphabet: string $alphabet = 'abcdefghijklmnopqrstuvwxyz012
 }
 
 /**
- * Lists of up to `max` items from `$item`. A failing one shrinks by dropping halves and single
- * items, then by shrinking an item in place.
+ * Lists of up to `max` items from `$item`. A failing one shrinks by dropping items and by
+ * shrinking the items that are left.
  */
 public function lists<T>(Gen<T> $item, max: usize $max = 16) : Gen<array<T>>
 {
     return Gen<array<T>>(
-        function(Random& $r) : array<T> {
-            usize $n = $r->below(($max + 1) as uint64) as usize;
-            $out = arr::room<T>($n);
-
-            for (usize $i = 0; $i < $n; $i++) {
-                $out[] = $item->make($r);
+        function(Draws& $d) : array<T> {
+            array<T> $out = [];
+            while ($d->more($out->count(), $max)) {
+                $out[] = $item->draw($d);
             }
-
-            return $out;
-        },
-        function(const array<T>& $v) : array<array<T>> {
-            array<array<T>> $out = [];
-            usize $n = $v->count();
-            if ($n == 0) {
-                return $out;
-            }
-
-            $out[] = [];
-
-            if ($n > 1) {
-                array<T> $front = [];
-                array<T> $back = [];
-                for (usize $i = 0; $i < $n; $i++) {
-                    if ($i < $n / 2) {
-                        $front[] = $v[$i];
-                    } else {
-                        $back[] = $v[$i];
-                    }
-                }
-                $out[] = mv $front;
-                $out[] = mv $back;
-            }
-
-            for (usize $skip = 0; $skip < $n && $skip < 16; $skip++) {
-                array<T> $fewer = [];
-                for (usize $i = 0; $i < $n; $i++) {
-                    if ($i != $skip) {
-                        $fewer[] = $v[$i];
-                    }
-                }
-                $out[] = mv $fewer;
-            }
-
-            for (usize $i = 0; $i < $n && $i < 8; $i++) {
-                $smaller = $item->shrink($v[$i]);
-                if (!$smaller->empty()) {
-                    array<T> $changed = $v;
-                    $changed[$i] = $smaller[0];
-                    $out[] = mv $changed;
-                }
-            }
-
             return $out;
         },
         function(const array<T>& $v) : string {
@@ -241,8 +208,8 @@ public function lists<T>(Gen<T> $item, max: usize $max = 16) : Gen<array<T>>
 }
 
 /**
- * One of `$items`. A failing one shrinks towards the items listed before it. Needs `==` and
- * `str::from` on `T`.
+ * One of `$items`. A failing one shrinks towards the items listed before it. Needs `str::from` on
+ * `T`.
  */
 public function pick<T>(array<T> $items) : Gen<T>
 {
@@ -251,41 +218,43 @@ public function pick<T>(array<T> $items) : Gen<T>
         die('gen::pick needs at least one item');
     }
 
+    uint64 $last = ($items->count() - 1) as uint64;
+
     return Gen<T>(
-        (Random& $r) => $items[$r->below($items->count() as uint64) as usize],
-        function(const T& $v) : array<T> {
-            array<T> $out = [];
-            for (usize $i = 0; $i < $items->count(); $i++) {
-                if ($items[$i] == $v) {
-                    break;
-                }
-                $out[] = $items[$i];
-            }
-            return $out;
-        },
-        (const T& $v) => "{$v}"
+        (Draws& $d) => $items[$d->draw($last, [0, $last]) as usize],
+        (const T& $v) => show::item($v)
     );
 }
 
 /**
- * A pair of independent values. A failing pair shrinks one side at a time.
+ * A value from one of `$gens`, chosen at random. A failing one shrinks towards the generators
+ * listed first. Printed by the first generator.
+ */
+public function oneOf<T>(array<Gen<T>> $gens) : Gen<T>
+{
+    if ($gens->empty()) {
+        die('gen::oneOf needs at least one generator');
+    }
+
+    uint64 $last = ($gens->count() - 1) as uint64;
+    $first = $gens[0];
+
+    return Gen<T>(
+        (Draws& $d) => $gens[$d->draw($last) as usize]->draw($d),
+        (const T& $v) => $first->show($v)
+    );
+}
+
+/**
+ * A pair of independent values.
  */
 public function pairs<A, B>(Gen<A> $first, Gen<B> $second) : Gen<Pair<A, B>>
 {
     return Gen<Pair<A, B>>(
-        (Random& $r) => Pair<A, B>($first->make($r), $second->make($r)),
-        function(const Pair<A, B>& $v) : array<Pair<A, B>> {
-            array<Pair<A, B>> $out = [];
-
-            foreach ($first->shrink($v->first) as const &$a) {
-                $out[] = Pair<A, B>($a, $v->second);
-            }
-
-            foreach ($second->shrink($v->second) as const &$b) {
-                $out[] = Pair<A, B>($v->first, $b);
-            }
-
-            return $out;
+        function(Draws& $d) : Pair<A, B> {
+            $a = $first->draw($d);
+            $b = $second->draw($d);
+            return Pair<A, B>(mv $a, mv $b);
         },
         function(const Pair<A, B>& $v) : string {
             $a = $first->show($v->first);
@@ -296,17 +265,69 @@ public function pairs<A, B>(Gen<A> $first, Gen<B> $second) : Gen<Pair<A, B>>
 }
 
 /**
- * Values of `$from` passed through `$into`. Shown through `str::from` on `U`; a failure is
- * reported as it was generated, since a mapped value cannot be shrunk back.
+ * Values of `$from` passed through `$into`. Shrinks as `$from` does, since shrinking works on the
+ * answers the value was made from. Printed through `str::from` on `U`.
  */
 public function map<T, U>(Gen<T> $from, function<U(const T&)> $into) : Gen<U>
 {
+    return map($from, $into, show: (const U& $v) => show::item($v));
+}
+
+/**
+ * `map` for a `U` without `str::from`, printed by `$show`.
+ */
+public function map<T, U>(Gen<T> $from, function<U(const T&)> $into, show: function<string(const U&)> $show) : Gen<U>
+{
     return Gen<U>(
-        (Random& $r) => $into($from->make($r)),
-        function(const U& $v) : array<U> {
-            array<U> $none = [];
-            return $none;
+        (Draws& $d) => $into($from->draw($d)),
+        $show
+    );
+}
+
+/**
+ * Values of `$from` that pass `$keep`. Up to 100 draws are tried for each case; a case where none
+ * passes is skipped rather than counted. Keep the filter loose: a filter that rejects most values
+ * makes slow, thin tests.
+ */
+public function filter<T>(Gen<T> $from, function<bool(const T&)> $keep) : Gen<T>
+{
+    return Gen<T>(
+        function(Draws& $d) : T {
+            $v = $from->draw($d);
+            usize $tries = 1;
+            while (!$keep($v) && $tries < 100) {
+                $v = $from->draw($d);
+                $tries++;
+            }
+            if (!$keep($v)) {
+                $d->reject();
+            }
+            return $v;
         },
-        (const U& $v) => "{$v}"
+        (const T& $v) => $from->show($v)
+    );
+}
+
+/**
+ * A value of `$from`, then a value of the generator `$then` makes from it: a list and an index
+ * into it, a size and a matrix of that size. Shrinks both parts together. Printed through
+ * `str::from` on `U`.
+ */
+public function flatMap<T, U>(Gen<T> $from, function<Gen<U>(const T&)> $then) : Gen<U>
+{
+    return flatMap($from, $then, show: (const U& $v) => show::item($v));
+}
+
+/**
+ * `flatMap` for a `U` without `str::from`, printed by `$show`.
+ */
+public function flatMap<T, U>(Gen<T> $from, function<Gen<U>(const T&)> $then, show: function<string(const U&)> $show) : Gen<U>
+{
+    return Gen<U>(
+        function(Draws& $d) : U {
+            $v = $from->draw($d);
+            return $then($v)->draw($d);
+        },
+        $show
     );
 }

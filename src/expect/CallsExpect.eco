@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
  * Checks on a `Calls<T>` recorder.
  */
@@ -56,9 +58,11 @@ public class CallsExpect<T>
             return $this;
         }
 
-        $made = $this->calls->seen[$index];
+        const T& $made = $this->calls->seen[$index];
         if (!($made == $want)) {
-            fail("call {$index}: expected {$want}, got {$made}", std::src::caller(), $expected: "{$want}", $actual: "{$made}");
+            $w = show::item($want);
+            $m = show::item($made);
+            fail("call {$index}: expected {$w}, got {$m}", std::src::caller(), $expected: $w, $actual: $m, $inline: true);
         }
 
         return $this;
@@ -79,7 +83,8 @@ public class CallsExpect<T>
         }
 
         usize $got = $this->calls->count();
-        fail("expected a call with {$want} among {$got} calls", std::src::caller());
+        $w = show::item($want);
+        fail("expected a call with {$w} among {$got} calls", std::src::caller());
         return $this;
     }
 }

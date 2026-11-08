@@ -1,0 +1,41 @@
+namespace ecotest::cli;
+
+/**
+ * What `ecotest report` renders a stored run as.
+ */
+public enum Format : string
+{
+    case terminal = 'terminal';
+    case md = 'md';
+    case junit = 'junit';
+    case lcov = 'lcov';
+    case html = 'html';
+    case json = 'json';
+
+    /**
+     * The format the word `$word` names, the terminal summary for none, or null for a word that
+     * names no format.
+     */
+    public static function of(const string& $word) : Format?
+    {
+        if ($word->empty() || $word == 'terminal') {
+            return .terminal;
+        }
+        if ($word == 'md') {
+            return .md;
+        }
+        if ($word == 'junit') {
+            return .junit;
+        }
+        if ($word == 'lcov') {
+            return .lcov;
+        }
+        if ($word == 'html') {
+            return .html;
+        }
+        if ($word == 'json') {
+            return .json;
+        }
+        return null;
+    }
+}

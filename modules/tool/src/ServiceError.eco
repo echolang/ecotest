@@ -19,12 +19,6 @@ public enum ServiceError
      * The service's program could not be started: missing, not executable, or refused.
      */
     case cannotStart(string $service, std::io::ioerror $cause);
-
-    /**
-     * The service started but its ready check did not pass within `$ms` milliseconds. What it
-     * said meanwhile is in `$log`.
-     */
-    case notReady(string $service, int64 $ms, string $log);
 }
 
 namespace str;
@@ -38,6 +32,5 @@ public function from(const ecotest::cli::ServiceError& $e) : string
         .noCommand($service) => "service {$service} has no `run` command",
         .cannotWrite($path, $cause) => "cannot write {$path}: {$cause}",
         .cannotStart($service, $cause) => "cannot start service {$service}: {$cause}",
-        .notReady($service, $ms, $log) => "service {$service} was not ready within {$ms} ms; see {$log}",
     };
 }

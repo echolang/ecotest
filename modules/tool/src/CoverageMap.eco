@@ -29,8 +29,22 @@ public struct CoverageMap
         foreach (doc::list($doc, 'modules') as const &$module) {
             $sites = ModuleSites(doc::text($module, 'name'), doc::text($module, 'dir'));
 
-            foreach (doc::list($module, 'counters') as const &$counter) {
+            $counters = doc::list($module, 'counters');
+            array<bool> $seen = arr::room<bool>($counters->count());
+            for (usize $i = 0; $i < $counters->count(); $i++) {
+                $seen[] = false;
+            }
+
+            foreach ($counters as const &$counter) {
+                // every count has exactly one counter, or the counts cannot be read against them
+                int64 $local = doc::number($counter, 'local');
+                if ($local < 0 || $local >= ($counters->count() as int64) || $seen[$local as usize]) {
+                    return .error(.badLocal($path, $sites->name, $local));
+                }
+                $seen[$local as usize] = true;
+
                 $sites->sites[] = CoverageSite(
+                    $local as usize,
                     doc::text($counter, 'file'),
                     doc::number($counter, 'line'),
                     doc::number($counter, 'column'),

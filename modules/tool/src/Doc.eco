@@ -29,6 +29,20 @@ public function number(const json::Value& $doc, const string& $key) : int64
 }
 
 /**
+ * The integer at `$key` as an `int32`, or null when it is missing or not an integer.
+ */
+public function small(const json::Value& $doc, const string& $key) : int32?
+{
+    $v = guard $doc->get($key) else {
+        return null;
+    };
+    $n = guard $v->asInt() else {
+        return null;
+    };
+    return $n as int32;
+}
+
+/**
  * The number at `$key`, integer or not, or null when it is missing or not a number.
  */
 public function decimal(const json::Value& $doc, const string& $key) : float64?

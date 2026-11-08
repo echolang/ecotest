@@ -1,0 +1,157 @@
+namespace ecotest;
+
+/**
+ * The random choices one generated value was made from. A generator asks for numbers here and
+ * builds its value from them, so 0 is always the simplest answer: the smallest integer, the
+ * shortest list, the first item. Recording keeps every answer; replaying hands back a given list
+ * instead. That is how a failing value shrinks: the shrinker edits the list of answers, replays
+ * it through the same generator, and keeps any shorter or smaller list that still fails. A
+ * mapped, filtered or combined generator shrinks the same way, with nothing of its own to write.
+ */
+public class Draws
+{
+    /**
+     * Where new answers come from while recording.
+     */
+    private Random $random;
+
+    /**
+     * The answers being replayed; empty while recording.
+     */
+    private array<uint64> $given = [];
+
+    /**
+     * True while replaying `$given` rather than recording.
+     */
+    private bool $replaying = false;
+
+    /**
+     * Every answer handed out, in order, as it was actually used.
+     */
+    private array<uint64> $used = [];
+
+    /**
+     * True once a generator gave up on this case, as a filter does when nothing it drew passed.
+     */
+    private bool $rejected = false;
+
+    /**
+     * Records fresh answers from `$random`.
+     */
+    public constructor(record: Random $random)
+    {
+        $this->random = $random;
+    }
+
+    /**
+     * Replays `$choices`. An answer above what is asked for is lowered to fit, and answers run out
+     * as 0, the simplest.
+     */
+    public constructor(replay: array<uint64> $choices)
+    {
+        $this->random = Random(1);
+        $this->given = mv $choices;
+        $this->replaying = true;
+    }
+
+    /**
+     * A number in `[0, $max]`.
+     */
+    public function draw(uint64 $max) : uint64
+    {
+        array<uint64> $none = [];
+        return $this->draw($max, $none);
+    }
+
+    /**
+     * A number in `[0, $max]`. While recording, about one answer in eight is one of `$edges`, the
+     * answers a generator knows to be interesting (a range's ends, an empty list), so they come up
+     * far more often than chance would have them.
+     */
+    public function draw(uint64 $max, const array<uint64>& $edges) : uint64
+    {
+        uint64 $v = 0;
+
+        if ($this->replaying) {
+            usize $at = $this->used->count();
+            if ($at < $this->given->count()) {
+                $v = $this->given[$at];
+            }
+        } else if (!$edges->empty() && $this->random->below(8) == 0) {
+            $v = $edges[$this->random->below($edges->count() as uint64) as usize];
+        } else if ($max == 18446744073709551615) {
+            $v = $this->random->next();
+        } else {
+            $v = $this->random->below($max + 1);
+        }
+
+        if ($v > $max) {
+            $v = $max;
+        }
+
+        $this->used[] = $v;
+        return $v;
+    }
+
+    /**
+     * Whether a list that holds `$have` items, at most `$max`, gets another one. Recording, lists
+     * come out about half of `$max` long on average, and empty more often than that. The answer is
+     * 1 for another item and 0 to stop, so deleting an item's answers removes the item.
+     */
+    public function more(usize $have, usize $max) : bool
+    {
+        if ($have >= $max) {
+            return false;
+        }
+
+        if ($this->replaying) {
+            return $this->draw(1) == 1;
+        }
+
+        bool $go = $this->random->below(($max + 2) as uint64) < ($max as uint64);
+        if ($have == 0 && $this->random->below(8) == 0) {
+            $go = false;
+        }
+
+        uint64 $answer = 0;
+        if ($go) {
+            $answer = 1;
+        }
+
+        $this->used[] = $answer;
+        return $go;
+    }
+
+    /**
+     * Gives up on this case: it is neither a pass nor a failure. A filter that found nothing to
+     * keep calls this.
+     */
+    public function reject() : void
+    {
+        $this->rejected = true;
+    }
+
+    /**
+     * True when a generator gave up on this case.
+     */
+    public const function rejected() : bool
+    {
+        return $this->rejected;
+    }
+
+    /**
+     * Every answer handed out so far, in order.
+     */
+    public const function used() : array<uint64>
+    {
+        return $this->used;
+    }
+
+    /**
+     * The random source as recording left it, so the next case goes on from there.
+     */
+    internal const function source() : Random
+    {
+        return $this->random;
+    }
+}

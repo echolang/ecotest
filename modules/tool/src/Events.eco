@@ -1,5 +1,6 @@
 namespace ecotest::cli;
 
+use ecotest::protocol;
 use ecotest::cli::doc;
 
 /**
@@ -14,7 +15,16 @@ public struct Events
      */
     public Fault? $fault = null;
 
+    /**
+     * True once the test ended itself as skipped, whatever reason it gave.
+     */
+    public bool $skipped = false;
     public string $skipReason = '';
+
+    /**
+     * Event lines of another protocol version, which were left out.
+     */
+    public usize $foreign = 0;
 
     /**
      * True once the test wrote any event, so its checks were counted.
@@ -31,10 +41,17 @@ public struct Events
      */
     public function apply(const json::Value& $event) : void
     {
+        // a line without a version predates it, and reads as the first
+        int64 $v = doc::number($event, 'v');
+        if ($v != 0 && $v != protocol::VERSION) {
+            $this->foreign++;
+            return;
+        }
+
         $this->usedEcotest = true;
         $type = doc::text($event, 'type');
 
-        if ($type == 'fail') {
+        if ($type == protocol::FAIL) {
             $summary = doc::text($event, 'summary');
             $file = doc::text($event, 'file');
             int64 $line = doc::number($event, 'line');
@@ -47,7 +64,9 @@ public struct Events
             $detail = doc::text($event, 'detail');
             $expected = doc::text($event, 'expected');
             $actual = doc::text($event, 'actual');
-            if (!$summary->contains($expected) || !$summary->contains($actual)) {
+            // a summary that already reads out both values says them once
+            bool $inline = doc::object($event, 'inline')->asBool() ?? false;
+            if (!$inline && (!$expected->empty() || !$actual->empty())) {
                 $values = "expected: {$expected}\n     got: {$actual}";
                 if (!$detail->empty()) {
                     $values->append("\n");
@@ -65,32 +84,33 @@ public struct Events
             return;
         }
 
-        if ($type == 'crash') {
+        if ($type == protocol::CRASH) {
             $this->crashed($event);
             return;
         }
 
-        if ($type == 'skip') {
+        if ($type == protocol::SKIP) {
+            $this->skipped = true;
             $this->skipReason = doc::text($event, 'reason');
             return;
         }
 
-        if ($type == 'checks') {
+        if ($type == protocol::CHECKS) {
             $this->checks = doc::number($event, 'count');
             return;
         }
 
-        if ($type == 'note') {
+        if ($type == protocol::NOTE) {
             $this->notes[] = doc::text($event, 'text');
             return;
         }
 
-        if ($type == 'metric') {
+        if ($type == protocol::METRIC) {
             $this->metrics[] = Metric(doc::text($event, 'name'), doc::number($event, 'value'));
             return;
         }
 
-        if ($type == 'bench') {
+        if ($type == protocol::BENCH) {
             $this->benches[] = BenchResult(
                 doc::text($event, 'label'),
                 doc::number($event, 'p50_ns'),
@@ -100,13 +120,13 @@ public struct Events
             return;
         }
 
-        if ($type == 'snapshot-new') {
+        if ($type == protocol::SNAPSHOT_NEW) {
             $path = doc::text($event, 'path');
             $this->notes[] = "wrote new snapshot {$path}";
             return;
         }
 
-        if ($type == 'snapshot-updated') {
+        if ($type == protocol::SNAPSHOT_UPDATED) {
             $path = doc::text($event, 'path');
             $this->notes[] = "updated snapshot {$path}";
         }

@@ -14,6 +14,16 @@ public enum RunError
      * The pass directory, or the log echoc's output goes to, could not be created at `$path`.
      */
     case cannotWrite(string $path, std::io::ioerror $cause);
+
+    /**
+     * The coverage echoc measured at `$path` could not be copied into the run.
+     */
+    case cannotKeep(string $path, std::io::ioerror $cause);
+
+    /**
+     * An interrupt arrived, and the pass was stopped.
+     */
+    case interrupted;
 }
 
 namespace str;
@@ -26,5 +36,7 @@ public function from(const ecotest::cli::RunError& $e) : string
     return match ($e) {
         .cannotRun($echoc, $cause) => "cannot run {$echoc}: {$cause}",
         .cannotWrite($path, $cause) => "cannot write {$path}: {$cause}",
+        .cannotKeep($path, $cause) => "cannot keep the coverage at {$path}: {$cause}",
+        .interrupted => 'interrupted',
     };
 }

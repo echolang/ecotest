@@ -4,13 +4,15 @@ use ecotest::cli::doc;
 
 /**
  * What a run comes to once the gates have judged it: the gates, every one that failed as a line,
- * and whether the run is green with all of them held. Reports render this rather than judging the
- * run again.
+ * why any pass was incomplete, and whether the run is green with all of that. This is the one
+ * policy every report renders: a flaky test is never a failure by itself, only `--max-flaky`
+ * makes it fail the run, so JUnit, Markdown and the exit code agree.
  */
 public struct Verdict
 {
     public Gates $gates;
     public array<string> $failed;
+    public array<string> $stopped;
     public bool $green;
 
     /**
@@ -20,6 +22,7 @@ public struct Verdict
     {
         $this->gates = $gates;
         $this->failed = $failed;
+        $this->stopped = $run->stopped();
         $this->green = $run->green() && $failed->empty();
     }
 
@@ -31,6 +34,7 @@ public struct Verdict
     {
         $this->gates = $gates;
         $this->failed = [];
+        $this->stopped = $run->stopped();
         $this->green = $run->green();
 
         $text = guard doc::read(std::env::join($dir, 'run.json')) else {

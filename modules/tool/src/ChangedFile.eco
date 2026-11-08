@@ -1,11 +1,71 @@
 namespace ecotest::cli;
 
 /**
- * One file of a diff: its path from the repository root and the lines added or changed in it,
- * in the order the hunks name them.
+ * One hunk of a diff: the lines that went, from `oldStart`, and the lines that came, from
+ * `newStart`. A count of 0 is a pure insertion or deletion at that point.
+ */
+public struct Hunk
+{
+    public int64 $oldStart;
+    public int64 $oldCount;
+    public int64 $newStart;
+    public int64 $newCount;
+}
+
+/**
+ * One file of a diff: its absolute path, its path from the repository's top, whether it is new,
+ * untracked or gone, and its hunks in order.
  */
 public struct ChangedFile
 {
     public string $path;
-    public array<int64> $lines = [];
+    public string $relative;
+    public bool $added = false;
+    public bool $untracked = false;
+    public bool $deleted = false;
+    public array<Hunk> $hunks = [];
+
+    /**
+     * The lines of the old text the change touched: those it removed or rewrote, and for a pure
+     * insertion the lines on either side of it.
+     */
+    public const function oldLines() : array<int64>
+    {
+        array<int64> $out = [];
+        foreach ($this->hunks as const &$h) {
+            touched($h->oldStart, $h->oldCount, $out);
+        }
+        return $out;
+    }
+
+    /**
+     * The lines of the new text the change touched: those it added or rewrote, and for a pure
+     * deletion the lines on either side of it.
+     */
+    public const function newLines() : array<int64>
+    {
+        array<int64> $out = [];
+        foreach ($this->hunks as const &$h) {
+            touched($h->newStart, $h->newCount, $out);
+        }
+        return $out;
+    }
+}
+
+/**
+ * Appends the lines one side of a hunk touched: its `$count` lines from `$start`, or for a count
+ * of 0, where nothing is on this side, the lines either side of the point after `$start`.
+ */
+internal function touched(int64 $start, int64 $count, array<int64>& $out) : void
+{
+    if ($count == 0) {
+        if ($start > 0) {
+            $out[] = $start;
+        }
+        $out[] = $start + 1;
+        return;
+    }
+    for (int64 $k = 0; $k < $count; $k++) {
+        $out[] = $start + $k;
+    }
 }

@@ -1,35 +1,140 @@
 /**
- * JSON paths off the common road: no `$`, bare keys, odd brackets, and steps that lead nowhere.
+ * The JSON path grammar: every spelling it reads, every mistake it refuses, and replacements that
+ * touch only what is there.
  */
 
 use ecotest::expect;
 use ecotest::http::jsonpath;
 
+/**
+ * `$path` read and written back, or the reason it was refused.
+ */
+internal function spelled(const string& $path) : string
+{
+    $steps = guard jsonpath::steps($path) else ($e) {
+        return "error: {$e}";
+    };
+    return jsonpath::render($steps);
+}
+
+/**
+ * The concrete paths and values `$path` names in `$doc`, as `path = value`.
+ */
+internal function named(const json::Value& $doc, const string& $path) : array<string>
+{
+    array<string> $out = [];
+    $found = guard jsonpath::all($doc, $path) else ($e) {
+        $out[] = "error: {$e}";
+        return $out;
+    };
+    foreach ($found as const &$hit) {
+        $out[] = "{$hit->path} = {$hit->value}";
+    }
+    return $out;
+}
+
+/**
+ * How many values `replace` changed for `$path`.
+ */
+internal function replaced(json::Value& $doc, const string& $path, const json::Value& $with) : usize
+{
+    $steps = guard jsonpath::steps($path);
+    return jsonpath::replace($doc, $steps, $with);
+}
+
+/**
+ * `$doc` written out compactly.
+ */
+internal function dumped(const json::Value& $doc) : string
+{
+    return json::dump($doc->clone());
+}
+
 test steps_read_every_spelling
 {
-    expect(jsonpath::steps('a.b'))->is(['a', 'b']);
-    expect(jsonpath::steps('$a[0]'))->is(['a', '[0]']);
-    expect(jsonpath::steps('$["k"][x]'))->is(['k', '[x]']);
-    expect(jsonpath::steps('$.a[0'))->is(['a']);
+    expect(spelled('$'))->is('$');
+    expect(spelled('a.b'))->is('$.a.b');
+    expect(spelled('$.a[0]'))->is('$.a[0]');
+    expect(spelled('[0].a'))->is('$[0].a');
+    expect(spelled('$.l[*].id'))->is('$.l[*].id');
+    expect(spelled('$["k"]'))->is('$.k');
+    expect(spelled("$['odd key']"))->is("$['odd key']");
+    expect(spelled("$['it\\'s']"))->is("$['it\\'s']");
+    expect(spelled('$["say \\"hi\\""]'))->is("$['say \"hi\"']");
+    expect(spelled("$['back\\\\slash']"))->is("$['back\\\\slash']");
+    expect(spelled("$['']"))->is("$['']");
+}
+
+test steps_refuse_malformed_paths
+{
+    expect(spelled(''))->is('error: the step at byte 0 is empty');
+    expect(spelled('$.a[0'))->is('error: the bracket or quote at byte 3 is never closed');
+    expect(spelled("$['a"))->is('error: the bracket or quote at byte 1 is never closed');
+    expect(spelled("$['a'"))->is('error: the bracket or quote at byte 1 is never closed');
+    expect(spelled('$.'))->is('error: the step at byte 1 is empty');
+    expect(spelled('$[]'))->is('error: the step at byte 1 is empty');
+    expect(spelled('$.a.'))->is('error: the step at byte 3 is empty');
+    expect(spelled('$..a'))->is("error: '..' at byte 1: recursive descent is not supported");
+    expect(spelled('$[x]'))->is("error: the index at byte 2 is neither digits, '*' nor a quoted key");
+    expect(spelled('$[-1]'))->is("error: the index at byte 2 is neither digits, '*' nor a quoted key");
+    expect(spelled('$[99999999999999999999999]'))->is("error: the index at byte 2 is neither digits, '*' nor a quoted key");
+    expect(spelled('$a'))->is('error: unexpected text at byte 1');
+    expect(spelled("$['a'x]"))->is('error: unexpected text at byte 5');
+    expect(spelled('$.a]'))->is('error: unexpected text at byte 3');
+}
+
+test keys_that_look_like_brackets_are_addressable
+{
+    $doc = guard json::parse('{"a[0]":1,"a.b":2,"it\'s":3,"*":4,"a":[5]}');
+
+    expect(named($doc, "$['a[0]']"))->is(["$['a[0]'] = 1"]);
+    expect(named($doc, '$["a.b"]'))->is(["$['a.b'] = 2"]);
+    expect(named($doc, "$['it\\'s']"))->is(["$['it\\'s'] = 3"]);
+    expect(named($doc, "$['*']"))->is(["$['*'] = 4"]);
+    expect(named($doc, '$.a[0]'))->is(['$.a[0] = 5']);
 }
 
 test steps_that_lead_nowhere_find_nothing
 {
-    $doc = guard json::parse('{"o":{"k":1},"l":[1,2]}');
+    $doc = guard json::parse('{"o":{"k":1},"l":[1,2],"s":"text"}');
 
-    expect(jsonpath::all($doc, '$.o[*]'))->empty();
-    expect(jsonpath::all($doc, '$.l[x]'))->empty();
-    expect(jsonpath::all($doc, '$.l[9]'))->empty();
+    expect(named($doc, '$.o[*]'))->empty();
+    expect(named($doc, '$.l[9]'))->empty();
+    expect(named($doc, '$.l.k'))->empty();
+    expect(named($doc, '$.s[0]'))->empty();
+    expect(named($doc, '$.o.k.deeper'))->empty();
+    expect(named($doc, '$.l[*]'))->is(['$.l[0] = 1', '$.l[1] = 2']);
 }
 
-test replace_follows_indexes_and_skips_what_is_not_there
+test replace_counts_what_it_changed
 {
-    $doc = guard json::parse('{"l":[1,2]}');
+    $doc = guard json::parse('{"l":[{"id":1},{"id":2},{"x":3}],"n":null}');
+    json::Value $mark = json::str('r');
 
-    jsonpath::replace($doc, '$.l[0]', json::str('a'));
-    jsonpath::replace($doc, '$.l[x]', json::str('b'));
-    jsonpath::replace($doc, '$.l[9]', json::str('c'));
-    jsonpath::replace($doc, '$.gone', json::str('d'));
+    expect(replaced($doc, '$.l[*].id', $mark))->is(2);
+    expect(replaced($doc, '$.l[2].x', $mark))->is(1);
+    expect(replaced($doc, '$.n', $mark))->is(1);
+    expect(replaced($doc, '$.l[9]', $mark))->is(0);
+    expect(replaced($doc, '$.gone', $mark))->is(0);
+    expect(dumped($doc))->is('{"l":[{"id":"r"},{"id":"r"},{"x":"r"}],"n":"r"}');
 
-    expect(json::dump($doc->clone()))->is('{"l":["a",2]}');
+    expect(replaced($doc, '$', $mark))->is(1);
+    expect(dumped($doc))->is('"r"');
+}
+
+test replace_never_writes_into_libjsons_shared_null
+{
+    $doc = guard json::parse('{"o":{},"l":[1]}');
+    json::Value $mark = json::str('leaked');
+
+    expect(replaced($doc, '$.gone.deeper', $mark))->is(0);
+    expect(replaced($doc, '$.o.k', $mark))->is(0);
+    expect(replaced($doc, '$.l[5]', $mark))->is(0);
+    expect(replaced($doc, '$.l[3][*]', $mark))->is(0);
+    expect(replaced($doc, '$.l[0].k', $mark))->is(0);
+    expect(dumped($doc))->is('{"o":{},"l":[1]}');
+
+    // a missing key reads libjson's one shared null; it must still be null
+    $other = guard json::parse('{}');
+    expect(str::from($other['missing']))->is('null');
 }

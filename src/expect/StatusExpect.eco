@@ -19,7 +19,7 @@ public class StatusExpect<E>
         Session::checked();
 
         guard $this->value else ($e) {
-            fail("expected success, got error {$e}", std::src::caller(), $actual: "{$e}");
+            fail("expected success, got error {$e}", std::src::caller(), $actual: "{$e}", $inline: true);
             return $this;
         };
 
@@ -56,7 +56,7 @@ public class StatusExpect<E>
 
         $e = $this->value->failure();
         if (!($e == $want)) {
-            fail("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}");
+            fail("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}", $inline: true);
         }
 
         return $this;

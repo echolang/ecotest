@@ -1,31 +1,43 @@
 namespace ecotest::http;
 
 /**
- * Why a request got no response at all.
+ * Why a request got no response at all, in terms every transport can report.
  */
 public enum TransportError
 {
     /**
-     * libcurl got nothing back: refused, unreachable, timed out, or a URL it could not use.
+     * Nothing answered: the connection was refused, or the host does not resolve.
      */
-    case curl(curl::Error $cause);
+    case unreachable;
 
     /**
-     * A transport other than libcurl, such as one that dispatches in process, could not deliver
-     * the request, for the reason given.
+     * No answer came within `$ms` milliseconds.
      */
-    case refused(string $reason);
+    case timeout(int32 $ms);
+
+    /**
+     * The request could not be sent as it is, such as a URL the transport cannot use, for the
+     * reason given.
+     */
+    case invalid(string $reason);
+
+    /**
+     * The exchange broke off for the reason given.
+     */
+    case failed(string $reason);
 }
 
 namespace str;
 
 /**
- * The reason in words, as a failure report shows it: libcurl's sentence, or the transport's own.
+ * The reason in words, as a failure report shows it.
  */
 public function from(const ecotest::http::TransportError& $e) : string
 {
     return match ($e) {
-        .curl($cause) => "{$cause}",
-        .refused($reason) => $reason,
+        .unreachable => 'nothing answers there',
+        .timeout($ms) => "no answer within {$ms} ms",
+        .invalid($reason) => "cannot be sent: {$reason}",
+        .failed($reason) => $reason,
     };
 }

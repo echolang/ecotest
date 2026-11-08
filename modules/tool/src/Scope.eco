@@ -1,0 +1,38 @@
+namespace ecotest::cli;
+
+use ecotest::cli::glob;
+
+/**
+ * Which coverage a run reports: the modules by name, and the file patterns left out. Fixed when
+ * the run finishes and kept with it, so a stored run reports the same coverage it was judged on.
+ */
+public struct Scope
+{
+    /**
+     * The modules reported, by name: the ones asked for and the ones whose tests ran.
+     */
+    public map<string, bool> $modules = [];
+
+    public array<string> $exclude = [];
+
+    /**
+     * True when `$module` is reported.
+     */
+    public const function reports(const string& $module) : bool
+    {
+        return $this->modules->has($module);
+    }
+
+    /**
+     * True when `$file`, relative to its module, matches one of the exclude patterns.
+     */
+    public const function excluded(const string& $file) : bool
+    {
+        foreach ($this->exclude as const &$pattern) {
+            if (glob::matches($pattern, $file)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

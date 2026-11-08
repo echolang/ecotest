@@ -1,0 +1,102 @@
+/**
+ * The little UTF-8 ecotest needs to cut text on a character boundary, keep event lines valid
+ * JSON, and draw characters rather than bytes from an alphabet.
+ */
+
+namespace ecotest::utf8;
+
+/**
+ * True for a byte that continues a character rather than starting one.
+ */
+internal function continues(uint8 $b) : bool
+{
+    return $b >= 128 && $b < 192;
+}
+
+/**
+ * The length of the well-formed character starting at `$at`, or 0 when the bytes there are not
+ * one: a stray continuation byte, a cut-off sequence, an overlong form or a surrogate.
+ */
+internal function sequence(const string& $text, usize $at) : usize
+{
+    uint8 $b = $text->byte($at);
+    if ($b < 128) {
+        return 1;
+    }
+
+    usize $n = 0;
+    uint32 $lowest = 0;
+    uint32 $point = 0;
+
+    if ($b >= 194 && $b < 224) {
+        $n = 2;
+        $lowest = 128;
+        $point = ($b & 31) as uint32;
+    } else if ($b >= 224 && $b < 240) {
+        $n = 3;
+        $lowest = 2048;
+        $point = ($b & 15) as uint32;
+    } else if ($b >= 240 && $b < 245) {
+        $n = 4;
+        $lowest = 65536;
+        $point = ($b & 7) as uint32;
+    } else {
+        return 0;
+    }
+
+    if ($at + $n > $text->size()) {
+        return 0;
+    }
+
+    for (usize $i = 1; $i < $n; $i++) {
+        uint8 $c = $text->byte($at + $i);
+        if (!continues($c)) {
+            return 0;
+        }
+        $point = ($point << 6) | (($c & 63) as uint32);
+    }
+
+    if ($point < $lowest || $point > 1114111 || ($point >= 55296 && $point <= 57343)) {
+        return 0;
+    }
+
+    return $n;
+}
+
+/**
+ * `$at`, moved back to where the character it falls in starts, so a cut there keeps every
+ * character whole.
+ */
+internal function boundary(const string& $text, usize $at) : usize
+{
+    if ($at >= $text->size()) {
+        return $text->size();
+    }
+
+    usize $i = $at;
+    while ($i > 0 && continues($text->byte($i))) {
+        $i--;
+    }
+    return $i;
+}
+
+/**
+ * The characters of `$text`, each as its own string. A byte that does not start a well-formed
+ * character stands alone.
+ */
+internal function characters(const string& $text) : array<string>
+{
+    array<string> $out = [];
+    usize $i = 0;
+
+    while ($i < $text->size()) {
+        usize $n = sequence($text, $i);
+        if ($n == 0) {
+            $n = 1;
+        }
+        $out[] = $text->sub($i, $n);
+        $i = $i + $n;
+    }
+
+    return $out;
+}

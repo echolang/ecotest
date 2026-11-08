@@ -15,3 +15,53 @@ public struct Header
      */
     public string $value;
 }
+
+/**
+ * The value of every header in `$headers` called `$name`, compared without case, in order.
+ */
+internal function headerValues(const array<Header>& $headers, const string& $name) : array<string>
+{
+    array<string> $out = [];
+    foreach ($headers as const &$h) {
+        if (str::iequals($h->name->view(), $name->view())) {
+            $out[] = $h->value;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Drops every header in `$headers` called `$name`, compared without case.
+ */
+internal function dropHeader(array<Header>& $headers, const string& $name) : void
+{
+    array<Header> $kept = [];
+    foreach ($headers as const &$h) {
+        if (!str::iequals($h->name->view(), $name->view())) {
+            $kept[] = $h;
+        }
+    }
+    $headers = mv $kept;
+}
+
+/**
+ * Makes `$name: $value` the one header of that name in `$headers`: it takes the place of the
+ * first one called that, compared without case, or goes last when there was none.
+ */
+internal function setHeader(array<Header>& $headers, const string& $name, const string& $value) : void
+{
+    array<Header> $out = [];
+    bool $placed = false;
+    foreach ($headers as const &$h) {
+        if (!str::iequals($h->name->view(), $name->view())) {
+            $out[] = $h;
+        } else if (!$placed) {
+            $out[] = Header($name, $value);
+            $placed = true;
+        }
+    }
+    if (!$placed) {
+        $out[] = Header($name, $value);
+    }
+    $headers = mv $out;
+}

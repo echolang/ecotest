@@ -1,5 +1,5 @@
 use ecotest::{expect, TempDir};
-use ecotest::cli::{Tool, doc, files};
+use ecotest::cli::{Store, Tool, doc};
 
 /**
  * A small module the tool is run against, written into a temp directory per test so runs never
@@ -105,11 +105,11 @@ test flips
     }
 
     /**
-     * The newest run directory of this module. The test fails when there is none.
+     * The newest finished run directory of this module. The test fails when there is none.
      */
     public const function latest() : string
     {
-        return expect(files::latest($this->dir->file('.ecotest')))->some();
+        return expect(Store($this->dir->file('.ecotest'))->latest())->some();
     }
 
     /**

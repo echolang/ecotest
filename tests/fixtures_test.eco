@@ -76,3 +76,43 @@ test a_snapshot_is_written_then_matched
 {
     expect("line one\nline two")->snapshot();
 }
+
+#[if: os != windows]
+test a_program_past_its_timeout_is_killed
+{
+    $ran = ecotest::run('sleep', ['10'], timeout: .millis(100));
+
+    expect($ran->timedOut)->yes();
+    expect($ran->code)->none();
+
+    $got = summaries(function() : void {
+        $late = ecotest::run('sleep', ['10'], timeout: .millis(50));
+        expect($late)->exits(0);
+    });
+    expect($got[0])->is('expected sleep 10 to exit 0, got a timeout');
+}
+
+test a_program_reads_its_input_environment_and_directory
+{
+    $dir = ecotest::TempDir();
+    $ran = ecotest::run(
+        'sh',
+        ['-c', 'cat; echo "$ECOTEST_PROBE"; pwd'],
+        input: "hello\n",
+        env: ['ECOTEST_PROBE' => 'set'],
+        dir: $dir->path
+    );
+
+    expect($ran)->succeeds()->stdout()->starts("hello\nset\n");
+}
+
+test a_failed_run_shows_the_end_of_what_it_printed
+{
+    $failed = ecotest::caught(function() : void {
+        $ran = ecotest::run('sh', ['-c', 'for i in $(seq 1 50); do echo "line $i"; done; exit 3']);
+        expect($ran)->succeeds();
+    });
+
+    expect($failed[0]->detail)->has('line 50')->lacks('line 1\n');
+}
+#[end]

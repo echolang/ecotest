@@ -1,0 +1,97 @@
+namespace ecotest::cli;
+
+/**
+ * How echoc itself ended a pass: its exit code, or the signal that stopped it. Both null for a
+ * pass stored before the tool recorded them.
+ */
+public struct PassExit
+{
+    public int32? $code = null;
+    public int32? $signal = null;
+}
+
+/**
+ * One pass of `echoc test` as its report and its exit tell it. A pass that did not reach its
+ * tests, stopped before its `end` row, reported fewer tests than it selected, or ended badly
+ * although every test passed is incomplete, and an incomplete pass makes the run red: what it
+ * did not report cannot count as passed.
+ */
+public struct Pass
+{
+    /**
+     * Where the pass keeps its report, its events and its coverage.
+     */
+    public string $dir;
+
+    /**
+     * True once echoc's `run` row arrived: the tests compiled and started.
+     */
+    public bool $reached = false;
+
+    /**
+     * How many tests echoc said it would run.
+     */
+    public int64 $selected = 0;
+
+    /**
+     * How many test rows arrived.
+     */
+    public int64 $rows = 0;
+
+    /**
+     * True once echoc's `end` row arrived.
+     */
+    public bool $ended = false;
+
+    /**
+     * True when a test row reported anything but a pass or a skip.
+     */
+    public bool $failing = false;
+
+    public PassExit $exit = PassExit();
+
+    /**
+     * Why the pass's report cannot be read, such as a version this tool does not know; empty when
+     * it can.
+     */
+    public string $refused = '';
+
+    public constructor(const string& $dir)
+    {
+        $this->dir = $dir;
+    }
+
+    /**
+     * Why the pass is incomplete, or null when it is whole.
+     */
+    public const function stop() : string?
+    {
+        if (!$this->refused->empty()) {
+            return $this->refused;
+        }
+
+        if (!$this->reached) {
+            return 'echoc stopped before the tests';
+        }
+
+        if (!$this->ended) {
+            return "echoc ended after {$this->rows} of {$this->selected} tests without its end row";
+        }
+
+        if ($this->rows < $this->selected) {
+            return "echoc reported {$this->rows} of {$this->selected} tests";
+        }
+
+        if ($this->exit->signal != null) {
+            int32 $signal = $this->exit->signal ?? 0;
+            return "echoc was stopped by signal {$signal}";
+        }
+
+        int32 $code = $this->exit->code ?? 0;
+        if ($code != 0 && !$this->failing) {
+            return "echoc exited {$code} although every test passed";
+        }
+
+        return null;
+    }
+}

@@ -1,5 +1,6 @@
 /**
- * The run as one JSON document, `run.json`, for other tools. Versioned by `v`.
+ * The run as one JSON document, `run.json`, for other tools. Versioned by `v`. The tool writes it
+ * last, with `complete`, so a run directory without it never finished.
  */
 
 namespace ecotest::cli::runjson;
@@ -10,11 +11,20 @@ namespace ecotest::cli::runjson;
 public function render(const Run& $run, const array<FileCoverage>& $files, Totals? $totals, const Verdict& $verdict) : string
 {
     $doc = json::object();
-    $doc['v'] = json::int(1);
+    $doc['v'] = json::int(2);
+    $doc['complete'] = json::bool(true);
     $doc['echoc'] = json::str($run->version);
+    $doc['seed'] = json::str($run->seed);
+    $doc['filtered'] = json::bool($run->filtered);
     $doc['ms'] = json::int($run->wallMs);
-    $doc['passes'] = json::int($run->passes as int64);
+    $doc['passes'] = json::int($run->passes->count() as int64);
     $doc['green'] = json::bool($verdict->green);
+
+    $stopped = json::arr();
+    foreach ($verdict->stopped as const &$reason) {
+        $stopped[] = json::str($reason);
+    }
+    $doc['stopped'] = mv $stopped;
 
     $c = $run->counts();
     $counts = json::object();
@@ -47,8 +57,8 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
         if ($events->usedEcotest) {
             $t['checks'] = json::int($events->checks);
         }
-        failure($t, $events);
-        if (!$events->skipReason->empty()) {
+        failure($t, $test);
+        if ($events->skipped) {
             $t['skip'] = json::str($events->skipReason);
         }
         if (!$events->notes->empty()) {
@@ -125,11 +135,11 @@ private function coverage(json::Value& $doc, const array<FileCoverage>& $files, 
 
 /**
  * Sets `failure` on the test object `$t` to `{"summary", "file", "line", "detail", "context"}`
- * when `$events` failed.
+ * when `$test` stopped somewhere.
  */
-private function failure(json::Value& $t, const Events& $events) : void
+private function failure(json::Value& $t, const TestRecord& $test) : void
 {
-    $f = guard $events->fault else {
+    $f = guard $test->fault() else {
         return;
     };
 
@@ -147,13 +157,17 @@ private function failure(json::Value& $t, const Events& $events) : void
 }
 
 /**
- * `{"hit": n, "total": n, "percent": p}`.
+ * `{"hit": n, "total": n, "percent": p}`, the percent null when there was nothing to hit.
  */
 private function ratio(const Ratio& $r) : json::Value
 {
     $v = json::object();
     $v['hit'] = json::int($r->hit as int64);
     $v['total'] = json::int($r->total as int64);
-    $v['percent'] = json::float($r->percent());
+    $v['percent'] = json::nil();
+    $p = guard $r->percent() else {
+        return $v;
+    };
+    $v['percent'] = json::float($p);
     return $v;
 }

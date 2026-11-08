@@ -1,7 +1,7 @@
 /**
- * The summary for a terminal that takes colour or unicode: the failures first with where they
- * stopped, then timing, checks, skips, coverage meters and the gates, closed by one PASS or FAIL
- * line. Each section is left out when it has nothing to say.
+ * The summary for a terminal that takes colour or unicode: incomplete passes and the failures
+ * first, with where they stopped, then timing, checks, skips, coverage meters and the gates,
+ * closed by one PASS or FAIL line. Each section is left out when it has nothing to say.
  */
 
 namespace ecotest::cli::pretty;
@@ -20,7 +20,7 @@ private const int32 METER = 24;
 public function render(const Look& $look, const Run& $run, const array<FileCoverage>& $files, Totals? $totals, const Verdict& $verdict, const string& $diff, const string& $report) : string
 {
     $out = '\n';
-    failures($out, $look, $run);
+    failures($out, $look, $run, $verdict);
 
     usize $facts = $out->size();
     timing($out, $look, $run);
@@ -52,6 +52,10 @@ public function render(const Look& $look, const Run& $run, const array<FileCover
     if (!$report->empty()) {
         $out->append(label($look, 'report'));
         $out->append("{$report}\n");
+    }
+    if (!$run->seed->empty()) {
+        $out->append(label($look, 'seed'));
+        $out->append("{$run->seed}\n");
     }
 
     return $out;
@@ -105,16 +109,11 @@ private function railed(string& $out, const Look& $look, const string& $text, bo
 /**
  * Each broken test with its mark, where it stopped, what it said and the context it was in.
  */
-private function failures(string& $out, const Look& $look, const Run& $run) : void
+private function failures(string& $out, const Look& $look, const Run& $run, const Verdict& $verdict) : void
 {
-    usize $stopped = $run->stopped();
-    if ($stopped > 0) {
+    foreach ($verdict->stopped as const &$reason) {
         $mark = $look->paint($look->fail, command::SGR_ERROR);
-        $out->append("  {$mark} echoc stopped before the tests ran");
-        if ($run->passes > 1) {
-            $out->append(" in {$stopped} of {$run->passes} passes");
-        }
-        $out->append('\n\n');
+        $out->append("  {$mark} {$reason}\n\n");
     }
 
     foreach ($run->tests as const &$test) {
@@ -125,7 +124,7 @@ private function failures(string& $out, const Look& $look, const Run& $run) : vo
         $headline = $look->headline($test->outcome, $look->title($test));
         $out->append("  {$headline}\n");
 
-        $fault = guard $test->events->fault else {
+        $fault = guard $test->fault() else {
             $out->append('\n');
             continue;
         };
@@ -275,7 +274,7 @@ private function coverage(string& $out, const Look& $look, const array<FileCover
  */
 private function meter(string& $out, const Look& $look, const string& $lead, const string& $name, const Ratio& $r) : void
 {
-    $bar = $look->meter($r->percent(), METER);
+    $bar = $look->meter($r->percent() ?? 0.0, METER);
     $out->append($lead);
     $out->append("{$name:<10}{$r:>6}  {$bar}\n");
 }
@@ -320,8 +319,9 @@ private function verdict(const Look& $look, const Run& $run, bool $ok) : string
     }
 
     $time = "in {$secs:.2f} s";
-    if ($run->passes > 1) {
-        $time->append(" over {$run->passes} passes");
+    usize $passes = $run->passes->count();
+    if ($passes > 1) {
+        $time->append(" over {$passes} passes");
     }
     $muted = $look->mute($time);
 

@@ -14,6 +14,12 @@ public enum CoverageMapError
      * The map at `$path` is not JSON.
      */
     case malformed(string $path, json::Error $cause);
+
+    /**
+     * Module `$module` of the map at `$path` has a counter whose `local` index `$local` is out of
+     * range or taken twice, so its counts cannot be matched to counters.
+     */
+    case badLocal(string $path, string $module, int64 $local);
 }
 
 namespace str;
@@ -26,5 +32,6 @@ public function from(const ecotest::cli::CoverageMapError& $e) : string
     return match ($e) {
         .unreadable($path, $cause) => "cannot read {$path}: {$cause}",
         .malformed($path, $cause) => "{$path} does not parse: {$cause->message()}",
+        .badLocal($path, $module, $local) => "{$path}: module {$module} has a counter with the bad index {$local}",
     };
 }

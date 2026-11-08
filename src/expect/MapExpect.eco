@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::show;
+
 /**
  * Checks on a `map<K, V>`. A failed `is` lists the missing, extra and changed keys.
  */
@@ -22,7 +24,8 @@ public class MapExpect<K, V>
             return $this;
         }
 
-        fail("expected key {$key}", std::src::caller());
+        $k = show::item($key);
+        fail("expected key {$k}", std::src::caller());
         return $this;
     }
 
@@ -35,13 +38,17 @@ public class MapExpect<K, V>
         Session::checked();
 
         if (!$this->value->has($key)) {
-            fail("expected key {$key}", std::src::caller());
+            $k = show::item($key);
+            fail("expected key {$k}", std::src::caller());
             return $this;
         }
 
         $got = $this->value->get($key);
         if (!($got == $want)) {
-            fail("at {$key}: expected {$want}, got {$got}", std::src::caller(), $expected: "{$want}", $actual: "{$got}");
+            $k = show::item($key);
+            $w = show::item($want);
+            $g = show::item($got);
+            fail("at {$k}: expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
         }
 
         return $this;
@@ -91,19 +98,26 @@ public class MapExpect<K, V>
 
         foreach ($want as $key => const &$value) {
             if (!$this->value->has($key)) {
-                $detail->append("- {$key}: {$value}\n");
+                $k = show::item($key);
+                $v = show::item($value);
+                $detail->append("- {$k}: {$v}\n");
                 continue;
             }
 
             $got = $this->value->get($key);
             if (!($got == $value)) {
-                $detail->append("~ {$key}: expected {$value}, got {$got}\n");
+                $k = show::item($key);
+                $v = show::item($value);
+                $g = show::item($got);
+                $detail->append("~ {$k}: expected {$v}, got {$g}\n");
             }
         }
 
         foreach ($this->value as $key => const &$value) {
             if (!$want->has($key)) {
-                $detail->append("+ {$key}: {$value}\n");
+                $k = show::item($key);
+                $v = show::item($value);
+                $detail->append("+ {$k}: {$v}\n");
             }
         }
 

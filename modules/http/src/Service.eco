@@ -1,17 +1,51 @@
 namespace ecotest::http;
 
 /**
- * A service a single test starts and stops itself: the program runs until the value goes. For
- * services shared by many tests, list them in `ecotest.json` and use `Api(service:)` instead.
+ * A service a single test starts and stops itself: the program runs until the value goes, and
+ * also when the test stops early on a failed check, a crash or a skip. Its stdout and stderr go to
+ * a log file, which a failure to get ready shows. For services shared by many tests, list them in
+ * `ecotest.json` and use `Api(service:)` instead.
+ *
+ * Only the direct child is killed. A wrapper script that starts the real server has to `exec` it,
+ * or the server outlives the test.
  */
 public class Service
 {
+    /**
+     * How many services this process has started, so two logs never collide.
+     */
+    internal static usize $started = 0;
+
+    /**
+     * The base URL tests use.
+     */
     public const string $url;
+
+    /**
+     * The file the program's stdout and stderr go to.
+     */
+    public const string $log;
+
+    /**
+     * The running program.
+     */
     private std::process::child $child;
 
     /**
+     * The cleanup that kills the program when the test stops before this value goes.
+     */
+    private usize $cleanup = 0;
+
+    /**
+     * Whether `halt` already ran.
+     */
+    private bool $halted = false;
+
+    /**
      * Starts `$program` with `$arguments`, then waits until `$ready` answers with a 2xx or 3xx, at
-     * most `within`. `$url` is the base URL tests use. Stops the test when it never gets ready.
+     * most `within`. `$url` is the base URL tests use. Stops the test when something already
+     * answers at `$ready`, when the program cannot start, when it exits first, or when it never
+     * gets ready.
      */
     #[caller]
     public constructor(
@@ -23,32 +57,60 @@ public class Service
     ) {
         $at = std::src::caller();
         $this->url = $url;
+        $this->log = Service::logPath();
+
+        // a leftover server would pass the ready check for a program that never started
+        if (probe($ready) != null) {
+            ecotest::Failure("something already answers at {$ready}", $at)->stop();
+        }
+
+        $file = guard std::io::open($this->log, .write) else ($e) {
+            die(ecotest::Session::report(ecotest::Failure("cannot create the log {$this->log}: {$e}", $at)), $at);
+        };
 
         $cmd = std::process::command($program, $arguments);
-        $cmd->stdout(.discard);
-        $cmd->stderr(.discard);
+        $cmd->stdin(.discard);
+        $cmd->stdout(.file($file));
+        $cmd->stderr(.merge);
 
         $child = guard $cmd->spawn() else ($e) {
+            $file->close();
+            Service::forget($this->log);
             die(ecotest::Session::report(ecotest::Failure("cannot start {$program}: {$e}", $at)), $at);
         };
-        $this->child = mv $child;
+        $file->close();
+        $this->child = $child;
+
+        // captures the handle and the path, not $this, so the session holds no cycle
+        std::process::child $held = $child;
+        string $log = $this->log;
+        $this->cleanup = ecotest::Session::defer(function() : void {
+            Service::reap($held, $log);
+        });
 
         $started = std::time::instant::now();
         while ($started->elapsed()->as_millis() < $limit->as_millis()) {
-            $probe = curl::Request::get($ready);
-            $probe->timeout(500);
-            $answer = guard curl::send($probe) else {
-                std::time::sleep(.millis(50));
-                continue;
+            $exited = guard $this->child->try_wait() else {
+                break;
             };
-            if ($answer->status >= 200 && $answer->status < 400) {
+            if ($exited != null) {
+                $status = guard $exited;
+                $tail = Service::tail($this->output());
+                $this->halt();
+                ecotest::Failure("{$program} exited ({$status}) before it was ready at {$ready}", $at, $detail: $tail)->stop();
+            }
+
+            int64 $code = probe($ready) ?? 0;
+            if ($code >= 200 && $code < 400) {
                 return;
             }
             std::time::sleep(.millis(50));
         }
 
         int64 $ms = $limit->as_millis();
-        ecotest::Failure("{$program} was not ready at {$ready} within {$ms} ms", $at)->stop();
+        $tail = Service::tail($this->output());
+        $this->halt();
+        ecotest::Failure("{$program} was not ready at {$ready} within {$ms} ms", $at, $detail: $tail)->stop();
     }
 
     /**
@@ -59,9 +121,86 @@ public class Service
         return Api($this->url);
     }
 
+    /**
+     * What the program wrote to stdout and stderr so far. Empty once it is halted.
+     */
+    public const function output() : string
+    {
+        $text = guard std::io::readfile($this->log) else {
+            return '';
+        };
+        return $text;
+    }
+
+    /**
+     * Kills the program, waits for it and removes its log. Safe to repeat; the destructor calls it.
+     */
+    public function halt() : void
+    {
+        if ($this->halted) {
+            return;
+        }
+        $this->halted = true;
+        ecotest::Session::undefer($this->cleanup);
+        Service::reap($this->child, $this->log);
+    }
+
     destructor()
     {
-        $killed = $this->child->kill();
-        $waited = $this->child->wait();
+        $this->halt();
     }
+
+    /**
+     * Kills `$child`, waits for it and removes `$log`.
+     */
+    private static function reap(std::process::child $child, const string& $log) : void
+    {
+        $killed = $child->kill();
+        $waited = $child->wait();
+        Service::forget($log);
+    }
+
+    /**
+     * Removes `$log`. Best effort: a log left behind is not a test failure.
+     */
+    private static function forget(const string& $log) : void
+    {
+        $removed = std::io::remove($log);
+    }
+
+    /**
+     * A fresh log path under the system temp directory.
+     */
+    private static function logPath() : string
+    {
+        Service::$started = Service::$started + 1;
+        int32 $pid = std::env::pid();
+        usize $n = Service::$started;
+        int64 $stamp = std::time::timestamp::now()->unix_nanos();
+        return std::env::join(std::env::tmp(), "ecotest-service-{$pid}-{$n}-{$stamp}.log");
+    }
+
+    /**
+     * The last 2000 bytes of `$text`.
+     */
+    private static function tail(const string& $text) : string
+    {
+        if ($text->size() <= 2000) {
+            return $text;
+        }
+        return $text->sub($text->size() - 2000, 2000);
+    }
+}
+
+/**
+ * The status `$url` answers a GET with inside half a second, or null when nothing answers.
+ */
+internal function probe(const string& $url) : int64?
+{
+    CurlTransport $curl = CurlTransport(500);
+    $request = Request(.get, $url);
+    $answer = guard $curl->send($request) else {
+        return null;
+    };
+    return $answer->status;
 }

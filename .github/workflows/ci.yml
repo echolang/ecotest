@@ -27,10 +27,9 @@ jobs:
       - name: Build and test
         run: |
           epm install
-          echoc test
+          echoc build --target ecotest
+          ./ecobuild/ecotest ${{ runner.os != 'Windows' && '--coverage' || '' }}
 
-  # the tool and ecotest-http link libcurl. ecotest-nexus is left out: it depends on nexus and
-  # container by sibling path
   modules:
     name: modules (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -50,6 +49,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev
 
+      - name: ecotest (exe)
+        run: |
+          epm install
+          echoc build --target ecotest
+
       - name: ecotest-tool
         working-directory: modules/tool
         run: |
@@ -60,4 +64,4 @@ jobs:
         working-directory: modules/http
         run: |
           epm install
-          echoc test
+          epm run ecotest --coverage

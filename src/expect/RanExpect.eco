@@ -71,10 +71,15 @@ public class RanExpect
     }
 
     /**
-     * "exit 2", or "a signal" when it did not exit on its own.
+     * "exit 2", "a timeout" when it was killed for running too long, or "a signal" when something
+     * else ended it.
      */
     private const function describe() : string
     {
+        if ($this->ran->timedOut) {
+            return 'a timeout';
+        }
+
         $got = guard $this->ran->code else {
             return 'a signal';
         };
@@ -83,7 +88,8 @@ public class RanExpect
     }
 
     /**
-     * Both streams, labelled, for the failure detail.
+     * The end of both streams, labelled, for the failure detail: what a program printed last is
+     * usually why it failed.
      */
     private const function streams() : string
     {
@@ -91,7 +97,7 @@ public class RanExpect
 
         if (!$this->ran->stdout->empty()) {
             $out->append("stdout:\n");
-            $out->append(show::indent(show::cut($this->ran->stdout), 2));
+            $out->append(show::indent(show::tail($this->ran->stdout), 2));
         }
 
         if (!$this->ran->stderr->empty()) {
@@ -99,7 +105,7 @@ public class RanExpect
                 $out->append("\n");
             }
             $out->append("stderr:\n");
-            $out->append(show::indent(show::cut($this->ran->stderr), 2));
+            $out->append(show::indent(show::tail($this->ran->stderr), 2));
         }
 
         return $out;

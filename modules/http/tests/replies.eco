@@ -21,7 +21,7 @@ test a_request_without_a_response_fails_every_check_with_the_reason
 test status_header_and_body_failures_show_the_exchange
 {
     $r = reply(200, 'plain text', [Header('Content-Type', 'text/plain'), Header('X-Id', '7')]);
-    $r->ok()->header('x-id', '7')->type('text/')->body('plain text')->has('plain');
+    $r->ok()->header('x-id', '7')->type('TEXT/plain')->body('plain text')->has('plain');
 
     $failures = ecotest::caught(function() : void {
         $r->status(201)->header('X-Id', '8')->header('X-Gone', '1')->type('application/json')
@@ -76,11 +76,11 @@ test json_failures_name_the_path
         'expected $.gone = "x", found nothing there',
         'expected a value at $.gone',
         'expected 1 items at $.gone, found nothing there',
-        'expected 1 items at $.o, got 1',
+        'expected 1 items at $.o, got {"k":1}, not an array',
         'expected 3 items at $.l, got 2',
         'expected a value at $.gone',
-        '$.l[*] = 1 failed the test',
-        'expected $.l[*] to be big, got 1',
+        '$.l[0] = 1 failed the test',
+        'expected $.l[0] to be big, got 1',
     ]);
 }
 
@@ -125,4 +125,124 @@ test capture_stops_even_inside_caught_on_a_body_that_is_not_json
     $failures = ecotest::caught(function() : void {
         $id = reply(200, 'plain')->capture('$.id');
     });
+}
+
+test json_numbers_compare_by_value
+{
+    $r = reply(200, '{"i":1,"f":1.0,"big":10000000000,"half":0.5}');
+    $r->json('$.i', 1.0)->json('$.f', 1)->json('$.big', 10000000000)->json('$.half', 0.5);
+
+    expect(said(function() : void {
+        $r->json('$.i', 2.0)->json('$.f', '1');
+    }))->is(['expected $.i = 2.0, got 1', 'expected $.f = "1", got 1.0']);
+}
+
+test a_wildcard_value_check_needs_every_match
+{
+    reply(200, '{"l":[{"k":1},{"k":1}]}')->json('$.l[*].k', 1);
+
+    expect(said(function() : void {
+        reply(200, '{"l":[{"k":1},{"k":2}]}')->json('$.l[*].k', 1);
+    }))->is(['expected $.l[*].k = 1, got 2 at $.l[1].k']);
+}
+
+test json_compares_a_document_structurally
+{
+    $r = reply(200, '{"o":{"a":1,"b":[1,2]}}');
+    $same = guard json::parse('{"b":[1,2.0],"a":1}');
+    $r->json('$.o', $same);
+
+    $short = guard json::parse('{"a":1}');
+    $order = guard json::parse('{"a":1,"b":[2,1]}');
+    expect(said(function() : void {
+        $r->json('$.o', $short)->json('$.o', $order);
+    }))->is([
+        'expected $.o = {"a":1}, got {"a":1,"b":[1,2]}',
+        'expected $.o = {"a":1,"b":[2,1]}, got {"a":1,"b":[1,2]}',
+    ]);
+}
+
+test count_with_a_wildcard_checks_every_match
+{
+    reply(200, '{"l":[[1,2],[3,4]]}')->count('$.l[*]', 2);
+
+    expect(said(function() : void {
+        reply(200, '{"l":[[1,2],[3]]}')->count('$.l[*]', 2);
+        reply(200, '{"l":[[1,2],"x"]}')->count('$.l[*]', 2);
+    }))->is(['expected 2 items at $.l[1], got 1', 'expected 2 items at $.l[1], got "x", not an array']);
+}
+
+#[tests: expects death]
+test capture_stops_on_a_path_naming_several_values
+{
+    $id = reply(200, '{"l":[1,2]}')->capture('$.l[*]');
+}
+
+#[tests: expects death]
+test capture_stops_on_a_malformed_path
+{
+    $id = reply(200, '{"l":[1,2]}')->capture('$.l[');
+}
+
+test a_malformed_path_fails_at_the_callers_line
+{
+    $failures = ecotest::caught(function() : void {
+        reply(200, '{}')->json('$..a', 1);
+    });
+
+    expect($failures->count())->is(1);
+    expect($failures[0]->summary)->is("bad JSON path $..a: '..' at byte 1: recursive descent is not supported");
+    string $file = "{$failures[0]->at->file}";
+    expect($file)->ends('replies.eco');
+}
+
+test a_redact_path_that_matches_nothing_fails
+{
+    expect(said(function() : void {
+        reply(200, '{"a":1}')->snapshot(['$.a', '$.b']);
+    }))->is(['cannot redact $.b: it matches nothing']);
+}
+
+test redacting_a_body_that_is_not_json_fails
+{
+    $got = said(function() : void {
+        reply(200, 'plain')->snapshot(['$.a']);
+    });
+
+    expect($got->count())->is(1);
+    expect($got[0])->starts('cannot redact a body that is not JSON (');
+}
+
+test a_malformed_redact_path_fails
+{
+    expect(said(function() : void {
+        reply(200, '{}')->snapshot(['$[']);
+    }))->is(['cannot redact $[: the bracket or quote at byte 1 is never closed']);
+}
+
+test header_checks_look_at_every_header_of_that_name
+{
+    $r = reply(200, '', [Header('Set-Cookie', 'a=1'), Header('set-cookie', 'b=2')]);
+    $r->header('SET-COOKIE', 'b=2')->header('Set-Cookie', 'a=1');
+
+    $res = answer($r);
+    expect($res->headers('Set-Cookie'))->is(['a=1', 'b=2']);
+    expect($res->headers('X-None'))->empty();
+
+    expect(said(function() : void {
+        $r->header('Set-Cookie', 'c=3');
+    }))->is(['expected header Set-Cookie: c=3, got a=1, b=2']);
+}
+
+test type_compares_the_media_type_only
+{
+    $r = reply(200, '', [Header('Content-Type', 'Application/JSON ; charset=utf-8')]);
+    $r->type('application/json');
+
+    expect(said(function() : void {
+        $r->type('application/js')->type('application/json; charset=utf-8');
+    }))->is([
+        "expected Content-Type application/js, got 'Application/JSON ; charset=utf-8'",
+        "expected Content-Type application/json; charset=utf-8, got 'Application/JSON ; charset=utf-8'",
+    ]);
 }

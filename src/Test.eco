@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::protocol;
+
 /**
  * Holds failed checks until the returned value goes out of scope, then reports them all at once.
  * Bind it to a local: `$all = ecotest::soft();`.
@@ -45,7 +47,7 @@ public function caught(function<void()> $body) : array<Failure>
  */
 public function note(const string& $text) : void
 {
-    Event('note')->text('text', $text)->emit();
+    Event(protocol::NOTE)->text('text', $text)->emit();
 }
 
 /**
@@ -53,24 +55,32 @@ public function note(const string& $text) : void
  */
 public function metric(const string& $name, int64 $value) : void
 {
-    Event('metric')->text('name', $name)->number('value', $value)->emit();
+    Event(protocol::METRIC)->text('name', $name)->number('value', $value)->emit();
 }
 
 /**
  * Ends the test as skipped. The process exits 0, so a plain `echoc test` counts it as passed; the
- * ecotest tool reads the `skip` event and reports it as skipped, with `$reason`.
+ * ecotest tool reads the `skip` event and reports it as skipped, with `$reason`. A test whose
+ * `soft()` scope already holds failures is not skipped: it stops with those failures.
  */
 #[caller]
 public function skip(const string& $reason) : void
 {
-    $at = std::src::caller();
+    skip($reason, at: std::src::caller());
+}
 
-    Session::start();
-    Session::$reported = true;
-    Event('skip')->text('reason', $reason)->at($at)->emit();
-    Session::$tally->flush();
-    echo "skipped: {$reason}";
-    std::env::exit(0);
+/**
+ * `skip` at `$at`, for a helper that skips on behalf of the test that called it.
+ */
+public function skip(const string& $reason, at: std::src::location $at) : void
+{
+    $failed = guard Session::skipping($reason, $at) else {
+        echo "skipped: {$reason}";
+        std::env::exit(0);
+        return;
+    };
+
+    die($failed, $at);
 }
 
 /**
@@ -80,11 +90,30 @@ public function skip(const string& $reason) : void
 #[caller]
 public function needs(env: const string& $name) : string
 {
+    return needs(env: $name, at: std::src::caller());
+}
+
+/**
+ * `needs` with the skip placed at `$at`, for a helper that needs the variable on behalf of the
+ * test that called it.
+ */
+public function needs(env: const string& $name, at: std::src::location $at) : string
+{
     $value = string(std::env::var($name, ''));
 
     if ($value->empty()) {
-        skip("{$name} is not set");
+        skip("{$name} is not set", at: $at);
     }
 
     return $value;
+}
+
+/**
+ * Compares `$text` with the test's next snapshot file, failing at `$at` when it changed. The first
+ * run writes the file; see `Snapshot` for where it lives and how to accept a change. For a helper
+ * that snapshots on behalf of the test that called it; a test writes `expect($text)->snapshot()`.
+ */
+public function snapshot(const string& $text, at: std::src::location $at) : void
+{
+    Snapshot::check($text, $at);
 }

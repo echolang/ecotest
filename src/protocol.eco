@@ -1,0 +1,129 @@
+/**
+ * What a test and the ecotest tool agree on: the version of an event line, the event types, the
+ * file name a test id becomes, and the variable a named service's URL lives in. Both sides read
+ * these from here, so they cannot drift apart.
+ */
+
+namespace ecotest::protocol;
+
+/**
+ * The version every event line carries as `"v"`. A reader skips lines of another version instead
+ * of guessing at them.
+ */
+public const int64 VERSION = 1;
+
+/**
+ * A failed check.
+ */
+public const string FAIL = 'fail';
+
+/**
+ * A stop no check reported: a plain `assert`, `die` or `guard`.
+ */
+public const string CRASH = 'crash';
+
+/**
+ * The test ended itself as skipped.
+ */
+public const string SKIP = 'skip';
+
+/**
+ * A note the test recorded.
+ */
+public const string NOTE = 'note';
+
+/**
+ * A named number the test recorded.
+ */
+public const string METRIC = 'metric';
+
+/**
+ * A timing from `bench`.
+ */
+public const string BENCH = 'bench';
+
+/**
+ * How many checks the test made, written once at the end.
+ */
+public const string CHECKS = 'checks';
+
+/**
+ * The variable that names the directory a test writes its events into, one per pass.
+ */
+public const string RUN_DIR = 'ECOTEST_RUN_DIR';
+
+/**
+ * The variable that carries the seed property tests start from, so every pass draws the same
+ * values and a failure replays.
+ */
+public const string SEED = 'ECOTEST_SEED';
+
+/**
+ * A snapshot file the test wrote for the first time.
+ */
+public const string SNAPSHOT_NEW = 'snapshot-new';
+
+/**
+ * A snapshot file the test rewrote under `ECOTEST_UPDATE`.
+ */
+public const string SNAPSHOT_UPDATED = 'snapshot-updated';
+
+/**
+ * The file-name form of a test id: every byte outside `[A-Za-z0-9_.-]` becomes `_`, the same
+ * rule echoc uses for the test's coverage file, so events and counters join on one key.
+ */
+public function key(const string& $id) : string
+{
+    string $out = '';
+
+    for (usize $i = 0; $i < $id->size(); $i++) {
+        uint8 $b = $id->byte($i);
+        bool $plain = ($b >= 97 && $b <= 122)
+            || ($b >= 65 && $b <= 90)
+            || ($b >= 48 && $b <= 57)
+            || $b == 95 || $b == 45 || $b == 46;
+
+        if ($plain) {
+            $out->push($b);
+        } else {
+            $out->push(95);
+        }
+    }
+
+    return $out;
+}
+
+/**
+ * The environment variable that carries the URL of the service named `$name`:
+ * `ECOTEST_<NAME>_URL`, upper case, with every byte outside `[A-Z0-9]` turned into `_`.
+ */
+public function serviceVar(const string& $name) : string
+{
+    return serviceVar($name, 'URL');
+}
+
+/**
+ * `ECOTEST_<NAME>_<suffix>`, the variable that carries one fact about the service named `$name`:
+ * `URL` where it answers, `READY` the URL that answers once it is up, `READY_MS` how long that may
+ * take. The tool sets them; ecotest-http reads them.
+ */
+public function serviceVar(const string& $name, const string& $suffix) : string
+{
+    string $out = 'ECOTEST_';
+
+    for (usize $i = 0; $i < $name->size(); $i++) {
+        uint8 $b = $name->byte($i);
+
+        if ($b >= 97 && $b <= 122) {
+            $out->push($b - 32);
+        } else if (($b >= 65 && $b <= 90) || ($b >= 48 && $b <= 57)) {
+            $out->push($b);
+        } else {
+            $out->push(95);
+        }
+    }
+
+    $out->push(95);
+    $out->append($suffix);
+    return $out;
+}

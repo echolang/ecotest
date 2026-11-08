@@ -1,74 +1,177 @@
 namespace ecotest::cli;
 
+use ecotest::paths;
+
 /**
- * The lines changed since a git ref, read from `git diff -U0`: added and modified lines per file,
- * paths relative to the repository root.
+ * What changed since a git ref, read from `git diff -U0`: per file, every hunk with both its old
+ * and its new side, so a query can map the change onto coverage measured before or after it. New
+ * untracked files count as changed in full. Paths are absolute, under the repository's top.
  */
 public struct GitDiff
 {
+    public string $top = '';
     public array<ChangedFile> $files = [];
 
     /**
-     * The changed lines in the text of a `git diff -U0`.
+     * The hunks in the text of a `git diff -U0` run with `--src-prefix=a/ --dst-prefix=b/`, its
+     * paths made absolute under `$top`.
      */
-    public constructor(parsing: const string& $text)
+    public constructor(parsing: const string& $text, top: const string& $top)
     {
-        $file = '';
+        $this->top = $top;
+        string $old = '';
 
         foreach (str::lines($text) as const &$raw) {
             $line = string($raw);
 
+            if ($line->starts('--- ')) {
+                $old = GitDiff::side($line->sub(4, $line->size() - 4), 'a/');
+                continue;
+            }
+
             if ($line->starts('+++ ')) {
-                $file = '';
-                if ($line->starts('+++ b/')) {
-                    // clone: a string made from a str::lines part does not keep $text alive, and
-                    // the path outlives it once git's output is dropped
-                    $file = $line->sub(6, $line->size() - 6)->clone();
-                    $this->files[] = ChangedFile($file);
+                $new = GitDiff::side($line->sub(4, $line->size() - 4), 'b/');
+                // a deleted file has no new side; it is known by its old path
+                string $relative = $new;
+                if ($relative->empty()) {
+                    $relative = $old;
                 }
+                if ($relative->empty()) {
+                    continue;
+                }
+
+                $changed = ChangedFile(paths::resolve($top, $relative), $relative);
+                $changed->added = $old->empty();
+                $changed->deleted = $new->empty();
+                $this->files[] = mv $changed;
                 continue;
             }
 
-            if (!$line->starts('@@ ') || $file->empty()) {
+            if (!$line->starts('@@ ') || $this->files->empty()) {
                 continue;
             }
 
-            // @@ -a,b +c,d @@: lines c .. c+d-1 are new; d defaults to 1
+            // @@ -a,b +c,d @@: lines a .. a+b-1 went, c .. c+d-1 came; a count defaults to 1
+            usize $minus = $line->find('-');
             usize $plus = $line->find('+');
             usize $end = $line->find(' ', $plus);
-            $span = $line->sub($plus + 1, $end - $plus - 1);
-
-            int64 $start = 0;
-            int64 $count = 1;
-            usize $comma = $span->find(',');
-            if ($comma < $span->size()) {
-                $start = str::int($span->sub(0, $comma)) ?? 0;
-                $count = str::int($span->sub($comma + 1, $span->size() - $comma - 1)) ?? 0;
-            } else {
-                $start = str::int($span) ?? 0;
+            if ($minus >= $line->size() || $plus >= $line->size() || $end >= $line->size()) {
+                continue;
             }
 
             ChangedFile& $changed = $this->files[$this->files->count() - 1];
-            for (int64 $k = 0; $k < $count; $k++) {
-                $changed->lines[] = $start + $k;
-            }
+            $changed->hunks[] = Hunk(
+                GitDiff::start($line->sub($minus + 1, $plus - $minus - 2)),
+                GitDiff::count($line->sub($minus + 1, $plus - $minus - 2)),
+                GitDiff::start($line->sub($plus + 1, $end - $plus - 1)),
+                GitDiff::count($line->sub($plus + 1, $end - $plus - 1))
+            );
         }
     }
 
     /**
-     * Changed lines that have code, and of those, lines that ran.
+     * The path one side of a file header names, without its `a/` or `b/` prefix, unquoted; empty
+     * for `/dev/null`, the side a new or deleted file lacks.
+     */
+    private static function side(const string& $named, const string& $prefix) : string
+    {
+        string $path = $named;
+        if ($path->starts('"')) {
+            $path = GitDiff::unquote($path);
+        }
+        if ($path == '/dev/null') {
+            return '';
+        }
+        if ($path->starts($prefix)) {
+            return $path->sub($prefix->size(), $path->size() - $prefix->size());
+        }
+        return $path;
+    }
+
+    /**
+     * A path git wrote quoted, as C writes a string literal: `"src/\303\244.eco"` is `src/ä.eco`.
+     */
+    public static function unquote(const string& $quoted) : string
+    {
+        string $out = '';
+        usize $i = 1;
+        usize $last = $quoted->size() - 1;
+
+        while ($i < $last) {
+            uint8 $b = $quoted->byte($i);
+            if ($b != 92 || $i + 1 >= $last) {
+                $out->push($b);
+                $i++;
+                continue;
+            }
+
+            uint8 $next = $quoted->byte($i + 1);
+            if ($next >= 48 && $next <= 55 && $i + 3 < $last + 1) {
+                // three octal digits are one byte
+                uint32 $v = 0;
+                usize $k = 0;
+                while ($k < 3 && $i + 1 + $k < $last) {
+                    uint8 $d = $quoted->byte($i + 1 + $k);
+                    if ($d < 48 || $d > 55) {
+                        break;
+                    }
+                    $v = $v * 8 + (($d - 48) as uint32);
+                    $k++;
+                }
+                $out->push($v as uint8);
+                $i = $i + 1 + $k;
+                continue;
+            }
+
+            if ($next == 110) {
+                $out->push(10);
+            } else if ($next == 116) {
+                $out->push(9);
+            } else {
+                $out->push($next);
+            }
+            $i = $i + 2;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The first line of a hunk side `a,b` or `a`.
+     */
+    private static function start(const string& $span) : int64
+    {
+        usize $comma = $span->find(',');
+        return str::int($span->sub(0, $comma)) ?? 0;
+    }
+
+    /**
+     * The line count of a hunk side `a,b`, or 1 for `a`.
+     */
+    private static function count(const string& $span) : int64
+    {
+        usize $comma = $span->find(',');
+        if ($comma >= $span->size()) {
+            return 1;
+        }
+        return str::int($span->sub($comma + 1, $span->size() - $comma - 1)) ?? 0;
+    }
+
+    /**
+     * Changed lines that have code, and of those, lines that ran, in coverage measured on the
+     * changed source.
      */
     public const function coverage(const array<FileCoverage>& $files) : Ratio
     {
         $r = Ratio();
 
-        foreach ($files as const &$file) {
-            foreach ($this->files as const &$changed) {
-                if (!Coverage::sameFile($changed->path, $file->file)) {
+        foreach ($this->files as const &$changed) {
+            foreach ($files as const &$file) {
+                if ($file->path != $changed->path) {
                     continue;
                 }
 
-                foreach ($changed->lines as const &$line) {
+                foreach ($changed->newLines() as const &$line) {
                     if ($file->lines->has($line)) {
                         $r->total++;
                         if ($file->lines->get($line) > 0) {
@@ -83,26 +186,75 @@ public struct GitDiff
     }
 
     /**
-     * The diff of the working tree in `$dir` against `$ref`, from the program `$git`, or why git
-     * gave none: it could not start, or it refused with what it said.
+     * The diff of the working tree in `$dir` against `$ref`, untracked files included, from the
+     * program `$git`, or why git gave none: the ref looks like an option, git could not start, or
+     * it refused with what it said.
      */
     public static function since(const string& $git, const string& $dir, const string& $ref) : result<GitDiff, GitError>
     {
-        $diff = std::process::command($git, ['diff', '-U0', '--no-color', $ref, '--']);
-        $diff->dir($dir);
-        $o = guard $diff->output() else ($e) {
+        if ($ref->empty() || $ref->starts('-')) {
+            return .error(.badRef($ref));
+        }
+
+        $top = guard GitDiff::git($git, $dir, ['rev-parse', '--show-toplevel'], $ref) else ($e) {
+            return .error($e);
+        };
+        // trimmed text shares the buffer git wrote; a path handed to the system needs its own
+        string $root = str::trim($top)->clone();
+        $root = std::io::realpath($root)->or($root);
+
+        $text = guard GitDiff::git($git, $dir, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-renames', '-U0', '--src-prefix=a/', '--dst-prefix=b/', $ref, '--'], $ref) else ($e) {
+            return .error($e);
+        };
+        $diff = GitDiff(parsing: $text, top: $root);
+
+        $untracked = guard GitDiff::git($git, $dir, ['-c', 'core.quotePath=false', 'ls-files', '-z', '--others', '--exclude-standard', '--full-name'], $ref) else ($e) {
+            return .error($e);
+        };
+        foreach (str::split($untracked, "\0") as const &$name) {
+            $relative = string($name);
+            if ($relative->empty()) {
+                continue;
+            }
+            $path = paths::resolve($root, $relative);
+            $changed = ChangedFile($path, $relative);
+            $changed->added = true;
+            $changed->untracked = true;
+            int64 $lines = str::lines(std::io::readfile($path)->or(''))->count() as int64;
+            $changed->hunks[] = Hunk(0, 0, 1, $lines);
+            $diff->files[] = mv $changed;
+        }
+
+        return .ok(mv $diff);
+    }
+
+    /**
+     * The text of `$path` at `$ref`, relative to the repository's top, or why git gave none.
+     */
+    public static function old(const string& $git, const string& $dir, const string& $ref, const string& $relative) : result<string, GitError>
+    {
+        return GitDiff::git($git, $dir, ['show', "{$ref}:{$relative}"], $ref);
+    }
+
+    /**
+     * What `$git` with `$args`, run in `$dir`, wrote to stdout, or why it gave nothing.
+     */
+    private static function git(const string& $git, const string& $dir, array<string> $args, const string& $ref) : result<string, GitError>
+    {
+        $cmd = std::process::command($git, $args);
+        $cmd->dir($dir);
+        $o = guard $cmd->output() else ($e) {
             return .error(.cannotRun($git, $e));
         };
         if (!$o->status->success()) {
             // git's usage text can run long; its first line names the problem
             $said = str::trim($o->stderr);
-            usize $end = $said->find('\n');
+            usize $end = $said->find("\n");
             if ($end < $said->size()) {
                 $said = str::trim($said->sub(0, $end));
             }
             return .error(.refused($ref, $o->status, $said));
         }
-
-        return .ok(GitDiff(parsing: $o->stdout));
+        return .ok($o->stdout);
     }
 }

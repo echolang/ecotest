@@ -1,20 +1,18 @@
 namespace ecotest;
 
 /**
- * A generator for property tests: how to make a random `T`, how to offer smaller versions of one
- * that failed, and how to print one. Built by the functions in `ecotest::gen`.
+ * A generator for property tests: how to build a `T` from the answers `Draws` hands out, and how
+ * to print one. Shrinking needs nothing more, because it works on the answers rather than on the
+ * value. Built by the functions in `ecotest::gen`; a generator of your own is any closure over
+ * `Draws`, usually made of other generators:
+ * `Gen<Point>((Draws& $d) => Point($x->draw($d), $y->draw($d)), (const Point& $p) => "{$p}")`.
  */
 public class Gen<T>
 {
     /**
-     * Makes one random value from `Random`.
+     * Builds one value from `Draws`.
      */
-    public const function<T(Random&)> $make;
-
-    /**
-     * Offers smaller versions of a failing value for the shrinker to try.
-     */
-    public const function<array<T>(const T&)> $shrink;
+    public const function<T(Draws&)> $draw;
 
     /**
      * Prints a value for the failure message.

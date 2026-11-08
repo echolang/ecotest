@@ -67,11 +67,21 @@ test json_paths_walk_keys_indexes_and_wildcards
 {
     $doc = guard json::parse('{"a":{"b":[{"c":1},{"c":2}]},"odd key":3}');
 
-    ecotest::expect(jsonpath::steps('$.a.b[0].c'))->is(['a', 'b', '[0]', 'c']);
-    ecotest::expect(jsonpath::all($doc, '$.a.b[*].c')->count())->is(2);
-    ecotest::expect(str::from(jsonpath::one($doc, "$['odd key']") ?? json::nil()))->is('3');
-    ecotest::expect(jsonpath::one($doc, '$.a.missing'))->none();
+    $steps = guard jsonpath::steps('$.a.b[0].c');
+    ecotest::expect(jsonpath::render($steps))->is('$.a.b[0].c');
 
-    jsonpath::replace($doc, '$.a.b[*].c', json::str('x'));
-    ecotest::expect(str::from(jsonpath::one($doc, '$.a.b[1].c') ?? json::nil()))->is('"x"');
+    $all = guard jsonpath::all($doc, '$.a.b[*].c');
+    ecotest::expect($all->count())->is(2);
+    ecotest::expect($all[1]->path)->is('$.a.b[1].c');
+
+    $odd = guard jsonpath::all($doc, "$['odd key']");
+    ecotest::expect(str::from($odd[0]->value))->is('3');
+
+    $missing = guard jsonpath::all($doc, '$.a.missing');
+    ecotest::expect($missing->count())->is(0);
+
+    $wild = guard jsonpath::steps('$.a.b[*].c');
+    ecotest::expect(jsonpath::replace($doc, $wild, json::str('x')))->is(2);
+    $after = guard jsonpath::all($doc, '$.a.b[1].c');
+    ecotest::expect(str::from($after[0]->value))->is('"x"');
 }

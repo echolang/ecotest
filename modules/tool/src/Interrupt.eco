@@ -1,0 +1,48 @@
+/**
+ * Ctrl-C and `kill`: once one arrives the tool stops what it runs, stops the services and leaves
+ * the run marked unfinished, instead of dying with its children still holding their ports. Windows
+ * has no such signals for a console program to catch, so there nothing is installed.
+ */
+
+namespace ecotest::cli::interrupt;
+
+#[if: os != windows]
+internal extern {
+    function signal as c_signal(int32 $sig, extern function<void(int32)> $handler) : ptr<uint8>;
+}
+#[end]
+
+/**
+ * The signal that arrived, or 0.
+ */
+internal class Flag
+{
+    internal static int32 $got = 0;
+}
+
+/**
+ * The handler: remembers the signal and nothing else, which is all a handler may safely do.
+ */
+internal function caught(int32 $sig) : void
+{
+    Flag::$got = $sig;
+}
+
+/**
+ * Catches SIGINT and SIGTERM from here on.
+ */
+public function install() : void
+{
+#[if: os != windows]
+    $int = c_signal(2, &caught);
+    $term = c_signal(15, &caught);
+#[end]
+}
+
+/**
+ * True once an interrupt arrived.
+ */
+public function requested() : bool
+{
+    return Flag::$got != 0;
+}

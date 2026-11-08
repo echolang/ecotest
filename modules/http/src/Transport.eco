@@ -2,6 +2,14 @@ namespace ecotest::http;
 
 /**
  * Whatever delivers a request: a socket client, or an app's own dispatcher called in process.
+ *
+ * Every transport keeps one contract, so a test reads the same through any of them. It takes the
+ * request's URL as absolute and already encoded. It follows no redirects and asks for no
+ * compression. It sends exactly the request's headers, plus `Host`, an `Accept` for any media
+ * type and `Content-Length` when the request has none of its own, and no User-Agent unless the request
+ * sets one. A HEAD comes back with an empty body. `ms` is wall time. Response headers keep their
+ * order and their duplicates. A request that could not be delivered is a `TransportError`, never
+ * a made-up response.
  */
 public interface Transport
 {

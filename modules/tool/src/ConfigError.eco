@@ -1,0 +1,31 @@
+namespace ecotest::cli;
+
+/**
+ * Why `ecotest.json` cannot be used. A configuration that is wrong stops the run: running without
+ * the gates or services it asks for would report a green that means nothing.
+ */
+public enum ConfigError
+{
+    /**
+     * The file at `$path` is not JSON.
+     */
+    case malformed(string $path, json::Error $cause);
+
+    /**
+     * The field `$field` of the file at `$path` is not `$expected`.
+     */
+    case badValue(string $path, string $field, string $expected);
+}
+
+namespace str;
+
+/**
+ * The reason in words.
+ */
+public function from(const ecotest::cli::ConfigError& $e) : string
+{
+    return match ($e) {
+        .malformed($path, $cause) => "{$path} does not parse: {$cause->message()}",
+        .badValue($path, $field, $expected) => "{$path}: {$field} must be {$expected}",
+    };
+}

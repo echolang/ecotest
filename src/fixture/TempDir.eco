@@ -1,5 +1,7 @@
 namespace ecotest;
 
+use ecotest::paths;
+
 /**
  * A fresh directory under the system temp directory, removed with everything in it when the value
  * goes. `$dir = TempDir();` at the top of a test is the whole setup.
@@ -15,6 +17,11 @@ public class TempDir
      * The path of the directory.
      */
     public const string $path;
+
+    /**
+     * The cleanup that removes the directory when the test stops before this value goes.
+     */
+    private usize $cleanup = 0;
 
     /**
      * Makes the directory. One that cannot be made stops the test at the line that asked for it.
@@ -33,6 +40,12 @@ public class TempDir
         guard std::io::mkdir($this->path) else ($e) {
             die(Session::report(Failure("cannot create temp directory {$this->path}: {$e}", $at)), $at);
         };
+
+        // a failed check stops the test without destructors; the session removes it then
+        string $made = $this->path;
+        $this->cleanup = Session::defer(function() : void {
+            $gone = paths::removeTree($made);
+        });
     }
 
     /**
@@ -68,28 +81,7 @@ public class TempDir
 
     destructor()
     {
-        TempDir::remove($this->path);
-    }
-
-    /**
-     * Removes `$path` and everything below it. Best effort: a temp directory left behind is not a
-     * test failure.
-     */
-    private static function remove(const string& $path) : void
-    {
-        $listing = guard std::io::opendir($path) else {
-            return;
-        };
-
-        foreach ($listing as const &$entry) {
-            if ($entry->is_directory()) {
-                TempDir::remove($entry->path());
-            } else {
-                $gone = std::io::remove($entry->path());
-            }
-        }
-
-        $listing->close();
-        $removed = std::io::rmdir($path);
+        Session::undefer($this->cleanup);
+        $gone = paths::removeTree($this->path);
     }
 }

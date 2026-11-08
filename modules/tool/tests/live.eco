@@ -3,8 +3,8 @@
  * runs of the sample module in pretty style, on a terminal and on a stream that cannot be redrawn.
  */
 
-use ecotest::{expect, TempDir};
-use ecotest::cli::{Tail, LiveView, Tool, Runner, Invocation, doc, files, Run, Gates, Verdict, runjson};
+use ecotest::{expect, paths, TempDir};
+use ecotest::cli::{Tail, LiveView, Tool, Runner, Invocation, doc, Run, Gates, Verdict, runjson};
 
 internal function terminal() : command::CLIContext
 {
@@ -41,6 +41,17 @@ internal function parsed(const string& $text) : json::Value
 {
     $row = guard json::parse($text);
     return $row;
+}
+
+/**
+ * Folds the report row `$text` into `$run` and shows it to `$view`, as the runner does.
+ */
+internal function show(LiveView& $view, Run& $run, const string& $text) : void
+{
+    $row = parsed($text);
+    $test = $run->fold($row);
+    $view->take($row, $test);
+    $view->advance();
 }
 
 internal function everything(const command::CLIContext& $ctx) : string
@@ -83,11 +94,12 @@ test a_view_ignores_rows_before_it_began
     $ctx = pipe();
     $view = LiveView($ctx);
 
+    $run = Run('/nowhere');
     $view->output('early\n');
-    $view->row(parsed('{"type":"run","selected":1}'));
-    $view->row(parsed('{"type":"test","id":"m/a.eco::t","status":"pass"}'));
-    $view->row(parsed('{"type":"end"}'));
-    $view->row(parsed('{"type":"other"}'));
+    show($view, $run, '{"v":2,"type":"run","selected":1}');
+    show($view, $run, '{"v":2,"type":"test","id":"m/a.eco::t","status":"pass"}');
+    show($view, $run, '{"v":2,"type":"end"}');
+    show($view, $run, '{"v":2,"type":"other"}');
     $view->end('nowhere');
 
     expect($ctx->page->rows)->empty();
@@ -95,7 +107,7 @@ test a_view_ignores_rows_before_it_began
     // a compile that stopped without a log still fails the spinner
     $quiet = pipe();
     $stopped = LiveView($quiet);
-    $stopped->begin(1, 1, 'nowhere');
+    $stopped->begin(1, 1);
     $stopped->end('nowhere');
     expect(rows($quiet))->has('echoc stopped before any test ran');
 }
@@ -106,15 +118,17 @@ test a_view_shows_the_compile_then_the_tests_on_a_pipe
     $view = LiveView($ctx);
 
     $dir = passDir('{"type":"checks","count":3}\n');
-    $view->begin(2, 3, $dir->path);
+    $run = Run('/nowhere');
+    $run->begin($dir->path);
+    $view->begin(2, 3);
     $view->output('compiling sample\n');
-    $view->row(parsed('{"type":"test","id":"m/a.eco::early","status":"pass"}'));
-    $view->row(parsed('{"type":"run","selected":3}'));
+    show($view, $run, '{"v":2,"type":"test","id":"m/a.eco::early","status":"pass"}');
+    show($view, $run, '{"v":2,"type":"run","selected":3}');
     $view->output('echoc listing\n');
-    $view->row(parsed('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'));
-    $view->row(parsed('{"type":"test","id":"m/a.eco::stops","module":"m","status":"fail","failure":{"headline":"fatal error","file":"tests/a.eco","line":9,"message":"expected 2, got 1\\n  in row 3"}}'));
-    $view->row(parsed('{"type":"test","id":"m/a.eco::hangs","module":"m","status":"timeout"}'));
-    $view->row(parsed('{"type":"end"}'));
+    show($view, $run, '{"v":2,"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}');
+    show($view, $run, '{"v":2,"type":"test","id":"m/a.eco::stops","module":"m","status":"fail","failure":{"headline":"fatal error","file":"tests/a.eco","line":9,"message":"expected 2, got 1\\n  in row 3"}}');
+    show($view, $run, '{"v":2,"type":"test","id":"m/a.eco::hangs","module":"m","status":"timeout"}');
+    show($view, $run, '{"v":2,"type":"end"}');
 
     expect(rows($ctx))
         ->has('compiling sample')
@@ -134,18 +148,22 @@ test a_green_pass_settles_the_bar_and_a_cut_one_fails_it
     $view = LiveView($ctx);
 
     $dir = passDir('{"type":"checks","count":1}\n');
-    $view->begin(1, 1, $dir->path);
-    $view->row(parsed('{"type":"run","selected":1}'));
-    $view->row(parsed('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'));
-    $view->row(parsed('{"type":"end"}'));
+    $run = Run('/nowhere');
+    $run->begin($dir->path);
+    $view->begin(1, 1);
+    show($view, $run, '{"v":2,"type":"run","selected":1}');
+    show($view, $run, '{"v":2,"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}');
+    show($view, $run, '{"v":2,"type":"end"}');
     $view->end('nowhere');
     expect($ctx->vt)->has('1 passed · 1 assertion in');
 
     $cut = terminal();
     $stopped = LiveView($cut);
-    $stopped->begin(1, 1, 'nowhere');
-    $stopped->row(parsed('{"type":"run","selected":2}'));
-    $stopped->row(parsed('{"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}'));
+    $cutRun = Run('/nowhere');
+    $cutRun->begin('/nowhere/pass-1');
+    $stopped->begin(1, 1);
+    show($stopped, $cutRun, '{"v":2,"type":"run","selected":2}');
+    show($stopped, $cutRun, '{"v":2,"type":"test","id":"m/a.eco::adds","module":"m","status":"pass","ms":3}');
     $stopped->end('nowhere');
     expect(rows($cut))->has('1 passed in')->lacks('assertion');
 }
@@ -226,13 +244,14 @@ test a_run_directory_that_cannot_be_written_fails_a_pretty_run
     // a pass directory that is there but closed keeps echoc's log out
     $dir = TempDir();
     $pass = $dir->file('run/pass-1');
-    guard files::mkdirs(std::env::join($pass, 'events'));
+    guard paths::mkdirs(std::env::join($pass, 'events'));
     expect(ecotest::run('chmod', ['555', $pass]))->succeeds();
     $echoc = Invocation();
     $echoc->project = $dir->path;
     $runner = Runner();
     $runner->view = LiveView(pipe());
-    $ran = $runner->run($echoc, $dir->file('run'));
+    $into = Run($dir->file('run'));
+    $ran = $runner->run($echoc, $dir->file('run'), $into);
     expect(ecotest::run('chmod', ['755', $pass]))->succeeds();
     $e = expect($ran)->fails();
     expect("{$e}")->is("cannot write {$pass}/echoc.log: Permission denied");

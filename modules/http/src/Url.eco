@@ -1,0 +1,49 @@
+/**
+ * Percent-encoding for URLs and form bodies, as RFC 3986 spells it.
+ */
+
+namespace ecotest::http::url;
+
+/**
+ * `$text` with every byte but the unreserved ones (`A-Z a-z 0-9 - . _ ~`) written as `%XX`.
+ */
+public function encode(const string& $text) : string
+{
+    string $hex = '0123456789ABCDEF';
+    string $out = '';
+
+    for (usize $i = 0; $i < $text->size(); $i++) {
+        uint8 $b = $text->byte($i);
+        bool $keep = ($b >= 65 && $b <= 90) || ($b >= 97 && $b <= 122) || ($b >= 48 && $b <= 57)
+            || $b == 45 || $b == 46 || $b == 95 || $b == 126;
+
+        if ($keep) {
+            $out->push($b);
+        } else {
+            $out->push(37);
+            $out->push($hex->byte(($b / 16) as usize));
+            $out->push($hex->byte(($b % 16) as usize));
+        }
+    }
+
+    return $out;
+}
+
+/**
+ * `$fields` as `a=1&b=two`, each name and value encoded, in the map's order. Empty for none.
+ */
+public function query(const ordered_map<string, string>& $fields) : string
+{
+    string $out = '';
+
+    foreach ($fields as $name => const &$value) {
+        if (!$out->empty()) {
+            $out->push(38);
+        }
+        $out->append(encode($name));
+        $out->push(61);
+        $out->append(encode($value));
+    }
+
+    return $out;
+}

@@ -68,15 +68,3 @@ public function last(const string& $text, uint8 $byte) : usize
     }
     return $at;
 }
-
-/**
- * The last segment of `$path`.
- */
-public function base(const string& $path) : string
-{
-    usize $slash = last($path, 47);
-    if ($slash == $path->size()) {
-        return $path;
-    }
-    return $path->sub($slash + 1, $path->size() - $slash - 1);
-}

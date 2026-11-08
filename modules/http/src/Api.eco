@@ -1,14 +1,34 @@
 namespace ecotest::http;
 
+use ecotest::protocol;
+use ecotest::http::url;
+
 /**
  * A service under test: a base URL, default headers, and the transport that carries requests.
- * Every request returns a `Reply` to check.
+ * Every request returns a `Reply` to check. It copies like any struct, so `with` and `bearer`
+ * hand back a changed copy and leave the original alone; the transport stays shared.
  */
-public class Api
+public struct Api
 {
+    /**
+     * The services whose ready check already passed in this process, by name.
+     */
+    internal static array<string> $ready = [];
+
+    /**
+     * The base URL, without a trailing `/`.
+     */
     public const string $base;
+
+    /**
+     * What carries the requests. Copies of this `Api` share it.
+     */
     public Transport $transport;
-    private array<Header> $headers = [];
+
+    /**
+     * The headers sent with every request, one per name.
+     */
+    public array<Header> $headers = [];
 
     /**
      * A service at `$base`, such as `http://127.0.0.1:8080`, reached over sockets.
@@ -21,15 +41,19 @@ public class Api
 
     /**
      * The service ecotest started under `$name` (the `services` list of `ecotest.json`). Outside
-     * `ecotest` its `ECOTEST_<NAME>_URL` is unset and the test is skipped, not failed.
+     * `ecotest` its `ECOTEST_<NAME>_URL` is unset and the test is skipped, not failed. When the
+     * tool also exports `ECOTEST_<NAME>_READY`, that URL has to answer with a 2xx or 3xx within
+     * `ECOTEST_<NAME>_READY_MS` first, once per process; otherwise the test stops here.
      */
     #[caller]
     public constructor(service: const string& $name)
     {
-        $variable = Api::variable($name);
-        $url = ecotest::needs(env: $variable);
+        $at = std::src::caller();
+        string $variable = protocol::serviceVar($name);
+        $url = ecotest::needs(env: $variable, at: $at);
         $this->base = Api::trimmed($url);
         $this->transport = CurlTransport();
+        Api::await($name, $at);
     }
 
     /**
@@ -42,108 +66,165 @@ public class Api
     }
 
     /**
-     * Sends `$name: $value` with every request from here on.
+     * A copy that sends `$name: $value` with every request, in place of any header of that name
+     * this one sends.
      */
-    public function with(const string& $name, const string& $value) : Api
+    public const function with(const string& $name, const string& $value) : Api
     {
-        $this->headers[] = Header($name, $value);
-        return $this;
+        Api $copy = $this;
+        setHeader($copy->headers, $name, $value);
+        return $copy;
     }
 
     /**
-     * Sends `Authorization: Bearer $token` with every request from here on.
+     * A copy that no longer sends header `$name`.
      */
-    public function bearer(const string& $token) : Api
+    public const function without(const string& $name) : Api
     {
-        return $this->with('Authorization', "Bearer {$token}");
+        Api $copy = $this;
+        dropHeader($copy->headers, $name);
+        return $copy;
     }
 
     /**
-     * GET `$path`.
+     * A copy that sends `Authorization: Bearer $token` with every request.
      */
-    public function get(const string& $path) : Reply
+    public const function bearer(const string& $token) : Api
     {
-        return $this->send(.get, $path);
+        string $value = "Bearer {$token}";
+        return $this->with('Authorization', $value);
     }
 
     /**
-     * HEAD `$path`.
+     * GET `$path`, with `$query` appended as encoded fields.
      */
-    public function head(const string& $path) : Reply
+    public const function get(const string& $path, query: const ordered_map<string, string>& $query = []) : Reply
     {
-        return $this->send(.head, $path);
+        return $this->send(.get, $path, null, query: $query);
     }
 
     /**
-     * DELETE `$path`.
+     * HEAD `$path`, with `$query` appended as encoded fields.
      */
-    public function delete(const string& $path) : Reply
+    public const function head(const string& $path, query: const ordered_map<string, string>& $query = []) : Reply
     {
-        return $this->send(.delete, $path);
+        return $this->send(.head, $path, null, query: $query);
+    }
+
+    /**
+     * DELETE `$path`, with `$query` appended as encoded fields.
+     */
+    public const function delete(const string& $path, query: const ordered_map<string, string>& $query = []) : Reply
+    {
+        return $this->send(.delete, $path, null, query: $query);
     }
 
     /**
      * POST `$body` to `$path`: `json:` text or a document, `form:` fields, or `body:` with `type:`.
      */
-    public function post(const string& $path, construct Body $body) : Reply
+    public const function post(const string& $path, construct Body $body) : Reply
     {
         return $this->send(.post, $path, $body);
     }
 
     /**
+     * POST `$body` to `$path` with `$query` appended as encoded fields.
+     */
+    public const function post(const string& $path, query: const ordered_map<string, string>& $query, construct Body $body) : Reply
+    {
+        return $this->send(.post, $path, $body, query: $query);
+    }
+
+    /**
      * PUT `$body` to `$path`: `json:` text or a document, `form:` fields, or `body:` with `type:`.
      */
-    public function put(const string& $path, construct Body $body) : Reply
+    public const function put(const string& $path, construct Body $body) : Reply
     {
         return $this->send(.put, $path, $body);
     }
 
     /**
+     * PUT `$body` to `$path` with `$query` appended as encoded fields.
+     */
+    public const function put(const string& $path, query: const ordered_map<string, string>& $query, construct Body $body) : Reply
+    {
+        return $this->send(.put, $path, $body, query: $query);
+    }
+
+    /**
      * PATCH `$body` to `$path`: `json:` text or a document, `form:` fields, or `body:` with `type:`.
      */
-    public function patch(const string& $path, construct Body $body) : Reply
+    public const function patch(const string& $path, construct Body $body) : Reply
     {
         return $this->send(.patch, $path, $body);
     }
 
     /**
-     * Sends a request built here, with `$body` and its Content-Type when there is one, and returns
-     * what came back. A transport failure is kept on the reply, so the first check on it fails at
-     * the test's line.
+     * PATCH `$body` to `$path` with `$query` appended as encoded fields.
      */
-    public function send(Verb $verb, const string& $path, const Body? $body = null) : Reply
+    public const function patch(const string& $path, query: const ordered_map<string, string>& $query, construct Body $body) : Reply
     {
-        $request = Request($verb, Api::join($this->base, $path));
+        return $this->send(.patch, $path, $body, query: $query);
+    }
+
+    /**
+     * Sends a request built here, with `$body` and its Content-Type when there is one, and returns
+     * what came back. The body's Content-Type replaces one set with `with`. A transport failure is
+     * kept on the reply, so the first check on it fails at the test's line.
+     */
+    public const function send(Verb $verb, const string& $path, const Body? $body = null, query: const ordered_map<string, string>& $query = []) : Reply
+    {
+        $request = Request($verb, Api::target($this->base, $path, $query));
         $request->headers = $this->headers;
 
         if ($body != null) {
             $b = guard $body;
             $request->body = $b->text;
-            $request->header('Content-Type', $b->type);
+            $request->set('Content-Type', $b->type);
         }
 
-        $response = $this->transport->send($request);
+        Transport $carrier = $this->transport;
+        $response = $carrier->send($request);
         return Reply(mv $request, mv $response);
     }
 
     /**
-     * `ECOTEST_<NAME>_URL`, the variable the ecotest tool exports for service `$name`.
+     * Waits for the ready URL the tool exported for service `$name`, once per process. Stops the
+     * test at `$at` when it does not answer in time.
      */
-    public static function variable(const string& $name) : string
+    private static function await(const string& $name, std::src::location $at) : void
     {
-        string $out = 'ECOTEST_';
-        for (usize $i = 0; $i < $name->size(); $i++) {
-            uint8 $b = $name->byte($i);
-            if ($b >= 97 && $b <= 122) {
-                $out->push($b - 32);
-            } else if (($b >= 65 && $b <= 90) || ($b >= 48 && $b <= 57)) {
-                $out->push($b);
-            } else {
-                $out->push(95);
+        foreach (Api::$ready as const &$done) {
+            if ($done == $name) {
+                return;
             }
         }
-        $out->append('_URL');
-        return $out;
+
+        string $readyVar = protocol::serviceVar($name, 'READY');
+        string $ready = string(std::env::var($readyVar, ''));
+        if ($ready->empty()) {
+            Api::$ready[] = $name;
+            return;
+        }
+
+        string $limitVar = protocol::serviceVar($name, 'READY_MS');
+        string $limitText = string(std::env::var($limitVar, ''));
+        int64 $limit = str::int($limitText) ?? 10000;
+
+        $started = std::time::instant::now();
+        while (true) {
+            int64 $status = probe($ready) ?? 0;
+            if ($status >= 200 && $status < 400) {
+                Api::$ready[] = $name;
+                return;
+            }
+            if ($started->elapsed()->as_millis() >= $limit) {
+                break;
+            }
+            std::time::sleep(.millis(50));
+        }
+
+        ecotest::Failure("service {$name} was not ready at {$ready} within {$limit} ms", $at)->stop();
     }
 
     /**
@@ -158,16 +239,38 @@ public class Api
     }
 
     /**
-     * `$base` and `$path` with exactly one `/` between them. A full URL as `$path` wins.
+     * `$base` and `$path` with exactly one `/` between them, then `$query` joined with `?` or `&`
+     * before any `#fragment`. A full URL as `$path` wins over `$base`.
      */
-    private static function join(const string& $base, const string& $path) : string
+    private static function target(const string& $base, const string& $path, const ordered_map<string, string>& $query) : string
     {
+        string $out = '';
         if ($path->starts('http://') || $path->starts('https://')) {
-            return $path;
+            $out = $path;
+        } else if ($path->starts('/')) {
+            $out = "{$base}{$path}";
+        } else {
+            $out = "{$base}/{$path}";
         }
-        if ($path->starts('/')) {
-            return "{$base}{$path}";
+
+        if ($query->empty()) {
+            return $out;
         }
-        return "{$base}/{$path}";
+
+        string $fragment = '';
+        usize $hash = $out->find('#');
+        if ($hash < $out->size()) {
+            $fragment = string($out->sub($hash, $out->size() - $hash));
+            $out = string($out->sub(0, $hash));
+        }
+
+        if (!$out->contains('?')) {
+            $out->push(63);
+        } else if (!$out->ends('?') && !$out->ends('&')) {
+            $out->push(38);
+        }
+        $out->append(url::query($query));
+        $out->append($fragment);
+        return $out;
     }
 }

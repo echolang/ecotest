@@ -1,0 +1,119 @@
+/**
+ * Stopping a program and everything it started. A service run through `sh -c` or `npm` leaves
+ * its real server as a grandchild that killing the child alone never reaches, and the server keeps
+ * its port. The standard library spawns without process groups, so the tree is read from `ps`.
+ */
+
+namespace ecotest::cli::proc;
+
+#[if: os != windows]
+internal extern {
+    function kill as c_kill(int32 $pid, int32 $sig) : int32;
+}
+#[end]
+
+/**
+ * Every process below `$root`, deepest first, from a snapshot of the process table. Empty when
+ * the table cannot be read.
+ */
+public function tree(int32 $root) : array<int32>
+{
+    array<int32> $out = [];
+
+#[if: os != windows]
+    $ps = std::process::command('ps', ['-A', '-o', 'pid=', '-o', 'ppid=']);
+    $o = guard $ps->output() else {
+        return $out;
+    };
+
+    map<int32, array<int32>> $children = [];
+    foreach (str::lines($o->stdout) as const &$line) {
+        $fields = str::split(str::trim(string($line)), ' ')->owned();
+        array<int32> $numbers = [];
+        foreach ($fields as const &$field) {
+            $n = guard str::int($field) else {
+                continue;
+            };
+            $numbers[] = $n as int32;
+        }
+        if ($numbers->count() != 2) {
+            continue;
+        }
+        if (!$children->has($numbers[1])) {
+            array<int32> $none = [];
+            $children->set($numbers[1], $none);
+        }
+        $children->at($numbers[1])[] = $numbers[0];
+    }
+
+    // breadth first from the root, then read backwards so the deepest go first
+    array<int32> $queue = [$root];
+    usize $i = 0;
+    while ($i < $queue->count()) {
+        int32 $pid = $queue[$i];
+        $i++;
+        if (!$children->has($pid)) {
+            continue;
+        }
+        foreach ($children->at($pid) as const &$child) {
+            $queue[] = $child;
+        }
+    }
+    for (usize $k = $queue->count(); $k > 1; $k--) {
+        $out[] = $queue[$k - 1];
+    }
+#[end]
+
+    return $out;
+}
+
+/**
+ * Stops `$child` and everything it started: asks them to end, gives them `$graceMs` to do so, then
+ * kills whatever is left, and reaps the child.
+ */
+public function stop(std::process::child& $child, int64 $graceMs) : void
+{
+#[if: os == windows]
+    $killer = std::process::command('taskkill', ['/T', '/F', '/PID', "{$child->id()}"]);
+    $quiet = $killer->output();
+    $killed = $child->kill();
+    $waited = $child->wait();
+#[else]
+    $below = tree($child->id());
+
+    foreach ($below as $pid) {
+        $sent = c_kill($pid, 15);
+    }
+    $sent = c_kill($child->id(), 15);
+
+    $started = std::time::instant::now();
+    while ($started->elapsed()->as_millis() < $graceMs) {
+        $done = $child->try_wait()->or(null);
+        if ($done != null && !alive($below)) {
+            break;
+        }
+        std::time::sleep(.millis(20));
+    }
+
+    foreach ($below as $pid) {
+        $sent = c_kill($pid, 9);
+    }
+    $killed = $child->kill();
+    $waited = $child->wait();
+#[end]
+}
+
+#[if: os != windows]
+/**
+ * True while any of `$pids` still runs.
+ */
+internal function alive(const array<int32>& $pids) : bool
+{
+    foreach ($pids as $pid) {
+        if (c_kill($pid, 0) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+#[end]

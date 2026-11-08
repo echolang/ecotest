@@ -1,5 +1,8 @@
 /**
- * The run as JUnit XML, the format CI servers read: one suite per file, one case per test.
+ * The run as JUnit XML, the format CI servers read: one suite per file, one case per test. It
+ * fails exactly when the run does. A flaky test passed in the end, so it is a passing case with a
+ * `flakyFailure` for every pass that broke, as surefire writes it; failed gates and incomplete
+ * passes are failing cases of their own suite, `ecotest`.
  */
 
 namespace ecotest::cli::junit;
@@ -7,17 +10,20 @@ namespace ecotest::cli::junit;
 use ecotest::cli::escape;
 
 /**
- * The JUnit XML of `$run`.
+ * The JUnit XML of `$run`, judged by `$verdict`.
  */
-public function render(const Run& $run) : string
+public function render(const Run& $run, const Verdict& $verdict) : string
 {
     $c = $run->counts();
-    usize $failures = $c->fail + $c->flaky;
-    usize $errors = $c->timeout + $c->signal;
+    usize $gates = $verdict->failed->count();
+    usize $stops = $verdict->stopped->count();
+    usize $tests = $c->total + $gates + $stops;
+    usize $failures = $c->fail + $gates;
+    usize $errors = $c->timeout + $c->signal + $stops;
     $secs = $run->seconds();
 
     $out = '<?xml version="1.0" encoding="UTF-8"?>\n';
-    $out->append("<testsuites name=\"ecotest\" tests=\"{$c->total}\" failures=\"{$failures}\" errors=\"{$errors}\" skipped=\"{$c->skip}\" time=\"{$secs:.3f}\">\n");
+    $out->append("<testsuites name=\"ecotest\" tests=\"{$tests}\" failures=\"{$failures}\" errors=\"{$errors}\" skipped=\"{$c->skip}\" time=\"{$secs:.3f}\">\n");
 
     $suite = '';
     foreach ($run->tests as const &$test) {
@@ -42,18 +48,30 @@ public function render(const Run& $run) : string
         }
 
         $out->append('>\n');
-        // a test that failed without saying how still gets a message and a body, both bare
-        $fault = $test->events->fault ?? Fault();
-        $message = escape::markup($fault->summary);
-        $body = escape::markup("{$fault->file}:{$fault->line}\n{$fault->summary}\n{$fault->detail}\n{$test->output}");
 
-        if ($test->outcome == Outcome::skip) {
+        if ($test->outcome == Outcome::flaky) {
+            foreach ($test->attempts as const &$attempt) {
+                if (!$attempt->outcome->broken()) {
+                    continue;
+                }
+                $fault = $attempt->fault ?? Fault();
+                $message = escape::markup($fault->summary);
+                $body = escape::markup("{$fault->file}:{$fault->line}\n{$fault->summary}\n{$fault->detail}");
+                $out->append("      <flakyFailure type=\"{$attempt->outcome}\" message=\"{$message}\">{$body}</flakyFailure>\n");
+            }
+        } else if ($test->outcome == Outcome::skip) {
             $reason = escape::markup($test->events->skipReason);
             $out->append("      <skipped message=\"{$reason}\"/>\n");
-        } else if ($test->outcome == Outcome::timeout || $test->outcome == Outcome::signal) {
-            $out->append("      <error type=\"{$test->outcome}\" message=\"{$message}\">{$body}</error>\n");
         } else {
-            $out->append("      <failure type=\"{$test->outcome}\" message=\"{$message}\">{$body}</failure>\n");
+            // a test that failed without saying how still gets a message and a body, both bare
+            $fault = $test->fault() ?? Fault();
+            $message = escape::markup($fault->summary);
+            $body = escape::markup("{$fault->file}:{$fault->line}\n{$fault->summary}\n{$fault->detail}\n{$test->output}");
+            if ($test->outcome == Outcome::timeout || $test->outcome == Outcome::signal) {
+                $out->append("      <error type=\"{$test->outcome}\" message=\"{$message}\">{$body}</error>\n");
+            } else {
+                $out->append("      <failure type=\"{$test->outcome}\" message=\"{$message}\">{$body}</failure>\n");
+            }
         }
 
         $out->append('    </testcase>\n');
@@ -62,6 +80,20 @@ public function render(const Run& $run) : string
     if (!$suite->empty()) {
         $out->append('  </testsuite>\n');
     }
+
+    if ($gates + $stops > 0) {
+        $out->append('  <testsuite name="ecotest">\n');
+        foreach ($verdict->stopped as const &$reason) {
+            $text = escape::markup($reason);
+            $out->append("    <testcase name=\"run incomplete\" classname=\"ecotest\"><error type=\"stopped\" message=\"{$text}\">{$text}</error></testcase>\n");
+        }
+        foreach ($verdict->failed as const &$gate) {
+            $text = escape::markup($gate);
+            $out->append("    <testcase name=\"gate\" classname=\"ecotest\"><failure type=\"gate\" message=\"{$text}\">{$text}</failure></testcase>\n");
+        }
+        $out->append('  </testsuite>\n');
+    }
+
     $out->append('</testsuites>\n');
     return $out;
 }

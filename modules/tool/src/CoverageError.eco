@@ -1,0 +1,39 @@
+namespace ecotest::cli;
+
+/**
+ * Why a run's coverage cannot be read. Coverage that would be wrong is refused rather than
+ * reported.
+ */
+public enum CoverageError
+{
+    /**
+     * A pass's coverage map cannot be read.
+     */
+    case map(CoverageMapError $cause);
+
+    /**
+     * The counter file at `$path` holds `$got` counts for module `$module`, whose map has
+     * `$expected` counters: it was written by another build.
+     */
+    case foreign(string $path, string $module, usize $expected, usize $got);
+
+    /**
+     * The passes measured different builds, map `$first` and map `$other`, so their counts do not
+     * add up.
+     */
+    case mixedBuilds(string $first, string $other);
+}
+
+namespace str;
+
+/**
+ * The reason in words.
+ */
+public function from(const ecotest::cli::CoverageError& $e) : string
+{
+    return match ($e) {
+        .map($cause) => from($cause),
+        .foreign($path, $module, $expected, $got) => "{$path} has {$got} counts for {$module}, whose map has {$expected}: it is from another build",
+        .mixedBuilds($first, $other) => "the passes measured different builds ({$first} and {$other})",
+    };
+}

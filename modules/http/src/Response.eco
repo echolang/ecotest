@@ -1,13 +1,29 @@
 namespace ecotest::http;
 
 /**
- * What came back: status, headers in arrival order, body, and how long the exchange took.
+ * What came back: status, headers in arrival order (duplicates kept), body, and how long the
+ * exchange took.
  */
 public struct Response
 {
+    /**
+     * The status code.
+     */
     public int64 $status;
+
+    /**
+     * Every header as it arrived, in order. Two with one name stay two.
+     */
     public array<Header> $headers = [];
+
+    /**
+     * The body, empty for a HEAD.
+     */
     public string $body = '';
+
+    /**
+     * Wall time of the exchange in milliseconds.
+     */
     public int64 $ms = 0;
 
     public constructor(int64 $status)
@@ -26,5 +42,13 @@ public struct Response
             }
         }
         return null;
+    }
+
+    /**
+     * The value of every header called `$name`, compared without case, in arrival order.
+     */
+    public const function headers(const string& $name) : array<string>
+    {
+        return headerValues($this->headers, $name);
     }
 }

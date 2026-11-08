@@ -1,137 +1,244 @@
 namespace ecotest::cli;
 
-use ecotest::cli::glob;
+use ecotest::paths;
 
 /**
- * The coverage of a run: echoc's map plus every test's counter file, from every pass. Answers per
- * file totals, which tests ran a line, and whether a function was ever called.
+ * The coverage of a run: echoc's map plus every test's counts, from every pass, merged once.
+ * Answers per file totals, which tests ran a line, and whether a function was ever called. Files
+ * are known by their absolute path, so two modules with a `src/a.eco` each never mix.
  */
 public class Coverage
 {
-    public CoverageMap $map;
-    public array<CounterFile> $tests = [];
+    public const CoverageMap $map;
 
     /**
-     * The modules reported, by name: the ones asked for and the ones whose tests ran.
+     * Each module's counts summed over every test, by the counters' `local` index.
      */
-    public map<string, bool> $modules = [];
+    private map<string, array<uint64>> $merged = [];
 
-    public array<string> $exclude = [];
+    /**
+     * The tests that ran any counter on a line, by `Coverage::spot`.
+     */
+    private map<string, array<string>> $byLine = [];
+
+    /**
+     * Whether the function counter on a line ran in any test, by `Coverage::spot`.
+     */
+    private map<string, bool> $fnAt = [];
+
+    /**
+     * The lines of the function counters named `name` in a file, by `Coverage::spot` of the path
+     * and the name. A type's constructors are found this way: echoc's declarations place them on
+     * the type's line, their counters sit on their bodies.
+     */
+    private map<string, array<int64>> $fnNamed = [];
+
+    /**
+     * Each module's directory with its links resolved, by name, so its files compare equal to the
+     * same files reached any other way (`/var` and `/private/var` on macOS).
+     */
+    private map<string, string> $dirs = [];
 
     public constructor(CoverageMap $map)
     {
+        foreach ($map->modules as const &$module) {
+            $this->dirs->set($module->name, std::io::realpath($module->dir)->or($module->dir));
+        }
+
+        foreach ($map->modules as const &$module) {
+            $zero = arr::room<uint64>($module->sites->count());
+            for (usize $i = 0; $i < $module->sites->count(); $i++) {
+                $zero[] = 0;
+            }
+            $this->merged->set($module->name, mv $zero);
+
+            foreach ($module->sites as const &$site) {
+                if ($site->kind != 'fn') {
+                    continue;
+                }
+                $path = $this->where($module, $site);
+                $this->fnAt->set(Coverage::spot($path, $site->line), false);
+
+                $named = Coverage::spot($path, 0);
+                $named->append($site->function);
+                if (!$this->fnNamed->has($named)) {
+                    array<int64> $none = [];
+                    $this->fnNamed->set($named, $none);
+                }
+                array<int64>& $lines = $this->fnNamed->at($named);
+                if ($lines->empty() || $lines[$lines->count() - 1] != $site->line) {
+                    $lines[] = $site->line;
+                }
+            }
+        }
         $this->map = mv $map;
     }
 
     /**
-     * The coverage stored in run directory `$dir`, or null when no pass recorded any.
+     * The key of `$line` of the file at `$path`.
      */
-    public static function load(const string& $dir) : Coverage?
+    private static function spot(const string& $path, int64 $line) : string
+    {
+        return "{$path}\n{$line}";
+    }
+
+    /**
+     * The absolute path of `$site`'s file in `$module`.
+     */
+    public const function where(const ModuleSites& $module, const CoverageSite& $site) : string
+    {
+        return paths::resolve($this->dirs->get($module->name), $site->file);
+    }
+
+    /**
+     * The absolute path of `$file` in the module named `$module`, or null when the map has no such
+     * module.
+     */
+    public const function path(const string& $module, const string& $file) : string?
+    {
+        if (!$this->dirs->has($module)) {
+            return null;
+        }
+        return paths::resolve($this->dirs->get($module), $file);
+    }
+
+    /**
+     * The directories of the modules `$scope` reports, links resolved.
+     */
+    public const function dirsOf(const Scope& $scope) : array<string>
+    {
+        array<string> $out = [];
+        foreach ($this->dirs as $name => const &$dir) {
+            if ($scope->reports($name)) {
+                $out[] = $dir;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The coverage stored in run directory `$dir`, or null when no pass recorded any, or why it
+     * cannot be read. A counter file joins its test by its name, the test id's file-name form.
+     */
+    public static function load(const string& $dir, const Run& $run) : result<Coverage?, CoverageError>
     {
         Coverage? $found = null;
-        usize $pass = 1;
+        string $firstMap = '';
 
-        while (true) {
-            $passDir = std::env::join($dir, "pass-{$pass}");
-            $there = std::io::exists($passDir)->or(false);
-            if (!$there) {
-                break;
+        foreach ($run->passes as const &$pass) {
+            $covDir = std::env::join($pass->dir, 'coverage');
+            $mapPath = std::env::join($covDir, 'map.json');
+            if (!std::io::exists($mapPath)->or(false)) {
+                continue;
             }
 
-            $covDir = std::env::join($passDir, 'coverage');
-            $pass++;
+            $map = guard CoverageMap::load($mapPath) else ($e) {
+                return .error(.map($e));
+            };
 
-            // every pass compiled the same build, so the first map found is the map
             if ($found == null) {
-                $map = guard CoverageMap::load(std::env::join($covDir, 'map.json')) else {
-                    continue;
-                };
+                $firstMap = $mapPath;
                 $found = Coverage(mv $map);
+            } else {
+                CoverageMap $other = mv $map;
+                $into = guard $found;
+                if ($other->hash != $into->map->hash) {
+                    return .error(.mixedBuilds($firstMap, $mapPath));
+                }
             }
 
-            $into = guard $found;
-            $into->absorb(std::env::join($covDir, 'tests'));
+            Coverage $into = guard $found;
+            guard $into->absorb(std::env::join($covDir, 'tests'), $run) else ($e) {
+                return .error($e);
+            };
         }
 
-        return $found;
+        return .ok($found);
     }
 
     /**
-     * Reads every `.ecocov` file in `$dir`.
+     * Adds every `.ecocov` file in `$dir`, each joined to its test in `$run`. A file that cannot
+     * be read is left out, as a test killed mid-write leaves one; one of another build is refused.
      */
-    public function absorb(const string& $dir) : void
+    public function absorb(const string& $dir, const Run& $run) : status<CoverageError>
     {
         $listing = guard std::io::opendir($dir) else {
-            return;
+            return .ok;
         };
 
+        array<string> $paths = [];
         foreach ($listing as const &$entry) {
-            $name = $entry->name();
-            if (!$name->ends('.ecocov')) {
-                continue;
+            if ($entry->name()->ends('.ecocov')) {
+                $paths[] = $entry->path();
             }
+        }
+        $listing->close();
+        $paths->sort();
 
-            $loaded = guard CounterFile::load($entry->path()) else {
+        foreach ($paths as const &$path) {
+            $loaded = guard CounterFile::load($path) else {
                 continue;
             };
-            $this->tests[] = mv $loaded;
+
+            // the header holds at most 128 bytes of the id; the file name holds all of it
+            $key = paths::stem($path);
+            string $id = $run->keyed($key)?->id ?? $loaded->testId;
+
+            guard $this->add($id, $loaded, $path) else ($e) {
+                return .error($e);
+            };
         }
 
-        $listing->close();
+        return .ok;
     }
 
     /**
-     * True when `$module` is reported: the listed modules, or else the modules whose tests ran,
-     * which is the module under test and never the libraries it uses.
+     * Adds the counts of test `$id`, read from `$path`.
      */
-    public const function reports(const string& $module) : bool
+    public function add(const string& $id, const CounterFile& $counts, const string& $path) : status<CoverageError>
     {
-        return $this->modules->has($module);
-    }
-
-    /**
-     * True when `$file` matches one of the exclude patterns.
-     */
-    public const function excluded(const string& $file) : bool
-    {
-        foreach ($this->exclude as const &$pattern) {
-            if (glob::matches($pattern, $file)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Module `$sites`' counts summed over every test.
-     */
-    public const function merged(const ModuleSites& $sites) : array<uint64>
-    {
-        usize $n = $sites->sites->count();
-        array<uint64> $sum = arr::room<uint64>($n);
-        for (usize $i = 0; $i < $n; $i++) {
-            $sum[] = 0;
-        }
-
-        foreach ($this->tests as const &$test) {
-            if (!$test->counts->has($sites->name)) {
+        foreach ($this->map->modules as const &$module) {
+            if (!$counts->counts->has($module->name)) {
                 continue;
             }
 
-            // a borrow into a test this const loop never changes
-            const array<uint32>& $counts = $test->counts->at($sites->name);
-            for (usize $i = 0; $i < $n && $i < $counts->count(); $i++) {
-                $sum[$i] = $sum[$i] + ($counts[$i] as uint64);
+            const array<uint32>& $mine = $counts->counts->at($module->name);
+            if ($mine->count() != $module->sites->count()) {
+                return .error(.foreign($path, $module->name, $module->sites->count(), $mine->count()));
+            }
+
+            array<uint64>& $sum = $this->merged->at($module->name);
+            foreach ($module->sites as const &$site) {
+                uint32 $n = $mine[$site->local];
+                if ($n == 0) {
+                    continue;
+                }
+
+                $sum[$site->local] = $sum[$site->local] + ($n as uint64);
+                $key = Coverage::spot($this->where($module, $site), $site->line);
+
+                if ($site->kind == 'fn') {
+                    $this->fnAt->set($key, true);
+                }
+
+                if (!$this->byLine->has($key)) {
+                    array<string> $none = [];
+                    $this->byLine->set($key, $none);
+                }
+                array<string>& $ids = $this->byLine->at($key);
+                if ($ids->empty() || $ids[$ids->count() - 1] != $id) {
+                    $ids[] = $id;
+                }
             }
         }
 
-        return $sum;
+        return .ok;
     }
 
     /**
-     * Coverage per reported file, sorted by path.
+     * Coverage per file of the modules `$scope` reports, sorted by module and path.
      */
-    public const function files() : array<FileCoverage>
+    public const function files(const Scope& $scope) : array<FileCoverage>
     {
         array<FileCoverage> $out = [];
         map<string, usize> $at = [];
@@ -142,38 +249,32 @@ public class Coverage
         map<Spot, usize> $functionAt = [];
 
         foreach ($this->map->modules as const &$module) {
-            if (!$this->reports($module->name)) {
+            if (!$scope->reports($module->name)) {
                 continue;
             }
 
-            $hits = $this->merged($module);
+            const array<uint64>& $hits = $this->merged->at($module->name);
 
-            for (usize $i = 0; $i < $module->sites->count(); $i++) {
-                const CoverageSite& $site = $module->sites[$i];
-                if ($this->excluded($site->file)) {
+            foreach ($module->sites as const &$site) {
+                if ($scope->excluded($site->file)) {
                     continue;
                 }
 
-                $key = "{$module->name}/{$site->file}";
-                if (!$at->has($key)) {
-                    $at->set($key, $out->count());
-                    $out[] = FileCoverage($module->name, $site->file, std::env::join($module->dir, $site->file));
+                $path = $this->where($module, $site);
+                if (!$at->has($path)) {
+                    $at->set($path, $out->count());
+                    $out[] = FileCoverage($module->name, $site->file, $path);
                 }
 
-                usize $index = $at->get($key);
-                FileCoverage& $file = $out[$index];
-                uint64 $count = $hits[$i];
+                FileCoverage& $file = $out[$at->get($path)];
+                uint64 $count = $hits[$site->local];
 
                 if ($site->kind == 'line') {
-                    uint64 $before = 0;
-                    if ($file->lines->has($site->line)) {
-                        $before = $file->lines->get($site->line);
-                    }
-                    if ($count > $before || !$file->lines->has($site->line)) {
+                    if (!$file->lines->has($site->line) || $count > $file->lines->get($site->line)) {
                         $file->lines->set($site->line, $count);
                     }
                 } else if ($site->kind == 'branch') {
-                    $spot = Spot($key, $site->line, $site->column, $site->edge);
+                    $spot = Spot($path, $site->line, $site->column, $site->edge);
                     if ($edgeAt->has($spot)) {
                         BranchSite& $branch = $file->branches[$edgeAt->get($spot)];
                         $branch->hits = $branch->hits + $count;
@@ -182,24 +283,24 @@ public class Coverage
                         $file->branches[] = BranchSite($site->line, $site->edge, $count);
                     }
                 } else if ($site->kind == 'fn') {
-                    $spot = Spot($key, $site->line, $site->column, '');
+                    $spot = Spot($path, $site->line, $site->column, '');
                     if ($functionAt->has($spot)) {
                         FunctionSite& $function = $file->functions[$functionAt->get($spot)];
                         $function->hits = $function->hits + $count;
                     } else {
                         $functionAt->set($spot, $file->functions->count());
-                        $file->functions[] = FunctionSite($site->function, $site->line, $count);
+                        $file->functions[] = FunctionSite($site->function, $site->line, $site->column, $count);
                     }
                 }
             }
         }
 
-        $out->sort(key: (const FileCoverage& $f) : string => $f->file);
+        $out->sort(key: (const FileCoverage& $f) : string => "{$f->module}\n{$f->file}");
         return $out;
     }
 
     /**
-     * Totals over every reported file.
+     * Totals over every file of `$files`.
      */
     public static function totals(const array<FileCoverage>& $files) : Totals
     {
@@ -221,87 +322,68 @@ public class Coverage
     }
 
     /**
-     * The ids of the tests that ran any counter on `$line` of a file whose path ends with `$file`.
+     * True when the map has counters in the file at the absolute `$path`.
      */
-    public const function testsAt(const string& $file, int64 $line) : array<string>
+    public const function knows(const string& $path) : bool
     {
-        array<string> $out = [];
-        map<string, bool> $named = [];
-
-        foreach ($this->tests as const &$test) {
-            $hit = false;
-
-            foreach ($this->map->modules as const &$module) {
-                if (!$test->counts->has($module->name)) {
-                    continue;
+        foreach ($this->map->modules as const &$module) {
+            foreach ($module->sites as const &$site) {
+                if ($this->where($module, $site) == $path) {
+                    return true;
                 }
-
-                const array<uint32>& $counts = $test->counts->at($module->name);
-
-                for (usize $i = 0; $i < $module->sites->count() && $i < $counts->count(); $i++) {
-                    const CoverageSite& $site = $module->sites[$i];
-                    if ($site->line == $line && $counts[$i] > 0 && Coverage::sameFile($site->file, $file)) {
-                        $hit = true;
-                        break;
-                    }
-                }
-
-                if ($hit) {
-                    break;
-                }
-            }
-
-            if ($hit && !$named->has($test->testId)) {
-                $named->set($test->testId, true);
-                $out[] = $test->testId;
             }
         }
+        return false;
+    }
 
+    /**
+     * The ids of the tests that ran any counter on `$line` of the file at the absolute `$path`,
+     * sorted.
+     */
+    public const function testsAt(const string& $path, int64 $line) : array<string>
+    {
+        $key = Coverage::spot($path, $line);
+        if (!$this->byLine->has($key)) {
+            array<string> $none = [];
+            return $none;
+        }
+
+        array<string> $out = [];
+        map<string, bool> $named = [];
+        foreach ($this->byLine->at($key) as const &$id) {
+            if (!$named->has($id)) {
+                $named->set($id, true);
+                $out[] = $id;
+            }
+        }
         $out->sort();
         return $out;
     }
 
     /**
-     * True when the `fn` counter at `$file`:`$line` ran in any test.
+     * The lines of the function counters named `$name` in the file at the absolute `$path`.
      */
-    public const function called(const string& $file, int64 $line) : bool?
+    public const function functionsNamed(const string& $path, const string& $name) : array<int64>
     {
-        bool? $found = null;
-
-        foreach ($this->map->modules as const &$module) {
-            $hits = $this->merged($module);
-
-            for (usize $i = 0; $i < $module->sites->count(); $i++) {
-                const CoverageSite& $site = $module->sites[$i];
-                if ($site->kind == 'fn' && $site->line == $line && Coverage::sameFile($site->file, $file)) {
-                    if ($hits[$i] > 0) {
-                        return true;
-                    }
-                    $found = false;
-                }
-            }
+        $key = Coverage::spot($path, 0);
+        $key->append($name);
+        if (!$this->fnNamed->has($key)) {
+            array<int64> $none = [];
+            return $none;
         }
-
-        return $found;
+        return $this->fnNamed->get($key);
     }
 
     /**
-     * True when two paths name the same file: equal, or one ends with the other at a `/`.
+     * Whether the function counter on `$line` of the file at the absolute `$path` ran in any test,
+     * or null when there is no function counter there.
      */
-    public static function sameFile(const string& $a, const string& $b) : bool
+    public const function called(const string& $path, int64 $line) : bool?
     {
-        if ($a == $b) {
-            return true;
+        $key = Coverage::spot($path, $line);
+        if (!$this->fnAt->has($key)) {
+            return null;
         }
-
-        if ($a->size() > $b->size()) {
-            return $a->ends($b) && $a->byte($a->size() - $b->size() - 1) == 47;
-        }
-
-        if ($b->size() > $a->size()) {
-            return $b->ends($a) && $b->byte($b->size() - $a->size() - 1) == 47;
-        }
-
-        return false;
+        return $this->fnAt->get($key);
     }
 }

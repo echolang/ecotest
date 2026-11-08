@@ -1,0 +1,26 @@
+/**
+ * A stable fingerprint of a file's bytes, kept with a run's coverage so a later query can tell
+ * whether the source still has the lines the counters were measured against. `hash::of` is seeded
+ * per process, so it cannot be stored.
+ */
+
+namespace ecotest::cli::digest;
+
+/**
+ * FNV-1a over `$bytes`, as 16 hex digits.
+ */
+public function fnv(const string& $bytes) : string
+{
+    uint64 $h = 14695981039346656037;
+    for (usize $i = 0; $i < $bytes->size(); $i++) {
+        $h = $h ^ ($bytes->byte($i) as uint64);
+        $h = $h * 1099511628211;
+    }
+
+    string $digits = '0123456789abcdef';
+    string $out = '';
+    for (int32 $shift = 60; $shift >= 0; $shift = $shift - 4) {
+        $out->push($digits->byte((($h >> ($shift as uint64)) & 15) as usize));
+    }
+    return $out;
+}

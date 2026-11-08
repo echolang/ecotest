@@ -4,7 +4,7 @@
  */
 
 use ecotest::{expect, TempDir};
-use ecotest::cli::doc;
+use ecotest::cli::{doc, queries, Format, Store};
 
 test a_green_run_with_coverage_writes_every_report
 {
@@ -35,15 +35,27 @@ test a_green_run_with_coverage_writes_every_report
 
     foreach (['', 'md', 'junit', 'lcov', 'html', 'json'] as const &$format) {
         $report = $sample->tool();
-        $report->format = $format;
+        $report->format = Format::of($format) ?? Format::terminal;
         expect($report->report(''))->is(0);
     }
 
     expect($sample->tool()->report($dir))->is(0);
     expect($sample->tool()->history())->is(0);
     expect($sample->tool()->who('src/math.eco:3'))->is(0);
-    expect($sample->tool()->who('src/math.eco:17'))->is(0);
+    expect(expect(queries::ran($sample->tool(), 'src/math.eco:3'))->ok())->is(['sample/math.eco::adds', 'sample/math.eco::benches', 'sample/math.eco::checks_nothing']);
+    expect(expect(queries::ran($sample->tool(), 'src/math.eco:17'))->ok())->empty();
     expect($sample->tool()->api())->is(0);
+
+    $api = expect(queries::judged($sample->tool()))->ok();
+    expect($api->never)->is(['unused  src/math.eco:15']);
+    expect($api->decided)->is(3);
+    expect($api->undecided)->empty();
+
+    // the run is finished, kept whole, and the one the queries read
+    expect(doc::object($sample->runJson(), 'complete')->asBool() ?? false)->yes();
+    expect(expect(Store($sample->dir->file('.ecotest'))->covered())->ok())->is($dir);
+    expect(std::io::exists(std::env::join($dir, 'coverage.json'))->or(false))->yes();
+    expect(std::io::exists(std::env::join($dir, 'decls'))->or(true))->no();
 }
 
 test a_red_run_fails_and_names_the_failures
@@ -150,15 +162,22 @@ test an_empty_ecotest_json_configures_nothing
     expect($tool->gates->minLines)->none();
 }
 
-test a_broken_ecotest_json_is_reported_and_ignored
+test a_broken_ecotest_json_stops_the_run
 {
     $sample = Sample();
     $sample->dir->write('ecotest.json', '{"coverage": ');
 
     $tool = $sample->tool();
-    $tool->configure();
+    $e = expect($tool->configure())->fails();
+    expect("{$e}")->has('ecotest.json does not parse');
+    expect($sample->tool()->run())->is(2);
 
-    expect($tool->exclude)->empty();
+    $sample->dir->write('ecotest.json', '{"coverage": {"min": 120}}');
+    $range = expect($sample->tool()->configure())->fails();
+    expect("{$range}")->has('coverage.min must be a percentage from 0 to 100');
+
+    $sample->dir->write('ecotest.json', '{"coverage": {"min": "high"}}');
+    expect($sample->tool()->configure())->fails();
 }
 
 test a_compiler_that_cannot_start_fails_the_run
@@ -186,27 +205,30 @@ test commands_without_a_run_say_so
 
 test affected_runs_the_tests_on_changed_lines
 {
-    $sample = Sample();
-    $first = $sample->tool();
-    $first->echoc->coverage = true;
-    expect($first->run())->is(0);
-
+    $sample = covered();
     $fake = TempDir();
     $sample->dir->write('changes.diff', 'diff --git a/src/math.eco b/src/math.eco\n--- a/src/math.eco\n+++ b/src/math.eco\n@@ -3 +3 @@\n-    return $a + $b;\n+    return $a + $b;\n');
-    $git = $fake->write('git', '#!/bin/sh\ncat changes.diff\n');
-    expect(ecotest::run('chmod', ['+x', $git]))->succeeds();
+    $git = fakeGit($sample, $fake);
 
     $tool = $sample->tool();
     $tool->git = $git;
     $tool->since = 'main';
     $tool->echoc->coverage = true;
-    expect($tool->affected())->is(0);
 
-    $sample->dir->write('changes.diff', 'diff --git a/README b/README\n+++ b/README\n@@ -1 +1 @@\n+x\n');
+    $selection = expect(queries::select($tool))->ok();
+    expect($selection->ids)->is(['sample/math.eco::adds', 'sample/math.eco::benches', 'sample/math.eco::checks_nothing']);
+    expect($tool->affected())->is(0);
+    expect($tool->echoc->forwarded)->is(['--filter', 'adds', '--filter', 'benches', '--filter', 'checks_nothing']);
+    expect(doc::object($sample->runJson(), 'filtered')->asBool() ?? false)->yes();
+    expect(doc::list($sample->runJson(), 'tests')->count())->is(3);
+
+    $sample->dir->write('changes.diff', 'diff --git a/README b/README\n--- a/README\n+++ b/README\n@@ -1 +1 @@\n+x\n');
     $none = $sample->tool();
     $none->git = $git;
     $none->since = 'main';
+    expect(expect(queries::select($none))->ok()->ids)->empty();
     expect($none->affected())->is(0);
+    expect($none->echoc->forwarded)->empty();
 
     $refused = $sample->tool();
     $refused->git = 'false';
@@ -218,9 +240,8 @@ test diff_coverage_is_measured_and_gated
 {
     $sample = Sample();
     $fake = TempDir();
-    $sample->dir->write('changes.diff', '+++ b/src/math.eco\n@@ -17 +17 @@\n+    return 7;\n');
-    $git = $fake->write('git', '#!/bin/sh\ncat changes.diff\n');
-    expect(ecotest::run('chmod', ['+x', $git]))->succeeds();
+    $sample->dir->write('changes.diff', '--- a/src/math.eco\n+++ b/src/math.eco\n@@ -17 +17 @@\n+    return 7;\n');
+    $git = fakeGit($sample, $fake);
 
     $tool = $sample->tool();
     $tool->echoc->coverage = true;
@@ -229,11 +250,40 @@ test diff_coverage_is_measured_and_gated
     $tool->gates->minDiff = 50.0;
 
     expect($tool->run())->is(1);
+    expect(json::dump(doc::object($sample->runJson(), 'failedGates')))->is('["diff coverage 0.0% is below 50.0%"]');
 
+    // a diff that could not be taken is not a diff that held
     $refused = $sample->tool();
     $refused->echoc->coverage = true;
     $refused->git = 'false';
     $refused->since = 'main';
     $refused->gates->minDiff = 50.0;
-    expect($refused->run())->is(0);
+    expect($refused->run())->is(1);
+    expect(doc::list($sample->runJson(), 'failedGates')->count())->is(1);
+}
+
+test a_compile_error_fails_a_line_gate_as_not_measured
+{
+    $sample = Sample();
+    $sample->dir->write('src/math.eco', 'public function add(int64 $a, int64 $b) : int64 { return nope; }\n');
+    $tool = $sample->tool();
+    $tool->echoc->coverage = true;
+    $tool->gates->minLines = 50.0;
+
+    expect($tool->run())->is(1);
+    expect(json::dump(doc::object($sample->runJson(), 'failedGates')))->is('["line coverage not measured: echoc stopped before the tests"]');
+    expect(json::dump(doc::object($sample->runJson(), 'stopped')))->is('["echoc stopped before the tests"]');
+    expect(doc::object($sample->runJson(), 'coverage')->isNull())->yes();
+    // and it is not the run the queries read
+    expect(Store($sample->dir->file('.ecotest'))->covered())->fails();
+}
+
+test the_seed_is_handed_down_and_recorded
+{
+    $sample = Sample();
+    $tool = $sample->tool();
+    $tool->seed = 42;
+
+    expect($tool->run())->is(0);
+    expect(doc::text($sample->runJson(), 'seed'))->is('42');
 }

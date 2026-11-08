@@ -18,7 +18,7 @@ Checks and test events for `echoc test`. Failures name the test's line, and the 
 From your project directory:
 
 ```bash
-epm add echolang/ecotest --git https://github.com/echolang/ecotest --range ^0.2
+epm add echolang/ecotest --git https://github.com/echolang/ecotest --range ^0.3
 ```
 
 The require belongs on the test target. The library is standard library only, so any module can add it there. The CLI, JSON and HTTP libraries compile into the `ecotest` binary. Your tests stay on the standard library.
@@ -26,7 +26,7 @@ The require belongs on the test target. The library is standard library only, so
 ```echo
 #[target: test] {
     #[sources: "tests/**/*.eco"]
-    #[requires: "echolang/ecotest" { version: "^0.2", source: git "https://github.com/echolang/ecotest" }]
+    #[requires: "echolang/ecotest" { version: "^0.3", source: git "https://github.com/echolang/ecotest" }]
 }
 ```
 
@@ -338,35 +338,6 @@ A JSON snapshot is stored pretty-printed. Paths in `$redact` are replaced first,
 
 `Service` starts a program for one test and stops it when the value goes. Shared services belong in `ecotest.json` with `Api(service:)`.
 
-### In process
-
-`modules/nexus` is a `Transport` that hands the request to a nexus kernel. No socket. Coverage counts the app's code. The same `Api` tests run unchanged:
-
-```echo
-use ecotest::http::{Api, KernelTransport};
-
-$api = Api(transport: KernelTransport($app->kernel));
-$api->get('/users/1')->ok()->json('$.name', 'Ada');
-```
-
-It depends on a nexus checkout.
-
-## Changes in 0.2.0
-
-0.2.0 breaks the 0.1 API in a few places. Each one trades a sentinel or a string for a type that says what happened.
-
-- `expect($text)->startsWith(...)` and `->endsWith(...)` are `->starts(...)` and `->ends(...)`.
-- `TempDir::read` answers `result<string, std::io::ioerror>` instead of `string?`: `->some(x)` becomes `->ok(x)`, `->none()` becomes `->fails()`.
-- `Ran::$code` is `int32?`, null when a signal ended the program. `Ran::$signalled` is gone.
-- `Failure->render()` and `Event->render()` are gone. Interpolate them: `"{$failure}"`.
-- A `TempDir` that cannot be made or written is a check failure at your line, not a crash.
-- `caught()` inside `soft()` leaves the outer scope's failures alone. Before, it took them.
-- HTTP: `post`, `put` and `patch` take one `Body`, so `put` and `patch` now accept every encoding `post` does. Call sites stay as they were.
-- HTTP: `Request` and `Response` carry `array<Header> $headers` instead of `headerNames` and `headerValues`.
-- HTTP: `Reply->response` is `result<Response, TransportError>`, and `Reply->error` is gone. `TransportError` is `curl(curl::Error)` or `refused(string)`; print it with `"{$e}"`.
-- HTTP: `JsonPath::steps/all/one/replace` are functions in `ecotest::http::jsonpath`.
-- Runner: `who <file:x>` exits 2. A report that cannot be written fails the run. `affected` says why git refused.
-
 ## This repo
 
 ```bash
@@ -374,7 +345,5 @@ echoc build
 echoc test
 echoc run --target ecotest -- --coverage
 ```
-
-The library lives in `src/`. The runner's sources are `modules/tool/`, compiled into the public `ecotest` exe. HTTP is `modules/http`. Nexus is `modules/nexus`.
 
 MIT. Copyright 2026 Mario Döring.

@@ -1,0 +1,395 @@
+/**
+ * The questions asked of stored coverage: which tests ran a line, which public API no test calls,
+ * and which tests a change touches. Each reads the last finished run that measured coverage of the
+ * whole suite, and each refuses to answer for a file whose source changed since that run, whose
+ * line numbers the counters no longer match.
+ */
+
+namespace ecotest::cli::queries;
+
+use ecotest::paths;
+use ecotest::cli::{Coverage, CoverageReport, GitDiff, Ratio, Run, Tool, digest, doc, files, text};
+
+/**
+ * The tests `affected` runs: their ids and names, or everything when a new source file has no
+ * coverage to go by.
+ */
+public struct Selection
+{
+    public array<string> $ids = [];
+    public array<string> $names = [];
+    public bool $everything = false;
+}
+
+/**
+ * What `api` found: how many public functions it could judge, the ones no test called, and the
+ * ones it could not judge, each with why.
+ */
+public struct ApiFindings
+{
+    public usize $decided = 0;
+    public array<string> $never = [];
+    public array<string> $undecided = [];
+}
+
+/**
+ * The stored coverage the queries read: the run, its counters and its report.
+ */
+internal struct Measured
+{
+    public string $dir;
+    public Coverage $coverage;
+    public CoverageReport $report;
+}
+
+/**
+ * The last run with coverage of every test, or the exit code after saying why there is none.
+ */
+internal function measured(const Tool& $tool) : result<Measured, int32>
+{
+    $dir = guard $tool->store()->covered() else ($e) {
+        files::warn("{$e}");
+        return .error(1);
+    };
+
+    $run = Run(readFrom: $dir);
+    $loaded = guard Coverage::load($dir, $run) else ($e) {
+        files::warn("cannot read the coverage of {$dir}: {$e}");
+        return .error(1);
+    };
+    Coverage $c = guard $loaded else {
+        files::warn("{$dir} has no coverage; run `ecotest --coverage` first");
+        return .error(1);
+    };
+    CoverageReport $report = guard CoverageReport::load($dir) else {
+        files::warn("{$dir} has no coverage.json; run `ecotest --coverage` again");
+        return .error(1);
+    };
+
+    return .ok(Measured($dir, $c, $report));
+}
+
+/**
+ * The fingerprint of the file at `$path` as it is now, empty when it is gone.
+ */
+internal function now(const string& $path) : string
+{
+    $text = guard doc::read($path) else {
+        return '';
+    };
+    return digest::fnv($text);
+}
+
+/**
+ * `$path` as the coverage names it: absolute, from the project or else the working directory,
+ * links resolved.
+ */
+internal function locate(const Tool& $tool, const string& $path) : string
+{
+    $inProject = paths::resolve($tool->echoc->project, $path);
+    if (std::io::exists($inProject)->or(false)) {
+        return std::io::realpath($inProject)->or($inProject);
+    }
+    $inCwd = paths::resolve(std::env::cwd(), $path);
+    return std::io::realpath($inCwd)->or($inCwd);
+}
+
+/**
+ * The tests that ran the line `<file:line>` names, or the exit code after saying why that cannot
+ * be told.
+ */
+public function ran(const Tool& $tool, const string& $spec) : result<array<string>, int32>
+{
+    usize $colon = text::last($spec, 58);
+    if ($colon == $spec->size()) {
+        files::warn('expected <file:line>, for example src/date.eco:42');
+        return .error(2);
+    }
+
+    $file = $spec->sub(0, $colon);
+    int64 $line = guard str::int($spec->sub($colon + 1, $spec->size() - $colon - 1)) else {
+        files::warn('expected <file:line>, for example src/date.eco:42');
+        return .error(2);
+    };
+
+    Measured $m = guard measured($tool) else ($code) {
+        return .error($code);
+    };
+
+    $path = locate($tool, $file);
+    $kept = guard $m->report->file($path) else {
+        files::warn("{$file} is not a file of the modules {$m->dir} reports");
+        return .error(1);
+    };
+    if ($kept->hash != now($path)) {
+        files::warn("{$file} changed since {$m->dir}; its line numbers no longer match. Run `ecotest --coverage` again");
+        return .error(1);
+    }
+
+    return .ok($m->coverage->testsAt($path, $line));
+}
+
+/**
+ * `ecotest who <file:line>`: prints the tests that ran the line. Answers the exit code.
+ */
+public function who(const Tool& $tool, const string& $spec) : int32
+{
+    $ids = guard ran($tool, $spec) else ($code) {
+        return $code;
+    };
+
+    if ($ids->empty()) {
+        std::io::println("no test ran {$spec}");
+        return 0;
+    }
+
+    foreach ($ids as const &$id) {
+        std::io::println($id);
+    }
+    return 0;
+}
+
+/**
+ * `ecotest api`: prints how much of the public API a test called, what none did, and what cannot
+ * be judged and why. Answers the exit code.
+ */
+public function api(const Tool& $tool) : int32
+{
+    $f = guard judged($tool) else ($code) {
+        return $code;
+    };
+
+    usize $called = $f->decided - $f->never->count();
+    $r = Ratio($called, $f->decided);
+    usize $unknown = $f->undecided->count();
+    std::io::println("public api  {$called} of {$f->decided} called by a test ({$r}); {$unknown} undecidable");
+    foreach ($f->never as const &$line) {
+        std::io::println("  never called: {$line}");
+    }
+    foreach ($f->undecided as const &$line) {
+        std::io::println("  undecidable, {$line}");
+    }
+
+    return 0;
+}
+
+/**
+ * Every public function and method of the reported modules judged against the stored coverage,
+ * or the exit code after saying why it cannot be.
+ */
+public function judged(const Tool& $tool) : result<ApiFindings, int32>
+{
+    Measured $m = guard measured($tool) else ($code) {
+        return .error($code);
+    };
+
+    // `build` writes a binary before it prints; a scratch directory takes it, never the run
+    int32 $pid = std::env::pid();
+    int64 $stamp = std::time::timestamp::now()->unix_millis();
+    $scratch = std::env::join(std::env::tmp(), "ecotest-decls-{$pid}-{$stamp}");
+    guard paths::mkdirs($scratch) else ($e) {
+        files::warn("cannot write {$scratch}: {$e}");
+        return .error(1);
+    };
+
+    $decls = $tool->echoc->command(['build', '-p', 'decls', '-o', std::env::join($scratch, 'decls')]);
+    $o = $decls->output();
+    $removed = paths::removeTree($scratch);
+    $out = guard $o else {
+        files::warn("cannot run {$tool->echoc->program}");
+        return .error(1);
+    };
+    $doc = guard json::parse($out->stdout) else {
+        files::warn('echoc -p decls did not answer with JSON');
+        return .error(1);
+    };
+
+    $f = ApiFindings();
+
+    foreach (doc::list($doc, 'modules') as const &$module) {
+        $name = doc::text($module, 'name');
+        if (!$m->report->scope->reports($name)) {
+            continue;
+        }
+
+        foreach (doc::list($module, 'declarations') as const &$decl) {
+            array<json::Value> $callables = [];
+            if (doc::text($decl, 'kind') == 'function') {
+                $callables[] = $decl;
+            } else {
+                foreach (doc::list($decl, 'methods') as const &$method) {
+                    $callables[] = $method;
+                }
+            }
+
+            foreach ($callables as const &$fn) {
+                judge($m, $name, $fn, $f);
+            }
+
+            // echoc places constructors on the type's line; their counters sit on their bodies,
+            // under the type's name. One without a counter is the implicit one, written by echoc
+            bool $public = false;
+            foreach (doc::list($decl, 'constructors') as const &$constructor) {
+                if (doc::text($constructor, 'visibility') == 'public') {
+                    $public = true;
+                }
+            }
+            $file = doc::text($decl, 'file');
+            if (!$public || $m->report->scope->excluded($file)) {
+                continue;
+            }
+
+            $qualified = doc::text($decl, 'qualified');
+            $path = guard $m->coverage->path($name, $file) else {
+                continue;
+            };
+            $kept = guard $m->report->file($path) else {
+                continue;
+            };
+            if ($kept->hash != now($path)) {
+                $f->undecided[] = "source changed since the run: {$qualified} constructor  {$file}";
+                continue;
+            }
+
+            foreach ($m->coverage->functionsNamed($path, doc::text($decl, 'name')) as $line) {
+                $was = guard $m->coverage->called($path, $line) else {
+                    continue;
+                };
+                $f->decided++;
+                if (!$was) {
+                    $f->never[] = "{$qualified} constructor  {$file}:{$line}";
+                }
+            }
+        }
+    }
+
+    return .ok(mv $f);
+}
+
+/**
+ * Judges the public function or method `$fn` of module `$module`: called, never called, or why it
+ * cannot be told.
+ */
+internal function judge(const Measured& $m, const string& $module, const json::Value& $fn, ApiFindings& $f) : void
+{
+    if (doc::text($fn, 'visibility') != 'public') {
+        return;
+    }
+
+    $file = doc::text($fn, 'file');
+    if ($m->report->scope->excluded($file)) {
+        return;
+    }
+
+    int64 $line = doc::number($fn, 'line');
+    $qualified = doc::text($fn, 'qualified');
+    $where = "{$qualified}  {$file}:{$line}";
+
+    $path = guard $m->coverage->path($module, $file) else {
+        $f->undecided[] = "module not in the run: {$where}";
+        return;
+    };
+    $kept = guard $m->report->file($path) else {
+        // a file the tests never compiled, such as one only an exe target builds, is no part of
+        // what they could call
+        if ($m->coverage->knows($path)) {
+            $f->undecided[] = "file not in the run: {$where}";
+        }
+        return;
+    };
+    if ($kept->hash != now($path)) {
+        $f->undecided[] = "source changed since the run: {$where}";
+        return;
+    }
+    $was = guard $m->coverage->called($path, $line) else {
+        $f->undecided[] = "no counter at this line: {$where}";
+        return;
+    };
+
+    $f->decided++;
+    if (!$was) {
+        $f->never[] = $where;
+    }
+}
+
+/**
+ * The tests whose coverage touches what changed since `--since`, or the exit code after saying
+ * why that cannot be known. Each changed file is read on the side its coverage was measured on:
+ * the old side when the run saw the file as it was at the ref, the new side when it saw it as it
+ * is now. Coverage of neither is stale and refused.
+ */
+public function select(const Tool& $tool) : result<Selection, int32>
+{
+    Measured $m = guard measured($tool) else ($code) {
+        return .error($code);
+    };
+
+    $diff = guard GitDiff::since($tool->git, $tool->echoc->project, $tool->since) else ($e) {
+        files::warn("{$e}");
+        return .error(1);
+    };
+
+    $sel = Selection();
+    map<string, bool> $named = [];
+    map<string, bool> $listed = [];
+    $dirs = $m->coverage->dirsOf($m->report->scope);
+
+    foreach ($diff->files as const &$changed) {
+        $kept = guard $m->report->file($changed->path) else {
+            // a new source file of a reported module has no coverage to go by
+            if ($changed->added && $changed->path->ends('.eco') && inside($changed->path, $dirs)) {
+                files::warn("{$changed->relative} is new; running every test");
+                $sel->everything = true;
+            }
+            continue;
+        };
+
+        array<int64> $lines = [];
+        if ($kept->hash == now($changed->path)) {
+            $lines = $changed->newLines();
+        } else {
+            $old = GitDiff::old($tool->git, $tool->echoc->project, $tool->since, $changed->relative)->or('');
+            if (digest::fnv($old) != $kept->hash) {
+                files::warn("the coverage of {$changed->relative} in {$m->dir} is from another version of it; run `ecotest --coverage` again");
+                return .error(1);
+            }
+            $lines = $changed->oldLines();
+        }
+
+        foreach ($lines as $line) {
+            foreach ($m->coverage->testsAt($changed->path, $line) as const &$id) {
+                if (!$listed->has($id)) {
+                    $listed->set($id, true);
+                    $sel->ids[] = $id;
+                }
+
+                // an id without `::` has no test name to filter on
+                usize $sep = $id->find('::');
+                if ($sep >= $id->size()) {
+                    continue;
+                }
+                $name = $id->sub($sep + 2, $id->size() - $sep - 2);
+                if (!$named->has($name)) {
+                    $named->set($name, true);
+                    $sel->names[] = $name;
+                }
+            }
+        }
+    }
+
+    $sel->ids->sort();
+    return .ok(mv $sel);
+}
+
+/**
+ * True when `$path` lies inside one of `$dirs`.
+ */
+internal function inside(const string& $path, const array<string>& $dirs) : bool
+{
+    foreach ($dirs as const &$dir) {
+        if (paths::relative($path, $dir) != $path) {
+            return true;
+        }
+    }
+    return false;
+}

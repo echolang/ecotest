@@ -1,6 +1,11 @@
 namespace ecotest;
 
 /**
+ * How many replays the shrinker may spend on one failure.
+ */
+internal const usize BUDGET = 2000;
+
+/**
  * Checks that `$holds` is true for `$runs` values from `$gen`. A failing value is shrunk to the
  * smallest one that still fails, and the failure names it with the seed to replay the run.
  */
@@ -8,41 +13,233 @@ namespace ecotest;
 public function forAll<T>(const Gen<T>& $gen, function<bool(const T&)> $holds, usize $runs = 200) : void
 {
     $at = std::src::caller();
+    search($gen, (const T& $v) : bool => !$holds($v), (const T& $v) : string => '', $runs, $at);
+}
+
+/**
+ * Runs `$body` for `$runs` values from `$gen`; a value fails when any check inside fails. The
+ * checks are ordinary `expect()` calls, collected as `caught()` does, so a check that stops the
+ * test (`ok()`, `some()`) still stops it, unshrunk. The smallest failing value is reported with
+ * the failures it caused.
+ */
+#[caller]
+public function forAll<T>(const Gen<T>& $gen, checks: function<void(const T&)> $body, usize $runs = 200) : void
+{
+    $at = std::src::caller();
+    search(
+        $gen,
+        function(const T& $v) : bool {
+            return !caught(function() : void { $body($v); })->empty();
+        },
+        function(const T& $v) : string {
+            string $out = '';
+            foreach (caught(function() : void { $body($v); }) as const &$failure) {
+                $out->append("\n\n{$failure}");
+            }
+            return $out;
+        },
+        $runs,
+        $at
+    );
+}
+
+/**
+ * Tries `$runs` cases of `$gen` and reports the first one that `$fails`, shrunk, with what
+ * `$explain` says about it. The property counts as one check however many checks its cases made.
+ */
+internal function search<T>(
+    const Gen<T>& $gen,
+    function<bool(const T&)> $fails,
+    function<string(const T&)> $explain,
+    usize $runs,
+    const std::src::location& $at
+) : void {
     Session::checked();
+    $tally = Session::$tally;
+    int64 $checks = $tally->checks;
 
     uint64 $seed = seed();
     $random = Random($seed);
 
     for (usize $i = 0; $i < $runs; $i++) {
-        $value = $gen->make($random);
-        if ($holds($value)) {
+        $d = Draws(record: $random);
+        $value = $gen->draw($d);
+        $random = $d->source();
+
+        if ($d->rejected() || !$fails($value)) {
             continue;
         }
 
+        $shrinker = Shrinker(function(const array<uint64>& $choices) : array<uint64>? {
+            $replay = Draws(replay: $choices);
+            $candidate = $gen->draw($replay);
+            if ($replay->rejected() || !$fails($candidate)) {
+                return null;
+            }
+            return $replay->used();
+        });
+
+        $first = $d->used();
+        $smallest = $shrinker->shrink($first);
+        $replay = Draws(replay: $smallest);
+        $last = $gen->draw($replay);
+
         $original = $gen->show($value);
-        $smallest = mv $value;
-        usize $steps = 0;
-        bool $moved = true;
+        $shown = $gen->show($last);
+        $caughtText = $explain($last);
+        usize $steps = $shrinker->steps;
+        usize $run = $i + 1;
 
-        while ($moved && $steps < 1000) {
-            $moved = false;
-            $candidates = $gen->shrink($smallest);
+        string $detail = "smallest failing value: {$shown}\nfirst failing value: {$original}\n";
+        $detail->append("shrunk {$steps} times; replay with ECOTEST_SEED={$seed}");
+        $detail->append($caughtText);
 
-            foreach ($candidates as const &$candidate) {
-                if (!$holds($candidate)) {
-                    $smallest = $candidate;
-                    $steps++;
-                    $moved = true;
-                    break;
+        $tally->checks = $checks;
+        fail("property failed on run {$run} of {$runs}", $at, $actual: $shown, $detail: $detail, $inline: true);
+        return;
+    }
+
+    $tally->checks = $checks;
+}
+
+/**
+ * Shrinks a failing case by editing the answers it was made from. It knows nothing of the value:
+ * `$replay` makes a case from a list of answers and hands back the answers it used when that case
+ * fails, null when it passes.
+ */
+internal class Shrinker
+{
+    internal function<array<uint64>?(const array<uint64>&)> $replay;
+
+    /**
+     * Replays spent so far.
+     */
+    internal usize $spent = 0;
+
+    /**
+     * Replays that found a simpler failing case.
+     */
+    internal usize $steps = 0;
+
+    internal constructor(function<array<uint64>?(const array<uint64>&)> $replay)
+    {
+        $this->replay = $replay;
+    }
+
+    /**
+     * Keeps `$candidate` as the new best when it fails and is simpler than `$best`.
+     */
+    internal function attempt(array<uint64>& $best, const array<uint64>& $candidate) : bool
+    {
+        if ($this->spent >= BUDGET) {
+            return false;
+        }
+
+        $this->spent++;
+        array<uint64>? $failed = $this->replay($candidate);
+        $used = guard $failed else {
+            return false;
+        };
+
+        if (!simpler($used, $best)) {
+            return false;
+        }
+
+        $best = $used;
+        $this->steps++;
+        return true;
+    }
+
+    /**
+     * The simplest failing list of answers the passes find from `$start`: deleting blocks of
+     * answers (which drops list items and characters), zeroing blocks, and lowering each answer
+     * as far as it still fails. Repeated until a round finds nothing or the budget is spent.
+     */
+    internal function shrink(const array<uint64>& $start) : array<uint64>
+    {
+        array<uint64> $best = $start;
+        array<usize> $sizes = [8, 4, 2, 1];
+        bool $better = true;
+
+        while ($better && $this->spent < BUDGET) {
+            $better = false;
+
+            foreach ($sizes as $size) {
+                usize $i = 0;
+                while ($i + $size <= $best->count() && $this->spent < BUDGET) {
+                    array<uint64> $cut = [];
+                    for (usize $k = 0; $k < $best->count(); $k++) {
+                        if ($k < $i || $k >= $i + $size) {
+                            $cut[] = $best[$k];
+                        }
+                    }
+                    if ($this->attempt($best, $cut)) {
+                        $better = true;
+                        continue;
+                    }
+                    $i++;
+                }
+            }
+
+            foreach ($sizes as $size) {
+                for (usize $i = 0; $i + $size <= $best->count(); $i++) {
+                    bool $zero = true;
+                    for (usize $k = $i; $k < $i + $size; $k++) {
+                        if ($best[$k] != 0) {
+                            $zero = false;
+                        }
+                    }
+                    if ($zero) {
+                        continue;
+                    }
+
+                    array<uint64> $zeroed = $best;
+                    for (usize $k = $i; $k < $i + $size; $k++) {
+                        $zeroed[$k] = 0;
+                    }
+                    if ($this->attempt($best, $zeroed)) {
+                        $better = true;
+                    }
+                }
+            }
+
+            for (usize $i = 0; $i < $best->count(); $i++) {
+                // the smallest answer at $i that still fails, taking smaller ones to pass
+                uint64 $low = 0;
+                uint64 $high = $best[$i];
+                while ($low < $high && $this->spent < BUDGET && $i < $best->count()) {
+                    uint64 $mid = $low + ($high - $low) / 2;
+                    array<uint64> $lowered = $best;
+                    $lowered[$i] = $mid;
+                    if ($this->attempt($best, $lowered)) {
+                        $better = true;
+                        if ($i < $best->count()) {
+                            $high = $best[$i];
+                        }
+                    } else {
+                        $low = $mid + 1;
+                    }
                 }
             }
         }
 
-        usize $run = $i + 1;
-        $shown = $gen->show($smallest);
-        $detail = "smallest failing value: {$shown}\nfirst failing value: {$original}\nshrunk {$steps} times; replay with ECOTEST_SEED={$seed}";
-
-        fail("property failed on run {$run} of {$runs}", $at, $actual: $shown, $detail: $detail);
-        return;
+        return $best;
     }
+}
+
+/**
+ * True when `$a` is the simpler list of answers: shorter, or as long and smaller at the first
+ * answer where they differ.
+ */
+internal function simpler(const array<uint64>& $a, const array<uint64>& $b) : bool
+{
+    if ($a->count() != $b->count()) {
+        return $a->count() < $b->count();
+    }
+    for (usize $i = 0; $i < $a->count(); $i++) {
+        if ($a[$i] != $b[$i]) {
+            return $a[$i] < $b[$i];
+        }
+    }
+    return false;
 }

@@ -5,51 +5,12 @@
 namespace ecotest::cli::files;
 
 /**
- * Creates `$path` and every missing directory above it. A directory that is already there is
- * fine; the first one that cannot be made is the failure.
+ * Says `$line` on stderr after `ecotest: `. Diagnostics never go to stdout, which carries only the
+ * report, so `ecotest report --format json > out.json` stays JSON.
  */
-public function mkdirs(const string& $path) : status<std::io::ioerror>
+public function warn(const string& $line) : void
 {
-    $built = '';
-    $first = true;
-
-    foreach (str::split($path, '/') as const &$part) {
-        if (!$first) {
-            $built->append('/');
-        }
-        $first = false;
-        $built->append(string($part));
-
-        if ($built->empty() || $built == '/') {
-            continue;
-        }
-
-        guard std::io::mkdir($built) else ($e) {
-            if (!std::io::exists($built)->or(false)) {
-                return .error($e);
-            }
-            continue;
-        };
-    }
-
-    return .ok;
-}
-
-/**
- * `$path` as seen from `$base`: itself when absolute, `$base` when empty, joined onto `$base`
- * otherwise.
- */
-public function resolve(const string& $base, const string& $path) : string
-{
-    if ($path->empty()) {
-        return $base;
-    }
-
-    if ($path->starts('/')) {
-        return $path;
-    }
-
-    return std::env::join($base, $path);
+    std::io::eprintln("ecotest: {$line}");
 }
 
 /**
@@ -81,28 +42,17 @@ public function appendLine(const string& $path, const string& $line) : status<st
 }
 
 /**
- * The newest run directory under `$root`, by its name, or null when there is no run yet.
+ * Writes `$text` to `$path` whole or not at all: into `<path>.tmp` first, then renamed over it, so a
+ * reader never sees half a file.
  */
-public function latest(const string& $root) : string?
+public function seal(const string& $path, const string& $text) : status<std::io::ioerror>
 {
-    $best = '';
-
-    $listing = guard std::io::opendir($root) else {
-        return null;
+    $tmp = "{$path}.tmp";
+    guard std::io::writefile($tmp, $text) else ($e) {
+        return .error($e);
     };
-
-    foreach ($listing as const &$entry) {
-        $name = $entry->name();
-        if ($entry->is_directory() && $name->starts('run-') && $name > $best) {
-            $best = $name;
-        }
-    }
-
-    $listing->close();
-
-    if ($best->empty()) {
-        return null;
-    }
-
-    return std::env::join($root, $best);
+    guard std::io::rename($tmp, $path) else ($e) {
+        return .error($e);
+    };
+    return .ok;
 }

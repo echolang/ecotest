@@ -1,0 +1,247 @@
+/**
+ * How a value reads inside a failure. Text is quoted with its invisible bytes spelled out, so a
+ * stray `\r` or trailing space shows; anything long is cut on a character boundary so a summary
+ * stays on one line; floats print with as many digits as it takes to tell two of them apart.
+ */
+
+namespace ecotest::show;
+
+use ecotest::utf8;
+
+/**
+ * How many bytes of a value a one-line summary shows before cutting.
+ */
+internal const usize WIDTH = 120;
+
+/**
+ * How many bytes before the first difference `around` keeps.
+ */
+internal const usize LEAD = 40;
+
+/**
+ * Appends `$b` to `$out` as it should read: tabs, newlines and carriage returns as their escapes,
+ * other control bytes and DEL as `\xNN`, anything else as it is.
+ */
+private function escape(string& $out, uint8 $b) : void
+{
+    string $digits = '0123456789abcdef';
+
+    if ($b == 10) {
+        $out->append('\\n');
+    } else if ($b == 13) {
+        $out->append('\\r');
+    } else if ($b == 9) {
+        $out->append('\\t');
+    } else if ($b < 32 || $b == 127) {
+        $out->append('\\x');
+        $out->push($digits->byte(($b / 16) as usize));
+        $out->push($digits->byte(($b % 16) as usize));
+    } else {
+        $out->push($b);
+    }
+}
+
+/**
+ * `$text` quoted, with tabs, newlines, carriage returns and other control bytes escaped, cut to
+ * `WIDTH` on a character boundary.
+ */
+internal function text(const string& $text) : string
+{
+    string $out = "'";
+
+    for (usize $i = 0; $i < $text->size(); $i++) {
+        uint8 $b = $text->byte($i);
+
+        if ($out->size() > WIDTH && !utf8::continues($b)) {
+            $out->append('...');
+            break;
+        }
+
+        if ($b == 39 || $b == 92) {
+            $out->push(92);
+            $out->push($b);
+        } else {
+            escape($out, $b);
+        }
+    }
+
+    $out->append("'");
+    return $out;
+}
+
+/**
+ * `$text` cut to `WIDTH` bytes on a character boundary, with `...` where it was cut.
+ */
+internal function cut(const string& $text) : string
+{
+    if ($text->size() <= WIDTH) {
+        return $text;
+    }
+
+    string $out = $text->sub(0, utf8::boundary($text, WIDTH));
+    $out->append('...');
+    return $out;
+}
+
+/**
+ * The last `$lines` lines of `$text`, with `...` above them when there were more. What a failing
+ * program printed last is usually why it failed.
+ */
+internal function tail(const string& $text, usize $lines = 20) : string
+{
+    $all = str::lines($text)->owned();
+    if ($all->count() <= $lines) {
+        return str::rtrim($text);
+    }
+
+    string $out = '...';
+    for (usize $i = $all->count() - $lines; $i < $all->count(); $i++) {
+        $out->append("\n");
+        $out->append($all[$i]);
+    }
+    return $out;
+}
+
+/**
+ * `$text` with every line indented by `$by` spaces.
+ */
+internal function indent(const string& $text, usize $by) : string
+{
+    $pad = str::repeat(' ', $by);
+    string $out = '';
+    bool $first = true;
+
+    foreach (str::split($text, "\n") as const &$line) {
+        if (!$first) {
+            $out->append("\n");
+        }
+        $first = false;
+        $out->append($pad);
+        $out->append(string($line));
+    }
+
+    return $out;
+}
+
+/**
+ * One line of a diff as it should read: control bytes escaped and trailing spaces shown as `·`,
+ * so two lines that differ only in what cannot be seen still look different.
+ */
+internal function visible(const string& $line) : string
+{
+    usize $end = $line->size();
+    while ($end > 0 && $line->byte($end - 1) == 32) {
+        $end--;
+    }
+
+    string $out = '';
+    for (usize $i = 0; $i < $end; $i++) {
+        escape($out, $line->byte($i));
+    }
+    for (usize $i = $end; $i < $line->size(); $i++) {
+        $out->append('·');
+    }
+    return $out;
+}
+
+/**
+ * The byte where `$a` and `$b` first differ: the length of the shorter one when it is a prefix
+ * of the other.
+ */
+internal function parting(const string& $a, const string& $b) : usize
+{
+    usize $k = 0;
+    while ($k < $a->size() && $k < $b->size() && $a->byte($k) == $b->byte($k)) {
+        $k++;
+    }
+    return $k;
+}
+
+/**
+ * `$text` quoted from byte `$from` on, with `...` in front when that is not the start, cut like
+ * `text`. Shows the part of a long text where it parts from another.
+ */
+internal function from(const string& $text, usize $from) : string
+{
+    if ($from == 0) {
+        return text($text);
+    }
+
+    string $out = '...';
+    $out->append(text($text->sub($from, $text->size() - $from)));
+    return $out;
+}
+
+/**
+ * Where `around` starts showing two texts that part at `$k`: `LEAD` bytes before it, on a
+ * character boundary.
+ */
+internal function lead(const string& $text, usize $k) : usize
+{
+    if ($k <= LEAD) {
+        return 0;
+    }
+    return utf8::boundary($text, $k - LEAD);
+}
+
+/**
+ * True when `$v` is NaN, the one float not equal to itself. Spelled with `==`: echoc's `!=` on
+ * floats is an ordered compare, false for NaN.
+ */
+internal function nan(float64 $v) : bool
+{
+    return !($v == $v);
+}
+
+/**
+ * `$v` with as few digits as still read back as exactly `$v`, so two different floats never print
+ * alike: `0.1 + 0.2` is `0.30000000000000004`, `0.3` stays `0.3`.
+ */
+internal function float(float64 $v) : string
+{
+    if (nan($v)) {
+        return 'NaN';
+    }
+
+    string $short = "{$v}";
+    if ((str::float($short) ?? $v + 1.0) == $v) {
+        return $short;
+    }
+
+    string $p15 = "{$v:.15g}";
+    if ((str::float($p15) ?? $v + 1.0) == $v) {
+        return $p15;
+    }
+
+    string $p16 = "{$v:.16g}";
+    if ((str::float($p16) ?? $v + 1.0) == $v) {
+        return $p16;
+    }
+
+    return "{$v:.17g}";
+}
+
+/**
+ * A text item of a list, map or recorded call, quoted like `text` so `['a, b']` and `['a', 'b']`
+ * read apart.
+ */
+internal function item(const string& $v) : string
+{
+    return text($v);
+}
+
+/**
+ * A float item, with all the digits it takes.
+ */
+internal function item(float64 $v) : string
+{
+    return float($v);
+}
+
+/**
+ * Any other item, through its `str::from`.
+ */
+internal function item<T>(const T& $v) : string
+{
+    return "{$v}";
+}

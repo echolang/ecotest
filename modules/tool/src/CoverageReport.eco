@@ -1,0 +1,176 @@
+namespace ecotest::cli;
+
+use ecotest::cli::{digest, doc};
+
+/**
+ * A run's coverage as it was judged: the scope it reports, the build it measured, and every file
+ * with its counts, its source and that source's fingerprint at the time. Written into the run as
+ * `coverage.json`, so `ecotest report` shows a stored run exactly as it finished, and the queries
+ * can tell whether a file still has the lines the counters were measured against.
+ */
+public struct CoverageReport
+{
+    public Scope $scope = Scope();
+    public string $mapHash = '';
+    public array<FileCoverage> $files = [];
+
+    /**
+     * The report of `$c` in `$scope`. Reads each file's source once, here and nowhere later.
+     */
+    public static function measure(const Coverage& $c, const Scope& $scope) : CoverageReport
+    {
+        $r = CoverageReport();
+        $r->scope = $scope;
+        $r->mapHash = $c->map->hash;
+        $r->files = $c->files($scope);
+
+        foreach ($r->files as &$file) {
+            $file->source = doc::read($file->path) ?? '';
+            $file->hash = digest::fnv($file->source);
+        }
+
+        return $r;
+    }
+
+    /**
+     * Totals over every file.
+     */
+    public const function totals() : Totals
+    {
+        return Coverage::totals($this->files);
+    }
+
+    /**
+     * The file at the absolute `$path`, or null when the report has none there.
+     */
+    public const function file(const string& $path) : FileCoverage?
+    {
+        foreach ($this->files as const &$file) {
+            if ($file->path == $path) {
+                return $file;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The report as `coverage.json`.
+     */
+    public const function json() : string
+    {
+        $doc = json::object();
+        $doc['v'] = json::int(1);
+        $doc['mapHash'] = json::str($this->mapHash);
+
+        $modules = json::arr();
+        foreach ($this->scope->modules as $name => const &$on) {
+            $modules[] = json::str($name);
+        }
+        $doc['modules'] = mv $modules;
+
+        $exclude = json::arr();
+        foreach ($this->scope->exclude as const &$pattern) {
+            $exclude[] = json::str($pattern);
+        }
+        $doc['exclude'] = mv $exclude;
+
+        $files = json::arr();
+        foreach ($this->files as const &$file) {
+            $f = json::object();
+            $f['module'] = json::str($file->module);
+            $f['file'] = json::str($file->file);
+            $f['path'] = json::str($file->path);
+            $f['hash'] = json::str($file->hash);
+            $f['source'] = json::str($file->source);
+
+            $lines = json::arr();
+            foreach ($file->codeLines() as $line) {
+                $pair = json::arr();
+                $pair[] = json::int($line);
+                $pair[] = json::int($file->lines->get($line) as int64);
+                $lines[] = mv $pair;
+            }
+            $f['lines'] = mv $lines;
+
+            $branches = json::arr();
+            foreach ($file->branches as const &$b) {
+                $row = json::arr();
+                $row[] = json::int($b->line);
+                $row[] = json::str($b->edge);
+                $row[] = json::int($b->hits as int64);
+                $branches[] = mv $row;
+            }
+            $f['branches'] = mv $branches;
+
+            $functions = json::arr();
+            foreach ($file->functions as const &$fn) {
+                $row = json::arr();
+                $row[] = json::str($fn->name);
+                $row[] = json::int($fn->line);
+                $row[] = json::int($fn->column);
+                $row[] = json::int($fn->hits as int64);
+                $functions[] = mv $row;
+            }
+            $f['functions'] = mv $functions;
+
+            $files[] = mv $f;
+        }
+        $doc['files'] = mv $files;
+
+        return json::dump($doc);
+    }
+
+    /**
+     * The report kept in run directory `$dir`, or null when the run has none: it measured no
+     * coverage, or it did not finish.
+     */
+    public static function load(const string& $dir) : CoverageReport?
+    {
+        $text = guard doc::read(std::env::join($dir, 'coverage.json')) else {
+            return null;
+        };
+        $doc = guard json::parse($text) else {
+            return null;
+        };
+
+        $r = CoverageReport();
+        $r->mapHash = doc::text($doc, 'mapHash');
+        foreach (doc::list($doc, 'modules') as const &$name) {
+            $r->scope->modules->set($name->asStr() ?? '', true);
+        }
+        foreach (doc::list($doc, 'exclude') as const &$pattern) {
+            $r->scope->exclude[] = $pattern->asStr() ?? '';
+        }
+
+        foreach (doc::list($doc, 'files') as const &$f) {
+            $file = FileCoverage(doc::text($f, 'module'), doc::text($f, 'file'), doc::text($f, 'path'));
+            $file->hash = doc::text($f, 'hash');
+            $file->source = doc::text($f, 'source');
+
+            foreach (doc::list($f, 'lines') as const &$pair) {
+                int64 $line = ($pair->at(0) ?? json::nil())->asInt() ?? 0;
+                int64 $hits = ($pair->at(1) ?? json::nil())->asInt() ?? 0;
+                $file->lines->set($line, $hits as uint64);
+            }
+            foreach (doc::list($f, 'branches') as const &$row) {
+                $file->branches[] = BranchSite(
+                    ($row->at(0) ?? json::nil())->asInt() ?? 0,
+                    ($row->at(1) ?? json::nil())->asStr() ?? '',
+                    (($row->at(2) ?? json::nil())->asInt() ?? 0) as uint64
+                );
+            }
+            foreach (doc::list($f, 'functions') as const &$row) {
+                $file->functions[] = FunctionSite(
+                    ($row->at(0) ?? json::nil())->asStr() ?? '',
+                    ($row->at(1) ?? json::nil())->asInt() ?? 0,
+                    ($row->at(2) ?? json::nil())->asInt() ?? 0,
+                    (($row->at(3) ?? json::nil())->asInt() ?? 0) as uint64
+                );
+            }
+
+            $r->files[] = mv $file;
+        }
+
+        return $r;
+    }
+}

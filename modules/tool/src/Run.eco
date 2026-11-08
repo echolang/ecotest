@@ -1,29 +1,51 @@
 namespace ecotest::cli;
 
+use ecotest::{paths, protocol};
 use ecotest::cli::doc;
 
 /**
- * One ecotest run, rebuilt from what its passes left in the run directory: `pass-N/report.jsonl`
- * from echoc and `pass-N/events/*.jsonl` from the tests. Everything a report shows is derived
- * here, so a stored run renders the same way later as it did live.
+ * The version of echoc's report rows this tool reads.
+ */
+public const int64 REPORT_VERSION = 2;
+
+/**
+ * One ecotest run, folded from what its passes left in the run directory: `pass-N/report.jsonl`
+ * from echoc, `pass-N/echoc.json` with how echoc ended, and `pass-N/events/*.jsonl` from the tests.
+ * A run being watched folds the same rows as they arrive, so a stored run renders later exactly as
+ * it did live.
  */
 public class Run
 {
     public const string $dir;
     public string $version = '';
     public int64 $wallMs = 0;
-    public usize $passes = 0;
 
     /**
-     * How many passes reached their tests. echoc stops short of them when the tests do not compile.
+     * The seed the tests were handed as `ECOTEST_SEED`, so a failure replays.
      */
-    public usize $reached = 0;
+    public string $seed = '';
+
+    /**
+     * True when the run ran only some tests: filtered, or a target named. Its coverage is not the
+     * suite's, so the queries never read it.
+     */
+    public bool $filtered = false;
+
+    /**
+     * Every pass so far, in order.
+     */
+    public array<Pass> $passes = [];
     public array<TestRecord> $tests = [];
 
     /**
      * Where each test's record sits in `tests`, by id.
      */
     private map<string, usize> $index = [];
+
+    /**
+     * The same places, by the file-name form of the id.
+     */
+    private map<string, usize> $byKey = [];
 
     /**
      * An empty run kept in `$dir`, filled as its rows arrive.
@@ -53,45 +75,99 @@ public class Run
         }
 
         $this->settle();
+        $this->recall();
     }
 
     /**
-     * Starts the next pass: the rows folded from now on belong to it.
+     * Takes what the tool knew when the run finished, kept in its `run.json`: the seed, and whether
+     * it was filtered.
      */
-    public function begin() : void
+    private function recall() : void
     {
-        $this->passes++;
+        $kept = guard doc::read(std::env::join($this->dir, 'run.json')) else {
+            return;
+        };
+        $facts = guard json::parse($kept) else {
+            return;
+        };
+        $this->seed = doc::text($facts, 'seed');
+        $this->filtered = doc::object($facts, 'filtered')->asBool() ?? false;
     }
 
     /**
-     * Reads one pass: echoc's report rows, then each test's events.
+     * Starts the next pass, kept in `$passDir`: the rows folded from now on belong to it.
+     */
+    public function begin(const string& $passDir) : void
+    {
+        $this->passes[] = Pass($passDir);
+    }
+
+    /**
+     * Reads one stored pass: echoc's report rows with each test's events, then how echoc ended.
      */
     public function absorb(const string& $passDir) : void
     {
-        $this->begin();
+        $this->begin($passDir);
 
         // the test a row folded into is for the live view; reading back needs only the fold
         foreach (doc::lines(doc::read(std::env::join($passDir, 'report.jsonl')) ?? '') as const &$row) {
-            $this->fold($row, $passDir);
+            $folded = $this->fold($row);
         }
+
+        // a pass stored before echoc's exit was kept has none, and is judged on its rows
+        $exit = guard doc::read(std::env::join($passDir, 'echoc.json')) else {
+            return;
+        };
+        $parsed = guard json::parse($exit) else {
+            return;
+        };
+        $this->exited(PassExit(doc::small($parsed, 'exit'), doc::small($parsed, 'signal')));
     }
 
     /**
-     * Folds one of echoc's report rows from the pass at `$passDir` into the run: the run starting,
-     * a test finishing with the events it wrote, or the end. Answers the test a test row is about.
+     * How echoc ended the current pass.
      */
-    public function fold(const json::Value& $row, const string& $passDir) : TestRecord?
+    public function exited(PassExit $exit) : void
     {
+        if ($this->passes->empty()) {
+            return;
+        }
+        $this->passes[$this->passes->count() - 1]->exit = $exit;
+    }
+
+    /**
+     * Folds one of echoc's report rows into the current pass: the run starting, a test finishing
+     * with the events it wrote, or the end. Answers the test a test row is about.
+     */
+    public function fold(const json::Value& $row) : TestRecord?
+    {
+        // a row before any pass began belongs to none
+        if ($this->passes->empty()) {
+            return null;
+        }
+
+        Pass& $pass = $this->passes[$this->passes->count() - 1];
         $type = doc::text($row, 'type');
+
+        int64 $v = doc::number($row, 'v');
+        if ($v != REPORT_VERSION) {
+            if ($pass->refused->empty()) {
+                int64 $known = REPORT_VERSION;
+                $pass->refused = "echoc's report is version {$v}; this ecotest reads version {$known}";
+            }
+            return null;
+        }
 
         if ($type == 'run') {
             $this->version = doc::text($row, 'version');
-            $this->reached++;
+            $pass->reached = true;
+            $pass->selected = doc::number($row, 'selected');
             return null;
         }
 
         if ($type == 'end') {
             $this->wallMs = $this->wallMs + doc::number($row, 'ms');
+            $pass->ended = true;
             return null;
         }
 
@@ -99,26 +175,21 @@ public class Run
             return null;
         }
 
+        $pass->rows++;
         $test = $this->find(doc::text($row, 'id'));
         $test->module = doc::text($row, 'module');
-        $test->file = Run::relative(doc::text($row, 'file'), Run::projectOf($this->dir));
+        $test->file = paths::relative(doc::text($row, 'file'), Run::projectOf($this->dir));
         $test->name = doc::text($row, 'name');
         $test->group = doc::text($row, 'group');
-        $test->attempts[] = Attempt(.of(doc::text($row, 'status')), doc::number($row, 'ms'));
         $test->output = doc::text($row, 'output');
 
         // the last pass's events describe the last pass's failure, skip and assertions, and a note
         // or a bench every pass wrote is reported once
         $test->events = Events();
-        $events = std::env::join(std::env::join($passDir, 'events'), "{$test->key}.jsonl");
+        $events = std::env::join(std::env::join($pass->dir, 'events'), "{$test->key}.jsonl");
         // a test that wrote nothing through ecotest has no events file
         foreach (doc::lines(doc::read($events) ?? '') as const &$event) {
             $test->events->apply($event);
-        }
-
-        // a test that skips itself exits cleanly, so echoc calls the pass a pass
-        if (!$test->events->skipReason->empty()) {
-            $test->attempts[$test->attempts->count() - 1]->outcome = .skip;
         }
 
         $crash = doc::object($row, 'failure');
@@ -126,7 +197,28 @@ public class Run
             $test->events->crashed($crash);
         }
 
+        Outcome $outcome = .of(doc::text($row, 'status'));
+        // a test that skips itself exits cleanly, so echoc calls the pass a pass
+        if ($test->events->skipped) {
+            $outcome = .skip;
+        }
+        if ($outcome != Outcome::pass && $outcome != Outcome::skip) {
+            $pass->failing = true;
+        }
+
+        $test->attempts[] = Attempt($outcome, doc::number($row, 'ms'), $test->events->fault);
         return $test;
+    }
+
+    /**
+     * The record whose id has the file-name form `$key`, or null.
+     */
+    public const function keyed(const string& $key) : TestRecord?
+    {
+        if (!$this->byKey->has($key)) {
+            return null;
+        }
+        return $this->tests[$this->byKey->get($key)];
     }
 
     /**
@@ -140,22 +232,9 @@ public class Run
 
         $test = TestRecord($id);
         $this->index->set($id, $this->tests->count());
+        $this->byKey->set($test->key, $this->tests->count());
         $this->tests[] = $test;
         return $test;
-    }
-
-    /**
-     * `$path` relative to `$base` when it lies below it, so reports name `tests/date.eco` rather
-     * than a checkout path.
-     */
-    public static function relative(const string& $path, const string& $base) : string
-    {
-        string $here = $base;
-        $here->append('/');
-        if ($path->starts($here)) {
-            return $path->sub($here->size(), $path->size() - $here->size());
-        }
-        return $path;
     }
 
     /**
@@ -164,9 +243,21 @@ public class Run
      */
     public static function projectOf(const string& $dir) : string
     {
-        usize $at = $dir->find('/.ecotest/');
-        if ($at < $dir->size()) {
-            return $dir->sub(0, $at);
+        $parts = paths::split($dir);
+        for (usize $i = $parts->count(); $i > 0; $i--) {
+            if ($parts[$i - 1] != '.ecotest') {
+                continue;
+            }
+
+            string $out = paths::root($dir);
+            for (usize $k = 0; $k + 1 < $i; $k++) {
+                if ($out->empty()) {
+                    $out = $parts[$k];
+                } else {
+                    $out = std::env::join($out, $parts[$k]);
+                }
+            }
+            return $out;
         }
 
         return std::env::cwd();
@@ -277,20 +368,33 @@ public class Run
     }
 
     /**
-     * How many passes stopped before their tests ran.
+     * Why passes are incomplete, one line each, naming the pass when there are several. Empty
+     * when every pass is whole.
      */
-    public const function stopped() : usize
+    public const function stopped() : array<string>
     {
-        return $this->passes - $this->reached;
+        array<string> $out = [];
+        for (usize $i = 0; $i < $this->passes->count(); $i++) {
+            $reason = guard $this->passes[$i]->stop() else {
+                continue;
+            };
+            if ($this->passes->count() > 1) {
+                usize $n = $i + 1;
+                $out[] = "pass {$n}: {$reason}";
+            } else {
+                $out[] = $reason;
+            }
+        }
+        return $out;
     }
 
     /**
-     * True when every pass reached its tests and none failed, timed out or was killed. Flaky tests
-     * are judged by the gates.
+     * True when at least one pass ran, every pass is whole, and no test failed, timed out or was
+     * killed. Flaky tests are judged by the gates.
      */
     public const function green() : bool
     {
-        if ($this->stopped() > 0) {
+        if ($this->passes->empty() || !$this->stopped()->empty()) {
             return false;
         }
         foreach ($this->tests as const &$test) {

@@ -4,7 +4,8 @@
  */
 
 use ecotest::expect;
-use ecotest::http::{Api, Service, TransportError};
+use ecotest::http::{Api, CurlTransport, Service, TransportError};
+use ecotest::http::url;
 
 test every_verb_and_body_reaches_the_transport
 {
@@ -12,7 +13,7 @@ test every_verb_and_body_reaches_the_transport
     $api = Api(transport: $fake, base: 'http://app/')->with('X-A', '1');
 
     $doc = guard json::parse('{"a":1}');
-    map<string, string> $form = ['a b' => '1&2~'];
+    ordered_map<string, string> $form = ['a b' => '1&2~'];
 
     $api->get('/a');
     $api->head('b');
@@ -36,17 +37,80 @@ test every_verb_and_body_reaches_the_transport
         '', '', '', 'application/json', 'application/json', 'text/plain',
         'application/x-www-form-urlencoded', 'application/json', 'text/csv', 'application/json',
     ]);
-    expect($fake->sent[0]->headers->count())->is(1);
+    expect($fake->headers(0))->is(['X-A: 1']);
 }
 
-test form_fields_are_joined
+test query_fields_are_encoded_in_order
 {
     $fake = FakeTransport();
-    map<string, string> $form = ['a' => '1', 'b' => '2'];
-    Api(transport: $fake)->post('/f', form: $form);
+    $api = Api(transport: $fake);
 
-    expect($fake->lines())->is(['POST http://app/f']);
-    expect($fake->sent[0]->body)->has('a=1')->has('b=2')->has('&')->length(7);
+    ordered_map<string, string> $query = ['b' => '2', 'a b' => 'x&y'];
+    ordered_map<string, string> $more = ['y' => '2'];
+    ordered_map<string, string> $none = [];
+    ordered_map<string, string> $form = ['z' => '1', 'a' => '2'];
+
+    $api->get('/q', query: $query);
+    $api->get('/q?x=1#frag', query: $more);
+    $api->head('/q#frag', query: $more);
+    $api->delete('/q?', query: $more);
+    $api->get('/q', query: $none);
+    $api->post('/f', query: $more, form: $form);
+
+    expect($fake->lines())->is([
+        'GET http://app/q?b=2&a%20b=x%26y',
+        'GET http://app/q?x=1&y=2#frag',
+        'HEAD http://app/q?y=2#frag',
+        'DELETE http://app/q?y=2',
+        'GET http://app/q',
+        'POST http://app/f?y=2',
+    ]);
+    expect($fake->sent[5]->body)->is('z=1&a=2');
+}
+
+test url_encoding_escapes_everything_but_unreserved_bytes
+{
+    expect(url::encode('AZaz09-._~'))->is('AZaz09-._~');
+    expect(url::encode(" /?#&=%+'\u{e9}"))->is('%20%2F%3F%23%26%3D%25%2B%27%C3%A9');
+    expect(url::encode(''))->is('');
+}
+
+test with_replaces_a_header_by_name
+{
+    $fake = FakeTransport();
+    Api(transport: $fake)->with('X-A', '1')->with('X-B', '2')->with('x-a', '3')->get('/');
+
+    expect($fake->headers(0))->is(['x-a: 3', 'X-B: 2']);
+}
+
+test with_and_bearer_leave_the_original_api_alone
+{
+    $fake = FakeTransport();
+    $plain = Api(transport: $fake);
+    $authed = $plain->bearer('t0k');
+    $tagged = $authed->with('X-A', '1');
+
+    $plain->get('/a');
+    $authed->get('/b');
+    $tagged->without('authorization')->get('/c');
+    $tagged->get('/d');
+
+    expect($fake->headers(0))->empty();
+    expect($fake->headers(1))->is(['Authorization: Bearer t0k']);
+    expect($fake->headers(2))->is(['X-A: 1']);
+    expect($fake->headers(3))->is(['Authorization: Bearer t0k', 'X-A: 1']);
+}
+
+test a_body_type_overrides_a_default_content_type
+{
+    $fake = FakeTransport();
+    $api = Api(transport: $fake)->with('content-type', 'text/plain')->with('X-A', '1');
+
+    $api->post('/p', json: '{}');
+    $api->get('/g');
+
+    expect($fake->headers(0))->is(['Content-Type: application/json', 'X-A: 1']);
+    expect($fake->headers(1))->is(['content-type: text/plain', 'X-A: 1']);
 }
 
 test a_broken_transport_fails_the_first_check
@@ -63,20 +127,69 @@ test a_broken_transport_fails_the_first_check
 
 test a_transport_error_reads_as_its_reason
 {
-    TransportError $curl = .curl(.couldNotConnect);
-    TransportError $refused = .refused('wire cut');
+    TransportError $unreachable = .unreachable;
+    TransportError $timeout = .timeout(250);
+    TransportError $invalid = .invalid('no scheme');
+    TransportError $failed = .failed('wire cut');
 
-    expect("{$curl}")->is(curl::Error::couldNotConnect->message());
-    expect("{$refused}")->is('wire cut');
+    expect("{$unreachable}")->is('nothing answers there');
+    expect("{$timeout}")->is('no answer within 250 ms');
+    expect("{$invalid}")->is('cannot be sent: no scheme');
+    expect("{$failed}")->is('wire cut');
+}
+
+test curl_errors_map_to_neutral_reasons
+{
+    $connect = CurlTransport::reason(.couldNotConnect, 5);
+    $resolve = CurlTransport::reason(.couldNotResolveHost, 5);
+    $timeout = CurlTransport::reason(.timeout, 200);
+    $malformed = CurlTransport::reason(.urlMalformat, 5);
+    $tls = CurlTransport::reason(.sslConnectError, 5);
+
+    expect("{$connect}")->is('nothing answers there');
+    expect("{$resolve}")->is('nothing answers there');
+    expect("{$timeout}")->is('no answer within 200 ms');
+    expect("{$malformed}")->starts('cannot be sent: ');
+    expect("{$tls}")->is(curl::Error::sslConnectError->message());
+
+    expect(why(Api('http://127.0.0.1:9')->get('/')))->is('nothing answers there');
+    expect(why(Api('nope://x')->get('/')))->starts('cannot be sent: ');
+
+    $server = TestServer();
+    $base = $server->start();
+    $impatient = Api(transport: CurlTransport(200), base: $base);
+    expect(why($impatient->get('/slow')))->is('no answer within 200 ms');
 }
 
 test a_named_service_is_read_from_its_variable
 {
-    expect(Api::variable('my-api2'))->is('ECOTEST_MY_API2_URL');
-    expect(Api::variable('My_Api'))->is('ECOTEST_MY_API_URL');
-
     setVar('ECOTEST_MY_API2_URL', 'http://127.0.0.1:1/');
     expect(Api(service: 'my-api2')->base)->is('http://127.0.0.1:1');
+}
+
+test a_named_service_waits_for_its_ready_url
+{
+    $server = TestServer();
+    $base = $server->start();
+
+    setVar('ECOTEST_READY_API_URL', $base);
+    setVar('ECOTEST_READY_API_READY', "{$base}/plain");
+    setVar('ECOTEST_READY_API_READY_MS', '2000');
+
+    Api(service: 'ready-api')->get('/plain')->body('hello there');
+    // the second one in this process does not probe again
+    Api(service: 'ready-api')->get('/plain')->ok();
+}
+
+#[tests: expects death]
+test a_named_service_that_never_gets_ready_stops_the_test
+{
+    int32 $port = freePort();
+    setVar('ECOTEST_DEAF_URL', "http://127.0.0.1:{$port}");
+    setVar('ECOTEST_DEAF_READY', "http://127.0.0.1:{$port}/");
+    setVar('ECOTEST_DEAF_READY_MS', '200');
+
+    $api = Api(service: 'deaf');
 }
 
 test libcurl_carries_every_verb
@@ -84,16 +197,69 @@ test libcurl_carries_every_verb
     $server = TestServer();
     $api = Api($server->start());
 
-    expect($api->head('/users/1')->response)->ok();
-    expect($api->delete('/users/1')->response)->ok();
-    expect($api->put('/users', json: '{}')->response)->ok();
-    expect($api->patch('/users', json: '{}')->response)->ok();
+    $api->get('/verb')->header('X-Method', 'GET')->body('GET');
+    $api->head('/verb')->header('X-Method', 'HEAD')->body('');
+    $api->delete('/verb')->header('X-Method', 'DELETE')->body('DELETE');
+    $api->post('/verb', json: '{}')->header('X-Method', 'POST')->body('POST');
+    $api->put('/verb', json: '{}')->header('X-Method', 'PUT')->body('PUT');
+    $api->patch('/verb', json: '{}')->header('X-Method', 'PATCH')->body('PATCH');
+}
+
+test redirects_come_back_as_they_are
+{
+    $server = TestServer();
+    $api = Api($server->start());
+
+    $api->get('/moved')->status(302)->header('Location', '/plain')->body('');
+}
+
+test curl_sends_what_the_transport_contract_says
+{
+    $server = TestServer();
+    $base = $server->start();
+    $api = Api($base);
+    int32 $port = $server->port;
+
+    $api->get('/headers')->body("host=127.0.0.1:{$port}\naccept=*/*\nagent=\nencoding=\nlength=");
+    $api->post('/headers', json: '{"a":1}')->body("host=127.0.0.1:{$port}\naccept=*/*\nagent=\nencoding=\nlength=7");
+    $api->with('User-Agent', 'probe/1')->with('Accept', 'text/plain')->get('/headers')
+        ->body("host=127.0.0.1:{$port}\naccept=text/plain\nagent=probe/1\nencoding=\nlength=");
+}
+
+test a_test_server_started_twice_answers_on_one_port
+{
+    $server = TestServer();
+    $first = $server->start();
+    $second = $server->start();
+
+    expect($second)->is($first);
+    Api($second)->get('/plain')->ok();
 }
 
 test a_service_a_test_starts_is_stopped_with_it
 {
-    $web = Service('python3', ['-m', 'http.server', '18736', '--bind', '127.0.0.1'], ready: 'http://127.0.0.1:18736/', url: 'http://127.0.0.1:18736');
+    int32 $port = freePort();
+    $web = Service('python3', ['-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "http://127.0.0.1:{$port}/", url: "http://127.0.0.1:{$port}");
     $web->api()->get('/')->ok();
+}
+
+/**
+ * Starts a python server on a free port, checks it answers, and lets it go. Answers its URL.
+ */
+internal function servedOnce() : string
+{
+    int32 $port = freePort();
+    string $url = "http://127.0.0.1:{$port}";
+    $web = Service('python3', ['-u', '-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "{$url}/", url: $url);
+    $web->api()->get('/')->ok();
+    expect($web->output())->has('GET / HTTP');
+    return $url;
+}
+
+test a_service_is_killed_when_it_goes
+{
+    $url = servedOnce();
+    expect(why(Api($url)->get('/')))->is('nothing answers there');
 }
 
 #[tests: expects death]
@@ -111,5 +277,21 @@ test a_service_that_never_answers_stops_the_test
 #[tests: expects death]
 test a_service_answering_with_an_error_is_never_ready
 {
-    $lost = Service('python3', ['-m', 'http.server', '18737', '--bind', '127.0.0.1'], ready: 'http://127.0.0.1:18737/missing', url: '', within: .millis(1500));
+    int32 $port = freePort();
+    $lost = Service('python3', ['-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "http://127.0.0.1:{$port}/missing", url: '', within: .millis(1500));
+}
+
+#[tests: expects death]
+test a_service_that_exits_before_ready_stops_the_test
+{
+    int32 $port = freePort();
+    $quitter = Service('sh', ['-c', 'echo boom; exit 3'], ready: "http://127.0.0.1:{$port}/", url: '');
+}
+
+#[tests: expects death]
+test a_service_whose_ready_url_already_answers_stops_the_test
+{
+    $server = TestServer();
+    $base = $server->start();
+    $late = Service('sleep', ['5'], ready: "{$base}/plain", url: $base);
 }

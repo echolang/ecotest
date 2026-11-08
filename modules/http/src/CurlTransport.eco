@@ -1,11 +1,16 @@
 namespace ecotest::http;
 
 /**
- * Requests over real sockets, through libcurl. Redirects are not followed, so a test sees the
- * status the service sent.
+ * Requests over real sockets, through libcurl, under the `Transport` contract: redirects come back
+ * as they are, nothing is decompressed, and libcurl adds only what the contract allows. Known gap:
+ * libcurl itself adds `Content-Type: application/x-www-form-urlencoded` to a POST that sets no
+ * Content-Type, and `Expect: 100-continue` to a body over 1 MiB.
  */
 public class CurlTransport : Transport
 {
+    /**
+     * How long one exchange may take, in milliseconds.
+     */
     public int32 $timeoutMs;
 
     public constructor(int32 $timeoutMs = 10000)
@@ -18,26 +23,62 @@ public class CurlTransport : Transport
      */
     public function send(const Request& $request) : result<Response, TransportError>
     {
-        $out = curl::Request($request->verb->curl(), $request->url);
+        $out = curl::Request(CurlTransport::method($request->verb), $request->url);
         $out->body = $request->body;
         $out->timeout($this->timeoutMs);
+        $out->follow(false);
+        $out->acceptEncoding(false);
 
         foreach ($request->headers as const &$h) {
             $out->header($h->name, $h->value);
         }
 
+        $started = std::time::instant::now();
         $got = guard curl::send($out) else ($e) {
-            return .error(.curl($e));
+            return .error(CurlTransport::reason($e, $this->timeoutMs));
         };
 
         $res = Response($got->status);
-        $res->body = $got->body;
-        $res->ms = ($got->seconds * 1000.0) as int64;
+        $res->ms = $started->elapsed()->as_millis();
+        if ($request->verb != Verb::head) {
+            $res->body = $got->body;
+        }
 
         foreach ($got->headers->items as const &$h) {
             $res->headers[] = Header($h->name, $h->value);
         }
 
         return .ok(mv $res);
+    }
+
+    /**
+     * libcurl's error `$e` as a transport-neutral reason. `$ms` is the timeout that was set.
+     */
+    internal static function reason(curl::Error $e, int32 $ms) : TransportError
+    {
+        return match ($e) {
+            .couldNotConnect => .unreachable,
+            .couldNotResolveHost => .unreachable,
+            .couldNotResolveProxy => .unreachable,
+            .timeout => .timeout($ms),
+            .urlMalformat => .invalid($e->message()),
+            .unsupportedProtocol => .invalid($e->message()),
+            else => .failed($e->message()),
+        };
+    }
+
+    /**
+     * libcurl's spelling of `$verb`.
+     */
+    private static function method(Verb $verb) : curl::Method
+    {
+        return match ($verb) {
+            .get => .get,
+            .head => .head,
+            .post => .post,
+            .put => .put,
+            .patch => .patch,
+            .delete => .delete,
+        };
     }
 }

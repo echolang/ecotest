@@ -5,6 +5,8 @@
 
 namespace ecotest::diff;
 
+use ecotest::show;
+
 /**
  * Unchanged lines shown on each side of a change.
  */
@@ -147,7 +149,7 @@ private function render(const array<DiffLine>& $rows) : string
             .got => '+ ',
             .same => '  ',
         });
-        $out->append($row->text);
+        $out->append(show::visible($row->text));
         $out->append("\n");
     }
 
@@ -179,5 +181,7 @@ private function first(const array<string>& $a, const array<string>& $b) : strin
     }
 
     usize $line = $k + 1;
-    return "first difference at line {$line}\n- {$want}\n+ {$got}\n";
+    $w = show::visible($want);
+    $g = show::visible($got);
+    return "first difference at line {$line}\n- {$w}\n+ {$g}\n";
 }

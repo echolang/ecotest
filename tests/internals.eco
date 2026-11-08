@@ -19,13 +19,13 @@ test show_indents_every_line
 
 test session_key_matches_the_coverage_file_rule
 {
-    expect(Session::key('mylib/date.eco::parses_iso'))->is('mylib_date.eco__parses_iso');
+    expect(ecotest::protocol::key('mylib/date.eco::parses_iso'))->is('mylib_date.eco__parses_iso');
 }
 
 test an_event_renders_one_json_line
 {
     $event = Event('metric')->text('name', 'rows')->number('value', 12)->texts('tags', ['a', 'b']);
-    expect("{$event}")->is('{"type":"metric","name":"rows","value":12,"tags":["a","b"]}');
+    expect("{$event}")->is('{"v":1,"type":"metric","name":"rows","value":12,"tags":["a","b"]}');
 }
 
 test equal_texts_have_no_diff
@@ -54,7 +54,7 @@ test a_failure_renders_values_context_and_detail
 
 test a_failure_quoting_its_values_says_them_once
 {
-    $f = Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2');
+    $f = Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2', $inline: true);
     expect("{$f}")->is('expected 1, got 2');
 }
 
@@ -72,7 +72,7 @@ test show_spells_out_every_invisible_byte
     string $odd = "a\r\tb";
     $odd->push(1);
 
-    expect(show::text($odd))->is("'a\\r\\tb\\x1'");
+    expect(show::text($odd))->is("'a\\r\\tb\\x01'");
 }
 
 test show_cuts_long_text

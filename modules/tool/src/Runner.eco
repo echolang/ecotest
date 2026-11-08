@@ -1,11 +1,13 @@
 namespace ecotest::cli;
 
-use ecotest::cli::{doc, files};
+use ecotest::{paths, protocol};
+use ecotest::cli::{doc, files, interrupt, proc};
 
 /**
- * Runs `echoc test` once per pass into a run directory. Each pass gets its own `report.jsonl`,
- * an `events/` directory the tests write into through `ECOTEST_RUN_DIR`, and a copy of echoc's
- * coverage files, which echoc clears on its next run.
+ * Runs `echoc test` once per pass into a run directory and folds what each pass reports into the
+ * run. Each pass gets its own `report.jsonl`, an `events/` directory the tests write into through
+ * `ECOTEST_RUN_DIR`, `echoc.json` with how echoc ended, and a copy of the coverage that pass
+ * measured.
  */
 public class Runner
 {
@@ -25,17 +27,25 @@ public class Runner
     public LiveView? $view = null;
 
     /**
-     * Runs every pass of `$echoc` into `$dir`, or answers why one could not run: echoc would not
-     * start, or its pass directory or log could not be written.
+     * Runs every pass of `$echoc` into `$dir`, folding each into `$run`, or answers why one could
+     * not run: echoc would not start, a pass directory could not be written, coverage could not be
+     * kept, or an interrupt arrived.
      */
-    public const function run(const Invocation& $echoc, const string& $dir) : status<RunError>
+    public function run(const Invocation& $echoc, const string& $dir, Run& $run) : status<RunError>
     {
+        $coverage = std::env::join(paths::resolve($echoc->project, $echoc->buildDir), 'coverage');
+
         for (usize $pass = 1; $pass <= $echoc->repeat; $pass++) {
             $passDir = std::env::join($dir, "pass-{$pass}");
             $events = std::env::join($passDir, 'events');
-            guard files::mkdirs($events) else ($e) {
+            guard paths::mkdirs($events) else ($e) {
                 return .error(.cannotWrite($events, $e));
             };
+
+            // what echoc left from an earlier run is not this pass's coverage
+            if ($echoc->coverage) {
+                Runner::clearCoverage($coverage);
+            }
 
             array<string> $args = ['test', '--report', std::env::join($passDir, 'report.jsonl')];
             if ($echoc->coverage) {
@@ -46,20 +56,26 @@ public class Runner
             foreach ($echoc->forwarded as const &$word) {
                 $test->arg($word);
             }
-            $test->env('ECOTEST_RUN_DIR', $passDir);
+            $test->env(protocol::RUN_DIR, $passDir);
             // a test that runs echoc itself reaches the same compiler
             $test->env('ECHOC', $echoc->program);
-            $test->env('ECOTEST_SEED', "{$this->seed}");
+            $test->env(protocol::SEED, "{$this->seed}");
             foreach ($this->env as $name => const &$value) {
                 $test->env($name, $value);
             }
 
-            guard $this->launch($echoc, $test, $passDir, $pass) else ($e) {
+            $run->begin($passDir);
+            $exit = guard $this->launch($echoc, $test, $passDir, $pass, $run) else ($e) {
                 return .error($e);
             };
+            $run->exited($exit);
+            Runner::record($passDir, $exit);
 
-            if ($echoc->coverage) {
-                $this->keepCoverage($echoc, $passDir);
+            const Pass& $done = $run->passes[$run->passes->count() - 1];
+            if ($echoc->coverage && $done->reached) {
+                guard Runner::keepCoverage($coverage, $passDir) else ($e) {
+                    return .error($e);
+                };
             }
         }
 
@@ -67,31 +83,49 @@ public class Runner
     }
 
     /**
-     * Runs pass `$pass` of `$echoc`, the command `$test`, to its end: with the streams inherited,
-     * or watched through the view.
+     * Runs pass `$pass` of `$echoc`, the command `$test`, to its end and answers how echoc ended:
+     * with the streams inherited and the report folded afterwards, or watched through the view.
      */
-    private const function launch(const Invocation& $echoc, std::process::command& $test, const string& $passDir, usize $pass) : status<RunError>
-    {
+    private function launch(
+        const Invocation& $echoc,
+        std::process::command& $test,
+        const string& $passDir,
+        usize $pass,
+        Run& $run
+    ) : result<PassExit, RunError> {
         LiveView $view = guard $this->view else {
             if ($echoc->repeat > 1) {
-                std::io::println("ecotest: pass {$pass} of {$echoc->repeat}");
+                files::warn("pass {$pass} of {$echoc->repeat}");
             }
 
-            guard $test->status() else ($e) {
+            $child = guard $test->spawn() else ($e) {
                 return .error(.cannotRun($echoc->program, $e));
             };
-            return .ok;
+            $exit = guard Runner::await($child) else ($e) {
+                return .error($e);
+            };
+
+            foreach (doc::lines(doc::read(std::env::join($passDir, 'report.jsonl')) ?? '') as const &$row) {
+                $folded = $run->fold($row);
+            }
+            return .ok($exit);
         };
 
-        return $this->watch($echoc, $test, $passDir, $pass, $view);
+        return $this->watch($echoc, $test, $passDir, $pass, $view, $run);
     }
 
     /**
      * Runs pass `$pass`, the command `$test`, with echoc's output in `echoc.log` beside its report,
-     * and feeds both to `$view` as they grow, until echoc ends.
+     * folding the rows into `$run` and feeding both to `$view` as they grow, until echoc ends.
      */
-    private const function watch(const Invocation& $echoc, std::process::command& $test, const string& $passDir, usize $pass, LiveView $view) : status<RunError>
-    {
+    private function watch(
+        const Invocation& $echoc,
+        std::process::command& $test,
+        const string& $passDir,
+        usize $pass,
+        LiveView $view,
+        Run& $run
+    ) : result<PassExit, RunError> {
         $logPath = std::env::join($passDir, 'echoc.log');
         $log = guard std::io::create($logPath) else ($e) {
             return .error(.cannotWrite($logPath, $e));
@@ -110,15 +144,20 @@ public class Runner
             return .error(.cannotRun($echoc->program, $e));
         };
 
-        $view->begin($pass, $echoc->repeat, $passDir);
+        $view->begin($pass, $echoc->repeat);
         $report = Tail(std::env::join($passDir, 'report.jsonl'));
         $output = Tail($logPath);
 
         while (Runner::alive($child)) {
+            if (interrupt::requested()) {
+                proc::stop($child, 2000);
+                $log->close();
+                return .error(.interrupted);
+            }
             if ($view->compiling()) {
                 $view->output($output->take());
             }
-            $view->rows(doc::lines($report->take()));
+            Runner::feed($view, $run, $report->take());
             std::thread::sleep(40);
         }
 
@@ -127,11 +166,46 @@ public class Runner
         if ($view->compiling()) {
             $view->output($output->rest());
         }
-        $view->rows(doc::lines($report->rest()));
+        Runner::feed($view, $run, $report->rest());
 
         $log->close();
         $view->end($logPath);
-        return .ok;
+
+        $status = guard $child->wait() else ($e) {
+            return .error(.cannotRun($echoc->program, $e));
+        };
+        return .ok(PassExit($status->code(), $status->signal()));
+    }
+
+    /**
+     * Folds the report rows in `$text` into `$run` and shows each to `$view`.
+     */
+    private static function feed(LiveView& $view, Run& $run, const string& $text) : void
+    {
+        foreach (doc::lines($text) as const &$row) {
+            $test = $run->fold($row);
+            $view->take($row, $test);
+        }
+        $view->advance();
+    }
+
+    /**
+     * Waits for `$child` to end, stopping it and everything it started when an interrupt arrives.
+     */
+    private static function await(std::process::child& $child) : result<PassExit, RunError>
+    {
+        while (Runner::alive($child)) {
+            if (interrupt::requested()) {
+                proc::stop($child, 2000);
+                return .error(.interrupted);
+            }
+            std::thread::sleep(40);
+        }
+
+        $status = guard $child->wait() else ($e) {
+            return .error(.cannotRun('echoc', $e));
+        };
+        return .ok(PassExit($status->code(), $status->signal()));
     }
 
     /**
@@ -144,35 +218,78 @@ public class Runner
     }
 
     /**
-     * Copies `$echoc`'s coverage map and counter files into the pass. A file that cannot be copied is
-     * named on stdout, so a run that then reports no coverage says why.
+     * Writes how echoc ended into the pass as `echoc.json`, so a stored run is judged by it too. A
+     * file that cannot be written leaves the pass to be judged on its rows.
      */
-    private const function keepCoverage(const Invocation& $echoc, const string& $passDir) : void
+    private static function record(const string& $passDir, const PassExit& $exit) : void
     {
-        $from = std::env::join(files::resolve($echoc->project, $echoc->buildDir), 'coverage');
+        $doc = json::object();
+        $doc['v'] = json::int(1);
+        $doc['exit'] = json::nil();
+        $doc['signal'] = json::nil();
+        if ($exit->code != null) {
+            $doc['exit'] = json::int(($exit->code ?? 0) as int64);
+        }
+        if ($exit->signal != null) {
+            $doc['signal'] = json::int(($exit->signal ?? 0) as int64);
+        }
+        $written = files::write(std::env::join($passDir, 'echoc.json'), json::dump($doc));
+    }
+
+    /**
+     * Removes the coverage map and counter files echoc left in `$from`, so whatever is there after
+     * the next pass is that pass's.
+     */
+    private static function clearCoverage(const string& $from) : void
+    {
+        $gone = std::io::remove(std::env::join($from, 'map.json'));
+
+        $tests = std::env::join($from, 'tests');
+        $listing = guard std::io::opendir($tests) else {
+            return;
+        };
+        array<string> $stale = [];
+        foreach ($listing as const &$entry) {
+            if ($entry->name()->ends('.ecocov')) {
+                $stale[] = $entry->path();
+            }
+        }
+        $listing->close();
+
+        foreach ($stale as const &$path) {
+            $removed = std::io::remove($path);
+        }
+    }
+
+    /**
+     * Copies the coverage map and counter files in `$from` into the pass at `$passDir`.
+     */
+    private static function keepCoverage(const string& $from, const string& $passDir) : status<RunError>
+    {
         $to = std::env::join($passDir, 'coverage');
         $tests = std::env::join($to, 'tests');
-        // a directory that cannot be made fails the copies into it, and those are named below
-        files::mkdirs($tests);
+        guard paths::mkdirs($tests) else ($e) {
+            return .error(.cannotWrite($tests, $e));
+        };
 
         $map = std::env::join($from, 'map.json');
         guard std::io::copy($map, std::env::join($to, 'map.json')) else ($e) {
-            std::io::println("ecotest: cannot keep the coverage map {$map}: {$e}");
-            return;
+            return .error(.cannotKeep($map, $e));
         };
 
-        $listing = guard std::io::opendir(std::env::join($from, 'tests')) else ($e) {
-            std::io::println("ecotest: cannot read the coverage counters in {$from}: {$e}");
-            return;
+        $counters = std::env::join($from, 'tests');
+        $listing = guard std::io::opendir($counters) else ($e) {
+            return .error(.cannotKeep($counters, $e));
         };
 
         foreach ($listing as const &$entry) {
             guard std::io::copy($entry->path(), std::env::join($tests, $entry->name())) else ($e) {
-                std::io::println("ecotest: cannot keep the coverage counters {$entry->path()}: {$e}");
-                continue;
+                $listing->close();
+                return .error(.cannotKeep($entry->path(), $e));
             };
         }
 
         $listing->close();
+        return .ok;
     }
 }

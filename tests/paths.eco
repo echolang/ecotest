@@ -1,0 +1,69 @@
+use ecotest::{expect, paths};
+
+test paths_split_into_segments
+{
+    expect(paths::split('/a//b/./c/'))->is(['a', 'b', 'c']);
+    expect(paths::split('a/b'))->is(['a', 'b']);
+    expect(paths::split('/'))->empty();
+}
+
+test absolute_paths_start_at_a_root
+{
+    expect(paths::isAbsolute('/x'))->yes();
+    expect(paths::isAbsolute('x/y'))->no();
+    expect(paths::isAbsolute(''))->no();
+    expect(paths::root('/x/y'))->is('/');
+    expect(paths::root('x'))->empty();
+}
+
+test a_path_has_a_dir_a_base_and_a_stem
+{
+    expect(paths::dir('/a/b/c.eco'))->is('/a/b');
+    expect(paths::dir('/c.eco'))->is('/');
+    expect(paths::dir('c.eco'))->is('.');
+    expect(paths::base('/a/b/c.eco'))->is('c.eco');
+    expect(paths::base('c.eco'))->is('c.eco');
+    expect(paths::stem('/a/b/c.test.eco'))->is('c.test');
+    expect(paths::stem('/a/Makefile'))->is('Makefile');
+    expect(paths::stem('/a/.env'))->is('.env');
+}
+
+test a_path_below_a_base_reads_relative
+{
+    expect(paths::relative('/p/tests/a.eco', '/p'))->is('tests/a.eco');
+    expect(paths::relative('/p/tests/a.eco', '/p/'))->is('tests/a.eco');
+    expect(paths::relative('/q/a.eco', '/p'))->is('/q/a.eco');
+    expect(paths::relative('/p', '/p'))->is('/p');
+    expect(paths::relative('/pp/a.eco', '/p'))->is('/pp/a.eco');
+}
+
+test resolve_keeps_absolute_paths
+{
+    expect(paths::resolve('/base', '/abs'))->is('/abs');
+    expect(paths::resolve('/base', ''))->is('/base');
+    expect(paths::resolve('/base', 'rel'))->is(std::env::join('/base', 'rel'));
+}
+
+test mkdirs_makes_every_missing_level
+{
+    $dir = ecotest::TempDir();
+    $deep = std::env::join(std::env::join($dir->path, 'a'), 'b');
+
+    expect(paths::mkdirs($deep))->fine();
+    expect(paths::mkdirs($deep))->fine();
+    expect(std::io::exists($deep)->or(false))->yes();
+
+    $file = $dir->write('file', 'x');
+    expect(paths::mkdirs(std::env::join($file, 'below')))->fails();
+}
+
+#[if: os == windows]
+test windows_paths_know_drives_and_shares
+{
+    expect(paths::isAbsolute('C:\\x'))->yes();
+    expect(paths::root('C:\\x\\y'))->is('C:\\');
+    expect(paths::root('\\\\server\\share\\x'))->is('\\\\server\\share\\');
+    expect(paths::split('C:\\a/b\\c'))->is(['a', 'b', 'c']);
+    expect(paths::dir('C:\\a\\b.eco'))->is('C:\\a');
+}
+#[end]

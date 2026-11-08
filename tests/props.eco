@@ -1,5 +1,5 @@
 use ecotest::expect;
-use ecotest::{gen, Random, Gen};
+use ecotest::{gen, Calls, Draws, Gen, Random};
 
 test random_is_reproducible_from_its_seed
 {
@@ -26,23 +26,176 @@ test a_true_property_passes
     ecotest::forAll(gen::pick($letters), (const string& $s) => $s == 'a' || $s == 'b');
 }
 
-test int_shrinking_reaches_the_boundary
-{
-    $g = gen::ints(0, 1000);
-    expect($g->shrink(37))->has(0)->has(18)->has(36);
-}
-
-test list_shrinking_offers_smaller_lists
-{
-    $g = gen::lists(gen::ints(0, 9));
-    array<int64> $v = [5, 6, 7];
-    $smaller = $g->shrink($v);
-    expect($smaller->count())->above(3);
-    expect($smaller[0]->count())->is(0);
-}
-
 #[tests: expects death]
 test a_false_property_fails
 {
     ecotest::forAll(gen::ints(0, 1000), (const int64& $n) => $n < 10);
+}
+
+test a_failing_property_reports_its_smallest_value
+{
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll(gen::ints(0, 1000), (const int64& $n) : bool => $n < 10);
+    });
+
+    expect($failures->count())->is(1);
+    expect($failures[0]->summary)->starts('property failed on run ');
+    expect($failures[0]->actual)->is('10');
+    expect($failures[0]->detail)->has('replay with ECOTEST_SEED=');
+}
+
+test a_mapped_generator_shrinks_through_its_source
+{
+    $doubled = gen::map(gen::ints(0, 1000), (const int64& $n) : int64 => $n * 2);
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll($doubled, (const int64& $n) : bool => $n <= 10);
+    });
+
+    expect($failures[0]->actual)->is('12');
+}
+
+test a_list_shrinks_to_the_shortest_simplest_failing_list
+{
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll(gen::lists(gen::ints(0, 9)), (const array<int64>& $xs) : bool => $xs->count() < 3);
+    });
+
+    expect($failures[0]->actual)->is('[0, 0, 0]');
+}
+
+test a_list_keeps_only_the_item_that_fails
+{
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll(gen::lists(gen::ints(0, 100)), function(const array<int64>& $xs) : bool {
+            foreach ($xs as const &$x) {
+                if ($x > 50) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    });
+
+    expect($failures[0]->actual)->is('[51]');
+}
+
+test a_pair_shrinks_to_a_pair_on_the_edge
+{
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll(
+            gen::pairs(gen::ints(0, 100), gen::ints(0, 100)),
+            (const ecotest::Pair<int64, int64>& $p) : bool => $p->first + $p->second < 10
+        );
+    });
+
+    // each side shrinks as far as the other allows: what is left sums to exactly 10
+    $sides = str::split($failures[0]->actual->sub(1, $failures[0]->actual->size() - 2), ', ')->owned();
+    int64 $sum = (str::int($sides[0]) ?? 0) + (str::int($sides[1]) ?? 0);
+    expect($sum)->is(10);
+}
+
+test a_pick_shrinks_towards_its_first_items
+{
+    array<string> $letters = ['a', 'b', 'c'];
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll(gen::pick($letters), (const string& $s) : bool => $s == 'a');
+    });
+
+    expect($failures[0]->actual)->is("'b'");
+}
+
+test text_shrinks_to_its_simplest_failing_string
+{
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll(gen::text(alphabet: 'ab'), (const string& $s) : bool => !$s->contains('b'));
+    });
+
+    expect($failures[0]->actual)->is("'b'");
+}
+
+test a_checks_body_can_use_expect
+{
+    $failures = ecotest::caught(function() : void {
+        ecotest::forAll(gen::ints(0, 1000), checks: function(const int64& $n) : void {
+            expect($n)->below(10);
+        });
+    });
+
+    expect($failures->count())->is(1);
+    expect($failures[0]->actual)->is('10');
+    expect($failures[0]->detail)->has('expected less than 10, got 10');
+}
+
+test a_passing_checks_body_counts_once
+{
+    ecotest::forAll(gen::ints(0, 10), checks: function(const int64& $n) : void {
+        expect($n)->between(0, 10);
+    });
+}
+
+test a_property_replays_from_its_seed
+{
+    setVar('ECOTEST_SEED', '1234');
+
+    $first = ecotest::caught(function() : void {
+        ecotest::forAll(gen::ints(0, 100000), (const int64& $n) : bool => $n % 7 != 3);
+    });
+    $again = ecotest::caught(function() : void {
+        ecotest::forAll(gen::ints(0, 100000), (const int64& $n) : bool => $n % 7 != 3);
+    });
+
+    unsetVar('ECOTEST_SEED');
+    expect($first[0]->detail)->is($again[0]->detail);
+    expect($first[0]->detail)->has('ECOTEST_SEED=1234');
+}
+
+test both_ends_of_a_range_come_up
+{
+    setVar('ECOTEST_SEED', '7');
+    $seen = Calls<int64>();
+
+    ecotest::forAll(gen::ints(0, 1000000), function(const int64& $n) : bool {
+        $seen->record($n);
+        return true;
+    });
+
+    unsetVar('ECOTEST_SEED');
+    expect($seen)->with(0)->with(1000000);
+}
+
+test a_filter_keeps_only_what_passes
+{
+    $even = gen::filter(gen::ints(0, 100), (const int64& $n) : bool => $n % 2 == 0);
+    ecotest::forAll($even, (const int64& $n) : bool => $n % 2 == 0);
+}
+
+test a_filter_that_keeps_nothing_skips_every_case
+{
+    $none = gen::filter(gen::ints(0, 100), (const int64& $n) : bool => $n < 0);
+    ecotest::forAll($none, (const int64& $n) : bool => false);
+}
+
+test flat_map_draws_from_what_it_drew
+{
+    $sized = gen::flatMap(
+        gen::ints(1, 5),
+        (const int64& $n) : Gen<array<int64>> => gen::lists(gen::ints(0, $n), max: $n as usize),
+        show: (const array<int64>& $xs) : string => "{$xs->count()} items"
+    );
+    ecotest::forAll($sized, (const array<int64>& $xs) : bool => $xs->count() <= 5);
+}
+
+test one_of_draws_from_every_generator
+{
+    array<Gen<int64>> $gens = [gen::ints(0, 0), gen::ints(100, 100)];
+    setVar('ECOTEST_SEED', '3');
+    $seen = Calls<int64>();
+
+    ecotest::forAll(gen::oneOf($gens), function(const int64& $n) : bool {
+        $seen->record($n);
+        return true;
+    });
+
+    unsetVar('ECOTEST_SEED');
+    expect($seen)->with(0)->with(100);
 }

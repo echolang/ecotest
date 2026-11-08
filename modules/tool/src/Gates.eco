@@ -1,7 +1,18 @@
 namespace ecotest::cli;
 
 /**
- * The thresholds a run must meet. A null bound is off.
+ * How much of a change ran: not asked for, measured, or asked for and not measurable, with why.
+ */
+public enum DiffMeasure
+{
+    case off;
+    case measured(Ratio $ratio);
+    case unmeasured(string $why);
+}
+
+/**
+ * The thresholds a run must meet. A null bound is off. A bound that is set and cannot be measured
+ * fails: a gate nobody could check is not a gate that held.
  */
 public struct Gates
 {
@@ -11,17 +22,35 @@ public struct Gates
     public int64? $maxFlaky = null;
 
     /**
-     * The verdict on `$run`, with every failed gate as a line. `$totals` is the coverage and `$diff`
-     * the diff coverage, each null when none was measured.
+     * The verdict on `$run`, with every failed gate as a line. `$totals` is the coverage, null when
+     * none was measured, with `$why` saying why; `$diff` the diff coverage.
      */
-    public const function check(const Run& $run, Totals? $totals, Ratio? $diff) : Verdict
+    public const function check(const Run& $run, Totals? $totals, const string& $why, const DiffMeasure& $diff) : Verdict
     {
         array<string> $failed = [];
 
-        $this->cover($failed, $totals);
+        $t = $totals ?? Totals();
+        Gates::hold($failed, 'line', $t->lines, $this->minLines, $totals != null, $why);
+        Gates::hold($failed, 'branch', $t->branches, $this->minBranches, $totals != null, $why);
 
-        // no diff to measure has nothing to fall short of: a ratio over no lines reads as whole
-        Gates::hold($failed, 'diff', $diff ?? Ratio(), $this->minDiff);
+        match ($diff) {
+            .off => {
+                if ($this->minDiff != null) {
+                    $failed[] = 'diff coverage not measured: no --since';
+                }
+            },
+            .measured($r) => {
+                // a change without code has no lines to fall short of
+                if ($r->total > 0) {
+                    Gates::hold($failed, 'diff', $r, $this->minDiff, true, '');
+                }
+            },
+            .unmeasured($reason) => {
+                if ($this->minDiff != null) {
+                    $failed[] = "diff coverage not measured: {$reason}";
+                }
+            },
+        };
 
         Gates::allow($failed, $run->counts()->flaky as int64, $this->maxFlaky);
 
@@ -29,40 +58,46 @@ public struct Gates
     }
 
     /**
-     * Adds the lines for the line and branch coverage of `$totals` that fall short of their gates.
-     * A run without coverage has none to fall short of.
-     */
-    private const function cover(array<string>& $failed, Totals? $totals) : void
-    {
-        $t = guard $totals else {
-            return;
-        };
-
-        Gates::hold($failed, 'line', $t->lines, $this->minLines);
-        Gates::hold($failed, 'branch', $t->branches, $this->minBranches);
-    }
-
-    /**
-     * True when `$r` falls short of the bound `$min`. Without a bound nothing does.
+     * True when `$r` falls short of the bound `$min`. Without a bound nothing does; without
+     * anything to measure, everything does.
      */
     public static function below(const Ratio& $r, float64? $min) : bool
     {
         $bound = guard $min else {
             return false;
         };
-        return $r->percent() < $bound;
+        $got = guard $r->percent() else {
+            return true;
+        };
+        return $got < $bound;
     }
 
     /**
-     * Adds the line for the `$what` coverage `$r` to `$failed` when it falls short of `$min`.
+     * Adds the line for the `$what` coverage `$r` to `$failed` when it falls short of `$min`, or
+     * when `$min` is set and nothing was `$measured`, for the reason `$why`.
      */
-    private static function hold(array<string>& $failed, const string& $what, const Ratio& $r, float64? $min) : void
-    {
+    private static function hold(
+        array<string>& $failed,
+        const string& $what,
+        const Ratio& $r,
+        float64? $min,
+        bool $measured,
+        const string& $why
+    ) : void {
         $bound = guard $min else {
             return;
         };
 
-        $got = $r->percent();
+        if (!$measured) {
+            $failed[] = "{$what} coverage not measured: {$why}";
+            return;
+        }
+
+        $got = guard $r->percent() else {
+            $failed[] = "{$what} coverage not measured: nothing in scope";
+            return;
+        };
+
         if ($got < $bound) {
             $failed[] = "{$what} coverage {$got:.1f}% is below {$bound:.1f}%";
         }

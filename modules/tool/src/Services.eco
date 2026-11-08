@@ -1,6 +1,7 @@
 namespace ecotest::cli;
 
-use ecotest::cli::{doc, files};
+use ecotest::paths;
+use ecotest::cli::{doc, proc};
 
 /**
  * The services a run needs, started before echoc and stopped after it. Each one's output goes to
@@ -66,7 +67,7 @@ public class Services
         }
 
         $logs = std::env::join($runDir, 'services');
-        guard files::mkdirs($logs) else ($e) {
+        guard paths::mkdirs($logs) else ($e) {
             return .error(.cannotWrite($logs, $e));
         };
 
@@ -98,25 +99,24 @@ public class Services
             };
             $this->running[] = mv $child;
 
-            // ready after its fixed delay, or once its URL answers in time
+            if (!$spec->url->empty()) {
+                $this->env->set($spec->variable(), $spec->url);
+            }
+
+            // ready after its fixed delay. an http check is ecotest-http's, made by `Api(service:)`
             match ($spec->ready) {
                 .delay($ms) => {
                     if ($ms > 0) {
                         std::time::sleep(std::time::duration::millis($ms));
                     }
+                    std::io::eprintln("ecotest: service {$spec->name} ready at {$spec->url}");
                 },
                 .http($url, $timeoutMs) => {
-                    if (!Services::poll($url, $timeoutMs)) {
-                        return .error(.notReady($spec->name, $timeoutMs, $logPath));
-                    }
+                    $this->env->set($spec->variable('READY'), $url);
+                    $this->env->set($spec->variable('READY_MS'), "{$timeoutMs}");
+                    std::io::eprintln("ecotest: service {$spec->name} started, ready once {$url} answers");
                 },
             };
-
-            if (!$spec->url->empty()) {
-                $this->env->set($spec->variable(), $spec->url);
-            }
-
-            std::io::println("ecotest: service {$spec->name} ready at {$spec->url}");
         }
 
         return .ok;
@@ -127,11 +127,10 @@ public class Services
      */
     public function stop() : void
     {
-        // best effort: killing a service that already ended fails, and the wait only reaps it;
-        // neither failure leaves anything to do
+        // what a service started goes too: a server behind `sh -c` or `npm` is a grandchild, and
+        // killing the child alone would leave it holding its port
         foreach ($this->running as &$child) {
-            $killed = $child->kill();
-            $waited = $child->wait();
+            proc::stop($child, 2000);
         }
 
         $this->running->clear();
@@ -168,36 +167,6 @@ public class Services
         }
 
         return $out;
-    }
-
-    /**
-     * True once `$url` answers with a 2xx or 3xx, asked every 50 ms for up to `$timeoutMs`.
-     */
-    private static function poll(const string& $url, int64 $timeoutMs) : bool
-    {
-        $started = std::time::instant::now();
-
-        while ($started->elapsed()->as_millis() < $timeoutMs) {
-            if (Services::answers($url)) {
-                return true;
-            }
-            std::time::sleep(std::time::duration::millis(50));
-        }
-
-        return false;
-    }
-
-    /**
-     * True when `$url` answers within half a second with a 2xx or 3xx.
-     */
-    private static function answers(const string& $url) : bool
-    {
-        $probe = curl::Request::get($url);
-        $probe->timeout(500);
-        $res = guard curl::send($probe) else {
-            return false;
-        };
-        return $res->status >= 200 && $res->status < 400;
     }
 
     /**

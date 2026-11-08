@@ -1,0 +1,43 @@
+namespace ecotest::cli;
+
+/**
+ * Why a run directory cannot be used.
+ */
+public enum StoreError
+{
+    /**
+     * The directory `$path` could not be made or written.
+     */
+    case cannotWrite(string $path, std::io::ioerror $cause);
+
+    /**
+     * There is no run at `$dir`.
+     */
+    case missing(string $dir);
+
+    /**
+     * The run at `$dir` never finished: it was interrupted, or ecotest died, before it wrote its
+     * `run.json`.
+     */
+    case unfinished(string $dir);
+
+    /**
+     * No finished run under `$root` measured coverage of the whole suite.
+     */
+    case noCoverage(string $root);
+}
+
+namespace str;
+
+/**
+ * The reason in words.
+ */
+public function from(const ecotest::cli::StoreError& $e) : string
+{
+    return match ($e) {
+        .cannotWrite($path, $cause) => "cannot write {$path}: {$cause}",
+        .missing($dir) => "no run at {$dir}",
+        .unfinished($dir) => "the run at {$dir} did not finish",
+        .noCoverage($root) => "no finished run in {$root} measured coverage of every test; run `ecotest --coverage` first",
+    };
+}

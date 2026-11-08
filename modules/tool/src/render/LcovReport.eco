@@ -14,11 +14,12 @@ public function render(const array<FileCoverage>& $files) : string
     foreach ($files as const &$file) {
         $out->append("TN:\nSF:{$file->path}\n");
 
+        // overloads and same-named methods share a name; where they start tells them apart
         foreach ($file->functions as const &$function) {
-            $out->append("FN:{$function->line},{$function->name}\n");
+            $out->append("FN:{$function->line},{$function->name}@{$function->line}:{$function->column}\n");
         }
         foreach ($file->functions as const &$function) {
-            $out->append("FNDA:{$function->hits},{$function->name}\n");
+            $out->append("FNDA:{$function->hits},{$function->name}@{$function->line}:{$function->column}\n");
         }
 
         $fns = $file->functionTotals();

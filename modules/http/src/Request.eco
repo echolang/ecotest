@@ -1,13 +1,28 @@
 namespace ecotest::http;
 
 /**
- * One request as a transport sees it: method, full URL, headers in order, body.
+ * One request as a transport sees it: method, absolute and encoded URL, headers in order, body.
  */
 public struct Request
 {
+    /**
+     * The method.
+     */
     public Verb $verb;
+
+    /**
+     * The absolute URL, query included, already percent-encoded.
+     */
     public string $url;
+
+    /**
+     * The headers to send, in order. A transport adds only what the `Transport` contract lists.
+     */
     public array<Header> $headers = [];
+
+    /**
+     * The body, empty for none.
+     */
     public string $body = '';
 
     public constructor(Verb $verb, const string& $url)
@@ -17,11 +32,19 @@ public struct Request
     }
 
     /**
-     * Adds header `$name: $value` after the ones already there.
+     * Adds header `$name: $value` after the ones already there, even when one has that name.
      */
-    public function header(const string& $name, const string& $value) : void
+    public function add(const string& $name, const string& $value) : void
     {
         $this->headers[] = Header($name, $value);
+    }
+
+    /**
+     * Makes `$name: $value` the only header of that name, compared without case.
+     */
+    public function set(const string& $name, const string& $value) : void
+    {
+        setHeader($this->headers, $name, $value);
     }
 
     /**
@@ -29,7 +52,7 @@ public struct Request
      */
     public const function line() : string
     {
-        $verb = $this->verb->word();
+        $verb = $this->verb->value();
         return "{$verb} {$this->url}";
     }
 }

@@ -1,81 +1,110 @@
 /**
- * Every generator's shrinker and printer, called directly.
+ * Every generator, driven by answers given by hand: answer 0 is always the simplest value.
  */
 
-use ecotest::{expect, gen, Gen, Pair, Random};
+use ecotest::{expect, gen, Draws, Gen, Pair, Random};
+use ecotest::utf8;
 
-test ints_shrink_towards_the_nearest_end_of_their_range
+/**
+ * The value `$g` makes from the answers `$choices`.
+ */
+function made<T>(const Gen<T>& $g, array<uint64> $choices) : T
 {
-    expect(gen::ints(5, 100)->shrink(5))->empty();
-    expect(gen::ints(-100, -5)->shrink(-50))->is([-5, -27, -49]);
-    expect(gen::ints(-100, 100)->shrink(1))->is([0]);
-    expect(gen::ints(0, 1000)->shrink(2))->is([0, 1]);
-    expect(gen::ints(0, 9)->show(7))->is('7');
+    $d = Draws(replay: $choices);
+    return $g->draw($d);
 }
 
-test floats_shrink_towards_zero_and_whole_numbers
+test ints_step_away_from_zero_on_alternating_sides
 {
-    $r = Random(3);
-    $made = gen::floats(2.0, 10.0)->make($r);
-    expect($made)->between(2.0, 10.0);
+    $g = gen::ints(-100, 100);
+    expect(made($g, [0]))->is(0);
+    expect(made($g, [1]))->is(1);
+    expect(made($g, [2]))->is(-1);
+    expect(made($g, [3]))->is(2);
+    expect(made($g, [200]))->is(-100);
+    expect(made($g, [999]))->is(-100);
+    expect($g->show(7))->is('7');
+}
 
-    expect(gen::floats(2.0, 10.0)->shrink(2.0))->empty();
-    expect(gen::floats(-10.0, -2.0)->shrink(-5.5))->is([-2.0, -5.0, -3.75]);
-    expect(gen::floats(0.0, 10.0)->shrink(3.0))->is([0.0, 1.5]);
-    expect(gen::floats(0.0, 1.0)->shrink(0.0000001))->is([0.0, 0.0]);
+test ints_start_at_the_end_of_their_range_nearest_zero
+{
+    expect(made(gen::ints(5, 100), [0]))->is(5);
+    expect(made(gen::ints(5, 100), [3]))->is(8);
+    expect(made(gen::ints(-100, -5), [0]))->is(-5);
+    expect(made(gen::ints(-100, -5), [1]))->is(-6);
+    expect(made(gen::ints(-2, 10), [4]))->is(-2);
+    expect(made(gen::ints(-2, 10), [5]))->is(3);
+    expect(made(gen::ints(3, 3), []))->is(3);
+}
+
+test ints_cover_the_whole_range
+{
+    $g = gen::ints(-9223372036854775807 - 1, 9223372036854775807);
+    expect(made($g, [18446744073709551615]))->is(-9223372036854775807 - 1);
+    expect(made($g, [18446744073709551613]))->is(9223372036854775807);
+}
+
+test floats_stay_in_their_range
+{
+    ecotest::forAll(gen::floats(2.0, 10.0), (const float64& $v) : bool => $v >= 2.0 && $v < 10.0);
+    ecotest::forAll(gen::floats(-10.0, -2.0), (const float64& $v) : bool => $v >= -10.0 && $v < -2.0);
+    ecotest::forAll(gen::floats(0.25, 0.75), (const float64& $v) : bool => $v >= 0.25 && $v < 0.75);
+    ecotest::forAll(gen::floats(-1.5, 2.5), (const float64& $v) : bool => $v >= -1.5 && $v < 2.5);
+    ecotest::forAll(gen::floats(-100000000000000000000.0, 100000000000000000000.0), (const float64& $v) : bool => $v >= -100000000000000000000.0 && $v < 100000000000000000000.0);
+    expect(made(gen::floats(-3.0, 3.0), [0, 0]))->is(0.0);
+    expect(made(gen::floats(2.0, 10.0), [0, 0]))->is(2.0);
     expect(gen::floats(0.0, 1.0)->show(0.5))->is('0.5');
 }
 
-test bools_shrink_to_false
+test bools_start_at_false
 {
     $g = gen::bools();
-    expect($g->shrink(true))->is([false]);
-    expect($g->shrink(false))->empty();
+    expect(made($g, [0]))->no();
+    expect(made($g, [1]))->yes();
     expect($g->show(true))->is('true');
     expect($g->show(false))->is('false');
 }
 
-test text_shrinks_by_dropping_and_simplifying
+test text_is_made_of_whole_characters
 {
-    $r = Random(5);
-    expect(gen::text(alphabet: '', max: 5)->make($r))->empty();
+    expect(made(gen::text(alphabet: '', max: 5), [1, 0, 1, 0]))->empty();
+    expect(made(gen::text(alphabet: 'ab'), [1, 1, 1, 0, 0]))->is('ba');
+    expect(made(gen::text(alphabet: 'äö€'), [1, 2, 1, 0, 0]))->is('€ä');
+    expect(gen::text()->show("a'b"))->is("'a\\'b'");
 
-    $g = gen::text();
-    expect($g->shrink(''))->empty();
-    expect($g->shrink('ab'))->is(['', 'a', 'b', 'a', 'aa']);
-    expect(gen::text(alphabet: '')->shrink('xy'))->is(['', 'x', 'y', 'x']);
-    expect($g->shrink('a'))->is(['', '']);
-    expect($g->show("a'b"))->is("'a\\'b'");
+    ecotest::forAll(gen::text(alphabet: 'aä€😀'), function(const string& $s) : bool {
+        usize $i = 0;
+        while ($i < $s->size()) {
+            usize $n = utf8::sequence($s, $i);
+            if ($n == 0) {
+                return false;
+            }
+            $i = $i + $n;
+        }
+        return true;
+    });
 }
 
-test lists_shrink_by_dropping_and_shrinking_items
+test lists_grow_one_answer_at_a_time
 {
-    $g = gen::lists(gen::ints(0, 9));
+    $g = gen::lists(gen::ints(0, 9), max: 2);
     array<int64> $none = [];
-    array<int64> $one = [5];
-    array<int64> $two = [1, 2];
 
-    expect($g->shrink($none))->empty();
-
-    array<int64> $settled = [0];
-    expect($g->shrink($settled)->count())->is(2);
-
-    $smaller = $g->shrink($one);
-    expect($smaller->count())->is(3);
-    expect($smaller[2])->is([0]);
-
-    expect($g->show($two))->is('[1, 2]');
+    expect(made($g, [0]))->is($none);
+    expect(made($g, [1, 5, 0]))->is([5]);
+    expect(made($g, [1, 1, 1, 2]))->is([1, 2]);
+    expect($g->show([1, 2]))->is('[1, 2]');
 }
 
-test pick_shrinks_towards_earlier_items
+test pick_starts_at_the_first_item
 {
     array<string> $letters = ['a', 'b', 'c'];
     $g = gen::pick($letters);
 
-    expect($g->shrink('c'))->is(['a', 'b']);
-    expect($g->shrink('a'))->empty();
-    expect($g->shrink('z'))->is(['a', 'b', 'c']);
-    expect($g->show('b'))->is('b');
+    expect(made($g, [0]))->is('a');
+    expect(made($g, [2]))->is('c');
+    expect(made($g, [9]))->is('c');
+    expect($g->show('b'))->is("'b'");
 }
 
 #[tests: expects death]
@@ -85,34 +114,37 @@ test pick_needs_an_item
     $g = gen::pick($none);
 }
 
-test pairs_shrink_one_side_at_a_time
+test pairs_draw_the_first_side_first
 {
     $g = gen::pairs(gen::bools(), gen::ints(0, 9));
-    $smaller = $g->shrink(Pair<bool, int64>(true, 3));
+    $p = made($g, [1, 3]);
 
-    expect($smaller->count())->is(4);
-    expect($smaller[0]->first)->no();
-    expect($smaller[1]->second)->is(0);
+    expect($p->first)->yes();
+    expect($p->second)->is(3);
     expect($g->show(Pair<bool, int64>(true, 3)))->is('(true, 3)');
 }
 
-test mapped_values_are_made_and_shown_but_not_shrunk
+test mapped_values_are_made_from_their_source
 {
     $g = gen::map(gen::ints(0, 9), (const int64& $n) : string => "n{$n}");
-    $r = Random(9);
 
-    expect($g->make($r))->starts('n');
-    expect($g->shrink('n3'))->empty();
-    expect($g->show('n3'))->is('n3');
+    expect(made($g, [3]))->is('n3');
+    expect($g->show('n3'))->is("'n3'");
 }
 
-test a_failing_property_reports_its_smallest_value
+test a_replay_past_its_answers_draws_zero
 {
-    $failures = ecotest::caught(function() : void {
-        ecotest::forAll(gen::ints(0, 1000), (const int64& $n) : bool => $n < 10);
-    });
+    $d = Draws(replay: [5]);
+    expect($d->draw(9))->is(5);
+    expect($d->draw(9))->is(0);
+    expect($d->used())->is([5, 0]);
+}
 
-    expect($failures->count())->is(1);
-    expect($failures[0]->summary)->starts('property failed on run ');
-    expect($failures[0]->actual)->is('10');
+test recording_keeps_every_answer
+{
+    $d = Draws(record: Random(11));
+    $v = gen::lists(gen::ints(0, 9))->draw($d);
+    $again = made(gen::lists(gen::ints(0, 9)), $d->used());
+
+    expect($again)->is($v);
 }

@@ -11,7 +11,7 @@ public struct Ran
     public string $command;
 
     /**
-     * The exit code, or null when a signal ended the program.
+     * The exit code, or null when a signal ended the program or it ran past its timeout.
      */
     public int32? $code;
 
@@ -24,15 +24,28 @@ public struct Ran
      * Everything the program wrote to stderr.
      */
     public string $stderr;
+
+    /**
+     * True when the program was still running at its timeout and was killed.
+     */
+    public bool $timedOut = false;
 }
 
 /**
- * Runs `$program` with `$arguments` to completion and captures both streams. A program that
- * cannot be started stops the test.
+ * Runs `$program` with `$arguments` to completion and captures both streams. It reads `input`
+ * on stdin (nothing when empty, never the terminal), gets `env` on top of this process's
+ * environment, starts in `dir` when one is given, and is killed once `timeout` has passed. A
+ * program that cannot be started stops the test.
  */
 #[caller]
-public function run(const string& $program, const array<string>& $arguments = []) : Ran
-{
+public function run(
+    const string& $program,
+    const array<string>& $arguments = [],
+    timeout: std::time::duration $limit = .secs(30),
+    input: const string& $input = '',
+    env: const map<string, string>& $env = [],
+    dir: const string& $dir = ''
+) : Ran {
     $at = std::src::caller();
     string $command = $program;
     foreach ($arguments as const &$argument) {
@@ -40,9 +53,83 @@ public function run(const string& $program, const array<string>& $arguments = []
         $command->append($argument);
     }
 
-    $o = guard std::process::command($program, $arguments)->output() else ($e) {
+    // the streams go to files, not pipes: nothing has to drain them while the clock runs
+    $scratch = TempDir();
+    $outPath = $scratch->file('stdout');
+    $errPath = $scratch->file('stderr');
+
+    $out = guard std::io::create($outPath) else ($e) {
+        die(Session::report(Failure("cannot capture the output of {$command}: {$e}", $at)), $at);
+    };
+    $err = guard std::io::create($errPath) else ($e) {
+        die(Session::report(Failure("cannot capture the output of {$command}: {$e}", $at)), $at);
+    };
+
+    $cmd = std::process::command($program, $arguments);
+    $cmd->stdout(.file($out));
+    $cmd->stderr(.file($err));
+
+    foreach ($env as $name => const &$value) {
+        $cmd->env($name, $value);
+    }
+
+    if (!$dir->empty()) {
+        $cmd->dir($dir);
+    }
+
+    if ($input->empty()) {
+        $cmd->stdin(.discard);
+    } else {
+        $inPath = $scratch->write('stdin', $input);
+        $in = guard std::io::open($inPath, .read) else ($e) {
+            die(Session::report(Failure("cannot hand input to {$command}: {$e}", $at)), $at);
+        };
+        $cmd->stdin(.file($in));
+    }
+
+    $child = guard $cmd->spawn() else ($e) {
         die(Session::report(Failure("cannot run {$command}: {$e}", $at)), $at);
     };
 
-    return Ran(mv $command, $o->status->code(), mv $o->stdout, mv $o->stderr);
+    $started = std::time::instant::now();
+    int64 $pause = 1;
+    bool $timedOut = false;
+
+    while (true) {
+        $done = guard $child->try_wait() else ($e) {
+            die(Session::report(Failure("cannot wait for {$command}: {$e}", $at)), $at);
+        };
+
+        if ($done != null) {
+            break;
+        }
+
+        if ($started->elapsed()->as_millis() >= $limit->as_millis()) {
+            $killed = $child->kill();
+            $timedOut = true;
+            break;
+        }
+
+        std::time::sleep(.millis($pause));
+        if ($pause < 20) {
+            $pause = $pause * 2;
+        }
+    }
+
+    $status = guard $child->wait() else ($e) {
+        die(Session::report(Failure("cannot wait for {$command}: {$e}", $at)), $at);
+    };
+
+    $out->close();
+    $err->close();
+
+    $stdout = std::io::readfile($outPath)->or('');
+    $stderr = std::io::readfile($errPath)->or('');
+
+    int32? $code = $status->code();
+    if ($timedOut) {
+        $code = null;
+    }
+
+    return Ran(mv $command, $code, mv $stdout, mv $stderr, $timedOut);
 }

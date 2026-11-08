@@ -1,5 +1,7 @@
 namespace ecotest::http;
 
+use ecotest::http::url;
+
 /**
  * What a POST, PUT or PATCH sends: the encoded text and its Content-Type. Built at the call from
  * the encoding's label, so `$api->post('/users', json: '{"id":7}')` reads as it sends.
@@ -35,15 +37,11 @@ public struct Body
     }
 
     /**
-     * Form fields as `a=1&b=two`, with everything but unreserved bytes percent-encoded.
+     * Form fields as `a=1&b=two`, in order, with everything but unreserved bytes percent-encoded.
      */
-    public constructor(form: const map<string, string>& $fields)
+    public constructor(form: const ordered_map<string, string>& $fields)
     {
-        $query = curl::Query();
-        foreach ($fields as $key => const &$value) {
-            $query->add($key, $value);
-        }
-        $this->text = $query->encode();
+        $this->text = url::query($fields);
         $this->type = 'application/x-www-form-urlencoded';
     }
 

@@ -7,8 +7,24 @@ namespace ecotest::cli;
 public struct FileCoverage
 {
     public const string $module;
+
+    /**
+     * The path from the module's directory, as reports name it.
+     */
     public const string $file;
+
+    /**
+     * The absolute path, which tells files of two modules apart.
+     */
     public const string $path;
+
+    /**
+     * The source as it was when the run measured it, and its fingerprint. Empty until the run's
+     * coverage report is measured: a stored run is shown and checked against these, not against
+     * whatever the file holds today.
+     */
+    public string $source = '';
+    public string $hash = '';
     public map<int64, uint64> $lines = [];
     public array<BranchSite> $branches = [];
     public array<FunctionSite> $functions = [];
@@ -75,7 +91,7 @@ public struct FileCoverage
         for (usize $i = 0; $i < $files->count(); $i++) {
             $r = $files[$i]->lineTotals();
             if ($r->hit < $r->total) {
-                $missing[] = Ranked($r->percent(), $i);
+                $missing[] = Ranked($r->percent() ?? 0.0, $i);
             }
         }
         $missing->sort(key: (const Ranked& $f) : float64 => $f->percent);

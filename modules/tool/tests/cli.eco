@@ -34,7 +34,7 @@ test every_command_is_dispatched
     $empty = TempDir();
 
     expect(cli::main(['ecotest', 'report', '--project', $empty->path]))->is(1);
-    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--format', 'md']))->is(0);
+    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--format', 'md']))->is(1);
     expect(cli::main(['ecotest', 'history', '--project', $empty->path]))->is(0);
     expect(cli::main(['ecotest', 'api', '--project', $empty->path]))->is(1);
     expect(cli::main(['ecotest', 'who', 'src/a.eco:1', '--project', $empty->path]))->is(1);
@@ -52,7 +52,7 @@ test run_takes_every_flag
         '--build-dir', $sample->dir->file('build'),
         '--coverage',
         '--html',
-        '--repeat', '1',
+        '--repeat', '2',
         '--filter', 'adds',
         '--define', 'UNUSED',
         '--target', 'tests',
@@ -61,6 +61,8 @@ test run_takes_every_flag
         '--min-coverage', '1',
         '--min-branch-coverage', '0',
         '--max-flaky', '0',
+        '--seed', '5',
+        '--keep', '3',
     ]);
 
     expect($code)->is(0);
@@ -70,7 +72,41 @@ test the_style_is_a_word_the_command_line_knows
 {
     $empty = TempDir();
 
-    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'pretty']))->is(0);
-    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'simple', '--color', 'never']))->is(0);
+    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'pretty']))->is(1);
+    expect(cli::main(['ecotest', 'report', 'nowhere', '--project', $empty->path, '--style', 'simple', '--color', 'never']))->is(1);
     expect(cli::main(['ecotest', 'run', '--style', 'fancy']))->is(2);
+    expect(cli::main(['ecotest', 'report', '--format', 'bogus']))->is(2);
+}
+
+test numbers_and_refs_are_checked_when_parsed
+{
+    $empty = TempDir();
+    foreach ([
+        ['--repeat', '0'],
+        ['--repeat', 'abc'],
+        ['--keep', '0'],
+        ['--timeout', 'soon'],
+        ['--seed', '-1'],
+        ['--min-coverage', 'abc'],
+        ['--min-coverage', '101'],
+        ['--min-branch-coverage', '-5'],
+        ['--min-diff-coverage', 'x'],
+        ['--max-flaky', '-1'],
+        ['--max-flaky', '0'],
+        ['--since', '--output=x'],
+    ] as const &$flag) {
+        array<string> $argv = ['ecotest', 'run', '--project', $empty->path];
+        $argv[] = $flag[0];
+        $argv[] = $flag[1];
+        $c = ecotest::context("{$flag[0]} {$flag[1]}");
+        expect(cli::main($argv))->is(2);
+    }
+}
+
+test the_version_is_the_manifests
+{
+    // the tool ships inside ecotest's exe, so its manifest carries ecotest's version
+    $v = ecotest::version();
+    expect($v)->isNot('unknown');
+    expect(expect(ecotest::cli::doc::read('module.eco'))->some())->has("#[version: \"{$v}\"]");
 }

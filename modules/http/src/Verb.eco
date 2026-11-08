@@ -1,35 +1,15 @@
 namespace ecotest::http;
 
 /**
- * The request methods a test sends.
+ * The request methods a test sends, backed by the method as it goes on the wire:
+ * `$verb->value()` is `'GET'`.
  */
-public enum Verb
+public enum Verb : string
 {
-    case get;
-    case head;
-    case post;
-    case put;
-    case patch;
-    case delete;
-
-    /**
-     * libcurl's spelling of the verb: `$verb->curl()`.
-     */
-    map curl : curl::Method
-    {
-        .get = .get;
-        .head = .head;
-        .post = .post;
-        .put = .put;
-        .patch = .patch;
-        .delete = .delete;
-    }
-
-    /**
-     * The method as it goes on the wire.
-     */
-    public const function word() : string
-    {
-        return $this->curl()->value();
-    }
+    case get = 'GET';
+    case head = 'HEAD';
+    case post = 'POST';
+    case put = 'PUT';
+    case patch = 'PATCH';
+    case delete = 'DELETE';
 }
