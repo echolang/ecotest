@@ -67,13 +67,15 @@ test a_red_run_fails_and_names_the_failures
     expect($tool->run())->is(1);
     expect(std::fs::exists(($sample->latest() / 'report.html'))->or(true))->no();
 
-    $wrong = doc::object($sample->result('halves_wrongly'), 'failure');
-    expect(doc::text($wrong, 'summary'))->is('expected 2, got 1');
-    expect(doc::number($wrong, 'line'))->is(36);
-    expect(doc::list($wrong, 'context')->count())->is(1);
+    $wrongs = doc::list($sample->result('halves_wrongly'), 'failures');
+    expect($wrongs->count())->is(1);
+    expect(doc::text($wrongs[0], 'summary'))->is('expected 2, got 1');
+    expect(doc::number($wrongs[0], 'line'))->is(36);
+    expect(doc::list($wrongs[0], 'context')->count())->is(1);
 
-    $crash = doc::object($sample->result('crashes'), 'failure');
-    expect(doc::text($crash, 'summary'))->has('plain stop');
+    $crashes = doc::list($sample->result('crashes'), 'failures');
+    expect($crashes->count())->is(1);
+    expect(doc::text($crashes[0], 'summary'))->has('plain stop');
 }
 
 test a_flaky_test_is_found_by_repeating

@@ -207,7 +207,7 @@ public class Run
             $pass->failing = true;
         }
 
-        $test->attempts[] = Attempt($outcome, doc::number($row, 'ms'), $test->events->fault);
+        $test->attempts[] = Attempt($outcome, doc::number($row, 'ms'), $test->events->failures);
         return $test;
     }
 

@@ -56,11 +56,11 @@ public class Service
 
         // a leftover server would pass the ready check for a program that never started
         if (probe($ready) != null) {
-            ecotest::Session::stop(ecotest::Failure("something already answers at {$ready}", $at));
+            ecotest::stop("something already answers at {$ready}", $at);
         }
 
         $file = guard std::fs::open($this->log, .write) else ($e) {
-            die(ecotest::Session::report(ecotest::Failure("cannot create the log {$this->log}: {$e}", $at)), $at);
+            die(ecotest::report("cannot create the log {$this->log}: {$e}", $at), $at);
         };
 
         $cmd = std::process::command($program, $arguments);
@@ -72,7 +72,7 @@ public class Service
         $child = guard $cmd->spawn() else ($e) {
             $file->close();
             Service::forget($this->log);
-            die(ecotest::Session::report(ecotest::Failure("cannot start {$program}: {$e}", $at)), $at);
+            die(ecotest::report("cannot start {$program}: {$e}", $at), $at);
         };
         $file->close();
         $this->child = $child;
@@ -80,7 +80,7 @@ public class Service
         // captures the handle and the path, not $this, so the session holds no cycle
         std::process::child $held = $child;
         string $log = $this->log;
-        $this->cleanup = ecotest::Session::defer(function() : void {
+        $this->cleanup = ecotest::defer(function() : void {
             Service::reap($held, $log);
         });
 
@@ -94,7 +94,7 @@ public class Service
                 $status = guard $exited;
                 $tail = Service::tail($this->output());
                 $this->halt();
-                ecotest::Session::stop(ecotest::Failure("{$program} exited ({$status}) before it was ready at {$ready}", $at, $detail: $tail));
+                ecotest::stop("{$program} exited ({$status}) before it was ready at {$ready}", $at, $detail: $tail);
             }
 
             if (waitReady($ready, 0)) {
@@ -105,7 +105,7 @@ public class Service
 
         $tail = Service::tail($this->output());
         $this->halt();
-        ecotest::Session::stop(ecotest::Failure("{$program} was not ready at {$ready} within {$ms} ms", $at, $detail: $tail));
+        ecotest::stop("{$program} was not ready at {$ready} within {$ms} ms", $at, $detail: $tail);
     }
 
     /**
@@ -136,7 +136,7 @@ public class Service
             return;
         }
         $this->halted = true;
-        ecotest::Session::undefer($this->cleanup);
+        ecotest::undefer($this->cleanup);
         Service::reap($this->child, $this->log);
     }
 

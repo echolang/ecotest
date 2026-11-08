@@ -1,8 +1,8 @@
 namespace ecotest::cli;
 
 /**
- * Where and why a test stopped in its last pass: the first failed check, or the crash when no
- * check failed first. The file is empty when nothing named one.
+ * One failed check or crash, as the tool folded it from an event line. A pass keeps every one;
+ * reports iterate them. The file is empty when nothing named one.
  */
 public struct Fault
 {
@@ -11,12 +11,22 @@ public struct Fault
     public int64 $line = 0;
 
     /**
-     * What the check compared and every later check that failed, one per line.
+     * Extra lines under the values, such as a diff.
      */
     public string $detail = '';
 
     /**
-     * The `ecotest::context` scopes the first failure happened in, outermost first.
+     * The `ecotest::context` scopes this failure happened in, outermost first.
      */
     public array<string> $context = [];
+
+    /**
+     * What the check wanted, as printed. Empty when the check names none.
+     */
+    public string $expected = '';
+
+    /**
+     * What the check got instead, as printed. Empty when the check names none.
+     */
+    public string $actual = '';
 }

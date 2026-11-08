@@ -10,7 +10,7 @@ public class MapExpect<K, V>
     /**
      * The value under test.
      */
-    public map<K, V> $value;
+    public const map<K, V> $value;
 
     /**
      * The map holds `$key`.
@@ -19,7 +19,6 @@ public class MapExpect<K, V>
     public const function has(key: const K& $key) : MapExpect<K, V>
     {
         Session::checked();
-
         if ($this->value->has($key)) {
             return $this;
         }
@@ -61,12 +60,12 @@ public class MapExpect<K, V>
     public const function size(usize $count) : MapExpect<K, V>
     {
         Session::checked();
-
         usize $m = $this->value->count();
-        if ($m != $count) {
-            fail("expected {$count} keys, got {$m}", std::src::caller());
+        if ($m == $count) {
+            return $this;
         }
 
+        fail("expected {$count} keys, got {$m}", std::src::caller());
         return $this;
     }
 
@@ -77,12 +76,12 @@ public class MapExpect<K, V>
     public const function empty() : MapExpect<K, V>
     {
         Session::checked();
-
-        usize $m = $this->value->count();
-        if ($m != 0) {
-            fail("expected no keys, got {$m}", std::src::caller());
+        if ($this->value->empty()) {
+            return $this;
         }
 
+        usize $m = $this->value->count();
+        fail("expected no keys, got {$m}", std::src::caller());
         return $this;
     }
 

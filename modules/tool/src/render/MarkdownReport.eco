@@ -4,7 +4,7 @@
 
 namespace ecotest::cli::markdown;
 
-use ecotest::cli::text;
+use ecotest::cli::{Fault, text};
 
 /**
  * The Markdown summary of `$run`.
@@ -77,18 +77,31 @@ private function listing(string& $out, const Run& $run, const string& $heading, 
             $words = $test->attemptWords();
             $out->append(" ({$words})");
         }
-        $fault = guard $test->fault() else {
+        array<Fault> $failures = $test->failures();
+        if ($failures->empty()) {
             $out->append('\n');
             continue;
-        };
-        if (!$fault->file->empty()) {
-            $out->append(" at `{$fault->file}:{$fault->line}`");
+        }
+        const Fault& $first = $failures[0];
+        if (!$first->file->empty()) {
+            $out->append(" at `{$first->file}:{$first->line}`");
         }
         $out->append('\n');
-        if (!$fault->summary->empty() || !$fault->detail->empty()) {
+        foreach ($failures as const &$fault) {
+            if ($fault->summary->empty() && $fault->detail->empty()
+                && $fault->expected->empty() && $fault->actual->empty()) {
+                continue;
+            }
             $out->append('  ```\n');
-            $out->append(text::indent($fault->summary, 2));
-            $out->append('\n');
+            if (!$fault->summary->empty()) {
+                $out->append(text::indent($fault->summary, 2));
+                $out->append('\n');
+            }
+            $values = text::values($fault);
+            if (!$values->empty()) {
+                $out->append(text::indent($values, 2));
+                $out->append('\n');
+            }
             if (!$fault->detail->empty()) {
                 $out->append(text::indent($fault->detail, 2));
                 $out->append('\n');

@@ -5,6 +5,7 @@
 namespace ecotest::cli::text;
 
 use ecotest::show;
+use ecotest::cli::Fault;
 
 /**
  * How many bytes of a line a report shows before cutting.
@@ -36,6 +37,20 @@ public function plural(usize $n, const string& $one, const string& $many) : stri
         return "{$n} {$one}";
     }
     return "{$n} {$many}";
+}
+
+/**
+ * Where the last `$byte` in `$text` is, or its size when there is none.
+ */
+/**
+ * `expected: ...` / `     got: ...` when `$fault` named values, empty otherwise.
+ */
+public function values(const Fault& $fault) : string
+{
+    if ($fault->expected->empty() && $fault->actual->empty()) {
+        return '';
+    }
+    return "expected: {$fault->expected}\n     got: {$fault->actual}";
 }
 
 /**

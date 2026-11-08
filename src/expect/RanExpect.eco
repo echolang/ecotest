@@ -11,7 +11,7 @@ public class RanExpect
     /**
      * The finished program under test.
      */
-    public Ran $ran;
+    public const Ran $ran;
 
     /**
      * The program exited with `$code`.
@@ -20,16 +20,16 @@ public class RanExpect
     public const function exits(int32 $code) : RanExpect
     {
         Session::checked();
-
-        if (!$this->exited($code)) {
-            $how = $this->describe();
-            fail(
-                "expected {$this->ran->command} to exit {$code}, got {$how}",
-                std::src::caller(),
-                $detail: $this->streams()
-            );
+        if ($this->exited($code)) {
+            return $this;
         }
 
+        $how = $this->describe();
+        fail(
+            "expected {$this->ran->command} to exit {$code}, got {$how}",
+            std::src::caller(),
+            $detail: $this->streams()
+        );
         return $this;
     }
 

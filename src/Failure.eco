@@ -55,9 +55,10 @@ public struct Failure
 
 /**
  * Builds a failure from the constructor arguments and raises it: it stops the test, or is held
- * until the enclosing `soft()` scope ends. `fail("...", std::src::caller())` in a check.
+ * until the enclosing `soft()` scope ends. `fail("...", std::src::caller())` in a check. HTTP
+ * checks and matchers written on top of ecotest go through here, never through `Session`.
  */
-internal function fail(construct Failure $failure) : void
+public function fail(construct Failure $failure) : void
 {
     Session::fail($failure);
 }
@@ -65,10 +66,55 @@ internal function fail(construct Failure $failure) : void
 /**
  * Counts one check and fails it when `$ok` is false.
  */
-internal function check(bool $ok, construct Failure $failure) : void
+public function check(bool $ok, construct Failure $failure) : void
 {
     Session::checked();
     if (!$ok) {
         Session::fail($failure);
     }
+}
+
+/**
+ * Counts one check towards the test's `checks` event. A matcher that then fails through `fail`
+ * uses `check` instead.
+ */
+public function checked() : void
+{
+    Session::checked();
+}
+
+/**
+ * Stops the test at the failure's own line, whatever `soft()` scope is open. Failures a soft
+ * scope holds are reported with it.
+ */
+public function stop(construct Failure $failure) : void
+{
+    Session::stop($failure);
+}
+
+/**
+ * Writes the failure's event, after any held ones, and answers the report to stop with. For a
+ * `guard ... else` that has to end in `die`.
+ */
+public function report(construct Failure $failure) : string
+{
+    return Session::report($failure);
+}
+
+/**
+ * Runs `$undo` if the test stops early: a failed check, a crash or a skip. A test that ends
+ * normally runs its destructors instead, so the owner calls `undefer` from there. Answers the
+ * handle `undefer` takes.
+ */
+public function defer(function<void()> $undo) : usize
+{
+    return Session::defer($undo);
+}
+
+/**
+ * Forgets a cleanup that `defer` registered, once its owner has cleaned up by itself.
+ */
+public function undefer(usize $id) : void
+{
+    Session::undefer($id);
 }

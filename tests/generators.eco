@@ -8,7 +8,7 @@ use ecotest::{expect, gen, Draws, Gen, Pair, Random};
 /**
  * The value `$g` makes from the answers `$choices`.
  */
-function made<T>(const Gen<T>& $g, array<uint64> $choices) : T
+internal function made<T>(const Gen<T>& $g, array<uint64> $choices) : T
 {
     $d = Draws(replay: $choices);
     return $g->draw($d);

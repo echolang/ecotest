@@ -9,7 +9,7 @@ public class NumericExpect<T>
     /**
      * The value under test.
      */
-    public T $value;
+    public const T $value;
 
     /**
      * The number equals `$want`.
@@ -17,7 +17,12 @@ public class NumericExpect<T>
     #[caller]
     public const function is(T $want) : NumericExpect<T>
     {
-        check($this->value == $want, Failure("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}"));
+        Session::checked();
+        if ($this->value == $want) {
+            return $this;
+        }
+
+        fail("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}");
         return $this;
     }
 
@@ -27,7 +32,12 @@ public class NumericExpect<T>
     #[caller]
     public const function isNot(T $other) : NumericExpect<T>
     {
-        check(!($this->value == $other), Failure("expected anything but {$other}", std::src::caller()));
+        Session::checked();
+        if (!($this->value == $other)) {
+            return $this;
+        }
+
+        fail("expected anything but {$other}", std::src::caller());
         return $this;
     }
 
@@ -37,7 +47,12 @@ public class NumericExpect<T>
     #[caller]
     public const function above(T $bound) : NumericExpect<T>
     {
-        check($this->value > $bound, Failure("expected more than {$bound}, got {$this->value}", std::src::caller(), $expected: "{$bound}", $actual: "{$this->value}"));
+        Session::checked();
+        if ($this->value > $bound) {
+            return $this;
+        }
+
+        fail("expected more than {$bound}, got {$this->value}", std::src::caller(), $expected: "{$bound}", $actual: "{$this->value}");
         return $this;
     }
 
@@ -47,7 +62,12 @@ public class NumericExpect<T>
     #[caller]
     public const function below(T $bound) : NumericExpect<T>
     {
-        check($this->value < $bound, Failure("expected less than {$bound}, got {$this->value}", std::src::caller(), $expected: "{$bound}", $actual: "{$this->value}"));
+        Session::checked();
+        if ($this->value < $bound) {
+            return $this;
+        }
+
+        fail("expected less than {$bound}, got {$this->value}", std::src::caller(), $expected: "{$bound}", $actual: "{$this->value}");
         return $this;
     }
 
@@ -57,7 +77,12 @@ public class NumericExpect<T>
     #[caller]
     public const function between(T $low, T $high) : NumericExpect<T>
     {
-        check($this->value >= $low && $this->value <= $high, Failure("expected {$low} to {$high}, got {$this->value}", std::src::caller(), $expected: "{$low}..{$high}", $actual: "{$this->value}"));
+        Session::checked();
+        if ($this->value >= $low && $this->value <= $high) {
+            return $this;
+        }
+
+        fail("expected {$low} to {$high}, got {$this->value}", std::src::caller(), $expected: "{$low}..{$high}", $actual: "{$this->value}");
         return $this;
     }
 }

@@ -206,7 +206,7 @@ public struct Api
             return;
         }
 
-        ecotest::Session::stop(ecotest::Failure("service {$name} was not ready at {$ready} within {$limit} ms", $at));
+        ecotest::stop("service {$name} was not ready at {$ready} within {$limit} ms", $at);
     }
 
     /**

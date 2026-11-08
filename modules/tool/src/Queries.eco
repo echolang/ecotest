@@ -348,7 +348,7 @@ public function select(const Tool& $tool) : result<Selection, QueryError>
             $lines = $changed->oldLines();
         }
 
-        foreach ($lines as $line) {
+        foreach ($lines as const &$line) {
             foreach ($m->coverage->testsAt($changed->path, $line) as const &$id) {
                 if (!$listed->has($id)) {
                     $listed->set($id, true);

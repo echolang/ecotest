@@ -59,10 +59,10 @@ public function run(
     $errPath = $scratch->file('stderr');
 
     $out = guard std::fs::create($outPath) else ($e) {
-        die(Session::report(Failure("cannot capture the output of {$command}: {$e}", $at)), $at);
+        die(report("cannot capture the output of {$command}: {$e}", $at), $at);
     };
     $err = guard std::fs::create($errPath) else ($e) {
-        die(Session::report(Failure("cannot capture the output of {$command}: {$e}", $at)), $at);
+        die(report("cannot capture the output of {$command}: {$e}", $at), $at);
     };
 
     $cmd = std::process::command($program, $arguments);
@@ -82,13 +82,13 @@ public function run(
     } else {
         $inPath = $scratch->write('stdin', $input);
         $in = guard std::fs::open($inPath, .read) else ($e) {
-            die(Session::report(Failure("cannot hand input to {$command}: {$e}", $at)), $at);
+            die(report("cannot hand input to {$command}: {$e}", $at), $at);
         };
         $cmd->stdin(.file($in));
     }
 
     $child = guard $cmd->spawn() else ($e) {
-        die(Session::report(Failure("cannot run {$command}: {$e}", $at)), $at);
+        die(report("cannot run {$command}: {$e}", $at), $at);
     };
 
     $started = std::time::instant::now();
@@ -97,7 +97,7 @@ public function run(
 
     while (true) {
         $done = guard $child->try_wait() else ($e) {
-            die(Session::report(Failure("cannot wait for {$command}: {$e}", $at)), $at);
+            die(report("cannot wait for {$command}: {$e}", $at), $at);
         };
 
         if ($done != null) {
@@ -117,7 +117,7 @@ public function run(
     }
 
     $status = guard $child->wait() else ($e) {
-        die(Session::report(Failure("cannot wait for {$command}: {$e}", $at)), $at);
+        die(report("cannot wait for {$command}: {$e}", $at), $at);
     };
 
     $out->close();

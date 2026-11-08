@@ -10,7 +10,7 @@ public class TextExpect
     /**
      * The value under test.
      */
-    public string $value;
+    public const string $value;
 
     /**
      * The text equals `$want`, byte for byte.
@@ -54,7 +54,6 @@ public class TextExpect
     public const function isNot(const string& $other) : TextExpect
     {
         Session::checked();
-
         if ($this->value != $other) {
             return $this;
         }
@@ -143,7 +142,6 @@ public class TextExpect
     public const function empty() : TextExpect
     {
         Session::checked();
-
         if ($this->value->empty()) {
             return $this;
         }
@@ -160,7 +158,6 @@ public class TextExpect
     public const function length(usize $bytes) : TextExpect
     {
         Session::checked();
-
         usize $size = $this->value->size();
         if ($size == $bytes) {
             return $this;

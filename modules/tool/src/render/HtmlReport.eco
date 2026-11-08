@@ -353,6 +353,12 @@ private function row(string& $out, const TestRecord& $test) : void
     if ($test->events->skipped && !$test->events->skipReason->empty()) {
         $out->append(why($test->events->skipReason));
     }
+    foreach ($test->events->snapshotsNew as const &$path) {
+        $out->append(why("wrote snapshot {$path}"));
+    }
+    foreach ($test->events->snapshotsUpdated as const &$path) {
+        $out->append(why("updated snapshot {$path}"));
+    }
     foreach ($test->events->notes as const &$note) {
         $out->append(why($note));
     }
@@ -365,14 +371,23 @@ private function row(string& $out, const TestRecord& $test) : void
  */
 private function fault(const TestRecord& $test) : string
 {
-    $f = guard $test->fault() else {
-        return '';
-    };
-
-    $where = escape::markup("{$f->file}:{$f->line}");
-    $what = escape::markup($f->summary);
-    $detail = escape::markup($f->detail);
-    return "<div class=\"failure surface\"><div class=\"failure-head\"><span class=\"dot\"></span>{$where}</div><div class=\"failure-msg\">{$what}</div><div class=\"failure-detail\">{$detail}</div></div>";
+    $out = '';
+    foreach ($test->failures() as const &$f) {
+        $where = escape::markup("{$f->file}:{$f->line}");
+        $what = escape::markup($f->summary);
+        string $extra = text::values($f);
+        if (!$extra->empty()) {
+            if (!$f->detail->empty()) {
+                $extra->append("\n");
+                $extra->append($f->detail);
+            }
+        } else {
+            $extra = $f->detail;
+        }
+        $detail = escape::markup($extra);
+        $out->append("<div class=\"failure surface\"><div class=\"failure-head\"><span class=\"dot\"></span>{$where}</div><div class=\"failure-msg\">{$what}</div><div class=\"failure-detail\">{$detail}</div></div>");
+    }
+    return $out;
 }
 
 /**

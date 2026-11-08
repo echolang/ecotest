@@ -12,7 +12,7 @@ public class Expect<T>
     /**
      * The value under test.
      */
-    public T $value;
+    public const T $value;
 
     /**
      * The value equals `$want`.
@@ -21,7 +21,6 @@ public class Expect<T>
     public const function is(const T& $want) : Expect<T>
     {
         Session::checked();
-
         if ($this->value == $want) {
             return $this;
         }
@@ -39,7 +38,6 @@ public class Expect<T>
     public const function isNot(const T& $other) : Expect<T>
     {
         Session::checked();
-
         if (!($this->value == $other)) {
             return $this;
         }

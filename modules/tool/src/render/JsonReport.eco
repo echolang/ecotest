@@ -5,13 +5,15 @@
 
 namespace ecotest::cli::runjson;
 
+use ecotest::cli::Fault;
+
 /**
  * The JSON document for `$run`.
  */
 public function render(const Run& $run, const array<FileCoverage>& $files, Totals? $totals, const Verdict& $verdict) : string
 {
     $doc = json::object();
-    $doc['v'] = json::int(2);
+    $doc['v'] = json::int(3);
     $doc['complete'] = json::bool(true);
     $doc['echoc'] = json::str($run->version);
     $doc['seed'] = json::str($run->seed);
@@ -57,9 +59,23 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
         if ($events->usedEcotest) {
             $t['checks'] = json::int($events->checks);
         }
-        failure($t, $test);
+        failures($t, $test);
         if ($events->skipped) {
             $t['skip'] = json::str($events->skipReason);
+        }
+        if (!$events->snapshotsNew->empty() || !$events->snapshotsUpdated->empty()) {
+            $snaps = json::object();
+            $wrote = json::arr();
+            foreach ($events->snapshotsNew as const &$path) {
+                $wrote[] = json::str($path);
+            }
+            $updated = json::arr();
+            foreach ($events->snapshotsUpdated as const &$path) {
+                $updated[] = json::str($path);
+            }
+            $snaps['new'] = mv $wrote;
+            $snaps['updated'] = mv $updated;
+            $t['snapshots'] = mv $snaps;
         }
         if (!$events->notes->empty()) {
             $notes = json::arr();
@@ -134,26 +150,33 @@ private function coverage(json::Value& $doc, const array<FileCoverage>& $files, 
 }
 
 /**
- * Sets `failure` on the test object `$t` to `{"summary", "file", "line", "detail", "context"}`
- * when `$test` stopped somewhere.
+ * Sets `failures` on the test object `$t` to an array of
+ * `{"summary", "file", "line", "expected", "actual", "detail", "context"}` when `$test` stopped.
  */
-private function failure(json::Value& $t, const TestRecord& $test) : void
+private function failures(json::Value& $t, const TestRecord& $test) : void
 {
-    $f = guard $test->fault() else {
+    array<Fault> $all = $test->failures();
+    if ($all->empty()) {
         return;
-    };
-
-    $v = json::object();
-    $v['summary'] = json::str($f->summary);
-    $v['file'] = json::str($f->file);
-    $v['line'] = json::int($f->line);
-    $v['detail'] = json::str($f->detail);
-    $context = json::arr();
-    foreach ($f->context as const &$scope) {
-        $context[] = json::str($scope);
     }
-    $v['context'] = mv $context;
-    $t['failure'] = mv $v;
+
+    $list = json::arr();
+    foreach ($all as const &$f) {
+        $v = json::object();
+        $v['summary'] = json::str($f->summary);
+        $v['file'] = json::str($f->file);
+        $v['line'] = json::int($f->line);
+        $v['expected'] = json::str($f->expected);
+        $v['actual'] = json::str($f->actual);
+        $v['detail'] = json::str($f->detail);
+        $context = json::arr();
+        foreach ($f->context as const &$scope) {
+            $context[] = json::str($scope);
+        }
+        $v['context'] = mv $context;
+        $list[] = mv $v;
+    }
+    $t['failures'] = mv $list;
 }
 
 /**

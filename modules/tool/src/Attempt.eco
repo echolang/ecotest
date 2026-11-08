@@ -9,5 +9,5 @@ public struct Attempt
 {
     public Outcome $outcome;
     public int64 $ms;
-    public Fault? $fault = null;
+    public array<Fault> $failures = [];
 }

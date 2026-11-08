@@ -116,7 +116,7 @@ test a_skip_without_a_reason_is_still_a_skip
 test a_flaky_test_keeps_the_fault_of_the_pass_that_broke
 {
     $t = TestRecord('m/a.eco::t');
-    $t->attempts = [Attempt(.fail, 0, Fault('expected 2, got 1', 'tests/a.eco', 9)), Attempt(.pass, 0)];
+    $t->attempts = [Attempt(.fail, 0, [Fault('expected 2, got 1', 'tests/a.eco', 9)]), Attempt(.pass, 0)];
     $t->settle();
 
     expect($t->outcome == Outcome::flaky)->yes();
@@ -133,17 +133,22 @@ test events_of_another_version_are_left_out
     expect($t->events->usedEcotest)->no();
 }
 
-test a_failure_always_keeps_expected_and_got_in_the_detail
+test a_failure_keeps_expected_and_got_as_fields
 {
     $t = TestRecord('m/a.eco::t');
     $inline = guard json::parse('{"v":1,"type":"fail","summary":"expected 1, got 2","expected":"1","actual":"2","file":"a.eco","line":1}');
     $t->events->apply($inline);
-    expect(expect($t->events->fault)->some()->detail)->is("expected: 1\n     got: 2");
+    $first = expect($t->events->fault())->some();
+    expect($first->expected)->is('1');
+    expect($first->actual)->is('2');
+    expect($first->detail)->empty();
 
     $u = TestRecord('m/a.eco::u');
     $apart = guard json::parse('{"v":1,"type":"fail","summary":"lists differ","expected":"[1]","actual":"[2]","file":"a.eco","line":1}');
     $u->events->apply($apart);
-    expect(expect($u->events->fault)->some()->detail)->is("expected: [1]\n     got: [2]");
+    $lists = expect($u->events->fault())->some();
+    expect($lists->expected)->is('[1]');
+    expect($lists->actual)->is('[2]');
 }
 
 test a_pass_says_why_it_is_incomplete
@@ -188,7 +193,7 @@ test a_run_folds_events_into_its_tests
     $doc = guard json::parse('{"type":"fail","summary":"expected 1, got 2","expected":"1","actual":"2","detail":"","context":["row 3"],"file":"tests/a.eco","line":7}');
     $t->events->apply($doc);
 
-    $fault = expect($t->events->fault)->some();
+    $fault = expect($t->events->fault())->some();
     expect($fault->summary)->is('expected 1, got 2');
     expect($fault->line)->is(7);
     expect($fault->context)->is(['row 3']);
@@ -217,7 +222,7 @@ test a_later_pass_starts_from_a_clean_record
 
     // nothing the first pass wrote describes the second
     expect($t->events->skipReason)->is('');
-    expect($t->events->fault)->none();
+    expect($t->events->fault())->none();
     expect($t->events->checks)->is(0);
     expect($t->events->usedEcotest)->no();
     expect($t->attemptWords())->is('skip timeout');

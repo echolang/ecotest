@@ -12,7 +12,7 @@ public class ListExpect<T>
     /**
      * The value under test.
      */
-    public array<T> $value;
+    public const array<T> $value;
 
     /**
      * The list equals `$want`: same length, same items in the same order. A failure names the
@@ -68,7 +68,6 @@ public class ListExpect<T>
     public const function size(usize $count) : ListExpect<T>
     {
         Session::checked();
-
         usize $m = $this->value->count();
         if ($m == $count) {
             return $this;
@@ -85,7 +84,6 @@ public class ListExpect<T>
     public const function empty() : ListExpect<T>
     {
         Session::checked();
-
         if ($this->value->empty()) {
             return $this;
         }

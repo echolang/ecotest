@@ -8,14 +8,11 @@ public class Context
 {
     public constructor(const string& $text)
     {
-        Session::start();
-        Session::$context[] = $text;
+        Session::enterContext($text);
     }
 
     destructor()
     {
-        if (!Session::$context->empty()) {
-            string $dropped = Session::$context->pop();
-        }
+        Session::leaveContext();
     }
 }

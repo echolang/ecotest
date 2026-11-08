@@ -117,16 +117,29 @@ public class TestRecord
      */
     public const function fault() : Fault?
     {
+        array<Fault> $all = $this->failures();
+        if ($all->empty()) {
+            return null;
+        }
+        return $all[0];
+    }
+
+    /**
+     * Every failure of the pass that reports: the last broken pass of a flaky test, otherwise
+     * the last pass.
+     */
+    public const function failures() : array<Fault>
+    {
         if ($this->outcome == Outcome::flaky) {
             for (usize $i = $this->attempts->count(); $i > 0; $i--) {
                 const Attempt& $attempt = $this->attempts[$i - 1];
                 if ($attempt->outcome->broken()) {
-                    return $attempt->fault;
+                    return $attempt->failures;
                 }
             }
         }
 
-        return $this->events->fault;
+        return $this->events->failures;
     }
 
     /**

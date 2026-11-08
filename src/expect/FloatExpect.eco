@@ -11,7 +11,7 @@ public class FloatExpect
     /**
      * The value under test.
      */
-    public float64 $value;
+    public const float64 $value;
 
     /**
      * The number equals `$want`.
@@ -20,7 +20,6 @@ public class FloatExpect
     public const function is(float64 $want) : FloatExpect
     {
         Session::checked();
-
         if ($this->value == $want) {
             return $this;
         }
@@ -38,7 +37,6 @@ public class FloatExpect
     public const function isNot(float64 $other) : FloatExpect
     {
         Session::checked();
-
         if (!($this->value == $other)) {
             return $this;
         }
@@ -55,7 +53,6 @@ public class FloatExpect
     public const function above(float64 $bound) : FloatExpect
     {
         Session::checked();
-
         if ($this->value > $bound) {
             return $this;
         }
@@ -73,7 +70,6 @@ public class FloatExpect
     public const function below(float64 $bound) : FloatExpect
     {
         Session::checked();
-
         if ($this->value < $bound) {
             return $this;
         }
@@ -91,7 +87,6 @@ public class FloatExpect
     public const function between(float64 $low, float64 $high) : FloatExpect
     {
         Session::checked();
-
         if ($this->value >= $low && $this->value <= $high) {
             return $this;
         }

@@ -128,7 +128,7 @@ public class Reply
         };
 
         if ($res->body != $text) {
-            ecotest::Session::fail(ecotest::Failure('the body differs', std::src::caller(), $expected: $text, $actual: $res->body, $detail: $this->exchange()));
+            ecotest::fail('the body differs', std::src::caller(), $expected: $text, $actual: $res->body, $detail: $this->exchange());
         }
         return $this;
     }
@@ -294,7 +294,7 @@ public class Reply
     public function capture(const string& $path) : string
     {
         $at = std::src::caller();
-        ecotest::Session::checked();
+        ecotest::checked();
 
         $res = guard $this->received() else {
             $line = $this->request->line();
@@ -398,7 +398,7 @@ public class Reply
      */
     private const function answered(std::src::location $at) : Response?
     {
-        ecotest::Session::checked();
+        ecotest::checked();
 
         match ($this->response) {
             .ok($res) => {
@@ -406,7 +406,7 @@ public class Reply
             },
             .error($e) => {
                 $line = $this->request->line();
-                ecotest::Session::fail(ecotest::Failure("no response to {$line}: {$e}", $at));
+                ecotest::fail("no response to {$line}: {$e}", $at);
                 return null;
             },
         };
@@ -434,10 +434,6 @@ public class Reply
         };
     }
 
-    /**
-     * Every value `$path` names in the JSON body, or null after failing the check because there is
-     * no response, the body is not JSON, or the path is malformed.
-     */
     /**
      * Parses the body once. Does not fail the check: callers that need a document say so.
      */
@@ -510,7 +506,7 @@ public class Reply
                 if ($found->count() > 1) {
                     $summary = "expected {$path} = {$expected}, got {$actual} at {$hit->path}";
                 }
-                ecotest::Session::fail(ecotest::Failure($summary, $at, $expected: $expected, $actual: $actual, $detail: $this->exchange()));
+                ecotest::fail($summary, $at, $expected: $expected, $actual: $actual, $detail: $this->exchange());
                 return;
             }
         }
@@ -521,15 +517,15 @@ public class Reply
      */
     private const function fail(const string& $summary, std::src::location $at) : void
     {
-        ecotest::Session::fail(ecotest::Failure($summary, $at, $detail: $this->exchange()));
+        ecotest::fail($summary, $at, $detail: $this->exchange());
     }
 
     /**
-     * Reports a failure with the exchange as the detail, for a check that stops the test.
+     * The report to stop with, for a check that cannot continue.
      */
     private const function stopped(const string& $summary, std::src::location $at) : string
     {
-        return ecotest::Session::report(ecotest::Failure($summary, $at, $detail: $this->exchange()));
+        return ecotest::report($summary, $at, $detail: $this->exchange());
     }
 
     /**

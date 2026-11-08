@@ -21,7 +21,7 @@ internal struct Frame
  * Every way a test can end goes through here, so held failures and cleanups are never lost: a
  * soft scope closing, a check that stops, a crash, and a skip.
  */
-public class Session
+internal class Session
 {
     internal static bool $started = false;
     internal static string $id = '';
@@ -38,7 +38,7 @@ public class Session
      * Reads the test's identity, opens its event file and installs the crash hook. Safe to call
      * any number of times.
      */
-    public static function start() : void
+    internal static function start() : void
     {
         if (Session::$started) {
             return;
@@ -65,7 +65,7 @@ public class Session
     /**
      * Counts one check towards the test's `checks` event.
      */
-    public static function checked() : void
+    internal static function checked() : void
     {
         Session::start();
         $tally = Session::$tally;
@@ -75,7 +75,7 @@ public class Session
     /**
      * Appends one event line to the test's event file. Does nothing without one.
      */
-    public static function write(const string& $line) : void
+    internal static function write(const string& $line) : void
     {
         Session::start();
 
@@ -105,7 +105,7 @@ public class Session
      * normally runs its destructors instead, so the owner calls `undefer` from there. Answers the
      * handle `undefer` takes.
      */
-    public static function defer(function<void()> $undo) : usize
+    internal static function defer(function<void()> $undo) : usize
     {
         Session::start();
         usize $id = Session::$nextCleanup;
@@ -117,7 +117,7 @@ public class Session
     /**
      * Forgets a cleanup that `defer` registered, once its owner has cleaned up by itself.
      */
-    public static function undefer(usize $id) : void
+    internal static function undefer(usize $id) : void
     {
         if (Session::$cleanups->has($id)) {
             Session::$cleanups->remove($id);
@@ -150,7 +150,7 @@ public class Session
      * Takes a failure: held while a `soft()` or `caught()` scope is open, otherwise the test
      * stops here.
      */
-    public static function fail(Failure $failure) : void
+    internal static function fail(Failure $failure) : void
     {
         Session::start();
         $failure->context = Session::$context;
@@ -168,7 +168,7 @@ public class Session
      * Stops the test at the failure's own line, whatever scope is open. Failures a soft scope
      * holds are reported with it.
      */
-    public static function stop(Failure $failure) : void
+    internal static function stop(Failure $failure) : void
     {
         die(Session::report($failure), $failure->at);
     }
@@ -177,7 +177,7 @@ public class Session
      * Writes the failure's event, after any held ones, as the test's last word and answers the
      * report to stop with. For a `guard ... else` that has to end in its own `die`.
      */
-    public static function report(Failure $failure) : string
+    internal static function report(Failure $failure) : string
     {
         Session::start();
 
@@ -231,6 +231,43 @@ public class Session
         Session::$drain->clear();
         Session::$tally->flush();
         return $text;
+    }
+
+    /**
+     * Pushes a `context()` line onto the stack attached to later failures.
+     */
+    internal static function enterContext(const string& $text) : void
+    {
+        Session::start();
+        Session::$context[] = $text;
+    }
+
+    /**
+     * Drops the innermost `context()` line.
+     */
+    internal static function leaveContext() : void
+    {
+        if (!Session::$context->empty()) {
+            string $dropped = Session::$context->pop();
+        }
+    }
+
+    /**
+     * How many checks this test has counted so far.
+     */
+    internal static function checkCount() : int64
+    {
+        $tally = Session::$tally;
+        return $tally->checks;
+    }
+
+    /**
+     * Sets the check count, so a property that made many inner checks still counts as one.
+     */
+    internal static function setChecks(int64 $n) : void
+    {
+        $tally = Session::$tally;
+        $tally->checks = $n;
     }
 
     /**

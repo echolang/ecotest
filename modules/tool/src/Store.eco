@@ -74,7 +74,7 @@ public struct Store
     public const function runs() : array<string>
     {
         array<string> $out = [];
-        foreach ($this->stamps() as $stamp) {
+        foreach ($this->stamps() as const &$stamp) {
             $dir = $this->dir($stamp);
             if (Store::finished($dir)) {
                 $out[] = $dir;
@@ -135,7 +135,7 @@ public struct Store
         array<string> $gone = [];
         array<int64> $done = [];
         array<int64> $open = [];
-        foreach ($this->stamps() as $stamp) {
+        foreach ($this->stamps() as const &$stamp) {
             if (Store::finished($this->dir($stamp))) {
                 $done[] = $stamp;
             } else {
@@ -154,18 +154,23 @@ public struct Store
             if ($dir == $pointed || $dir == $current) {
                 continue;
             }
-            if (!std::fs::remove_all($dir)->failed()) {
-                $gone[] = $dir;
-            }
+            guard std::fs::remove_all($dir) else {
+                continue;
+            };
+            $gone[] = $dir;
         }
 
         // an unfinished run older than the oldest kept one is abandoned
         int64 $bound = $done[$drop];
-        foreach ($open as $stamp) {
+        foreach ($open as const &$stamp) {
             $dir = $this->dir($stamp);
-            if ($stamp < $bound && $dir != $current && !std::fs::remove_all($dir)->failed()) {
-                $gone[] = $dir;
+            if ($stamp >= $bound || $dir == $current) {
+                continue;
             }
+            guard std::fs::remove_all($dir) else {
+                continue;
+            };
+            $gone[] = $dir;
         }
 
         return $gone;

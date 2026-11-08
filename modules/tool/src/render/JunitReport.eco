@@ -7,7 +7,7 @@
 
 namespace ecotest::cli::junit;
 
-use ecotest::cli::escape;
+use ecotest::cli::{Fault, escape, text};
 
 /**
  * The JUnit XML of `$run`, judged by `$verdict`.
@@ -54,9 +54,12 @@ public function render(const Run& $run, const Verdict& $verdict) : string
                 if (!$attempt->outcome->broken()) {
                     continue;
                 }
-                $fault = $attempt->fault ?? Fault();
+                Fault $fault = Fault();
+                if (!$attempt->failures->empty()) {
+                    $fault = $attempt->failures[0];
+                }
                 $message = escape::markup($fault->summary);
-                $body = escape::markup("{$fault->file}:{$fault->line}\n{$fault->summary}\n{$fault->detail}");
+                $body = escape::markup(junitBody($attempt->failures, ''));
                 $out->append("      <flakyFailure type=\"{$attempt->outcome}\" message=\"{$message}\">{$body}</flakyFailure>\n");
             }
         } else if ($test->outcome == Outcome::skip) {
@@ -64,9 +67,13 @@ public function render(const Run& $run, const Verdict& $verdict) : string
             $out->append("      <skipped message=\"{$reason}\"/>\n");
         } else {
             // a test that failed without saying how still gets a message and a body, both bare
-            $fault = $test->fault() ?? Fault();
+            Fault $fault = Fault();
+            array<Fault> $all = $test->failures();
+            if (!$all->empty()) {
+                $fault = $all[0];
+            }
             $message = escape::markup($fault->summary);
-            $body = escape::markup("{$fault->file}:{$fault->line}\n{$fault->summary}\n{$fault->detail}\n{$test->output}");
+            $body = escape::markup(junitBody($all, $test->output));
             if ($test->outcome == Outcome::timeout || $test->outcome == Outcome::signal) {
                 $out->append("      <error type=\"{$test->outcome}\" message=\"{$message}\">{$body}</error>\n");
             } else {
@@ -95,5 +102,37 @@ public function render(const Run& $run, const Verdict& $verdict) : string
     }
 
     $out->append('</testsuites>\n');
+    return $out;
+}
+
+/**
+ * The body of a JUnit failure or error: each check's location, summary, values and detail, then
+ * `$output` when the test printed something.
+ */
+private function junitBody(const array<Fault>& $failures, const string& $output) : string
+{
+    string $out = '';
+    foreach ($failures as const &$fault) {
+        if (!$out->empty()) {
+            $out->append("\n");
+        }
+        $out->append("{$fault->file}:{$fault->line}\n");
+        $out->append($fault->summary);
+        $values = text::values($fault);
+        if (!$values->empty()) {
+            $out->append("\n");
+            $out->append($values);
+        }
+        if (!$fault->detail->empty()) {
+            $out->append("\n");
+            $out->append($fault->detail);
+        }
+    }
+    if (!$output->empty()) {
+        if (!$out->empty()) {
+            $out->append("\n");
+        }
+        $out->append($output);
+    }
     return $out;
 }

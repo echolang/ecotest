@@ -1,0 +1,131 @@
+namespace ecotest::cli;
+
+use ecotest::cli::{files, history, html, junit, lcov, markdown, runjson};
+
+/**
+ * Judges, renders and stores `$run`, finished in `$dir`. `run.json` goes last, marking the run
+ * finished; then a run of the whole suite with coverage becomes the one the queries read, and
+ * old runs are pruned. Returns the process exit code: 1 when the run is red or one of its
+ * reports could not be written.
+ */
+internal function finish(Tool& $tool, const string& $dir, const Run& $run, Store& $store) : int32
+{
+    usize $unwritten = 0;
+    string $why = 'the run measured no coverage (add --coverage)';
+    array<FileCoverage> $files = [];
+    Totals? $totals = null;
+
+    if ($tool->echoc->coverage) {
+        $why = 'echoc stopped before the tests';
+        match (Coverage::load($dir, $run)) {
+            .ok($found) => {
+                if ($found != null) {
+                    Coverage $c = guard $found;
+                    $r = CoverageReport::measure($c, $tool->scope($run));
+                    write(($dir / 'coverage.json')->string(), $r->json(), $unwritten);
+                    $totals = $r->totals();
+                    $files = mv $r->files;
+                }
+            },
+            .error($e) => {
+                $why = "{$e}";
+                files::warn("no coverage: {$why}");
+            },
+        };
+    }
+
+    $diff = diffCoverage($tool, $files, $totals != null, $why);
+    $verdict = $tool->gates->check($run, $totals, $why, $diff);
+
+    // every report is attempted, each rendered as it is written; one that could not be written
+    // fails the run once it is shown
+    write(($dir / 'summary.md')->string(), markdown::render($run, $files, $totals, $verdict), $unwritten);
+    write(($dir / 'junit.xml')->string(), junit::render($run, $verdict), $unwritten);
+    if (!$files->empty()) {
+        write(($dir / 'lcov.info')->string(), lcov::render($files), $unwritten);
+    }
+
+    $report = '';
+    if ($tool->html) {
+        $report = ($dir / 'report.html')->string();
+        write($report, html::render($run, $files, $totals, $verdict), $unwritten);
+    }
+
+    // a run the history misses is still a run: said, but not failed
+    $historyPath = ($tool->root() / 'history.jsonl')->string();
+    $kept = history::append($historyPath, $dir, $run, $totals);
+    if ($kept->failed()) {
+        files::warn("cannot write {$historyPath}: {$kept->failure()}");
+    }
+
+    // written whole and last: a run without it never finished
+    $runJson = ($dir / 'run.json')->string();
+    $sealed = std::fs::replace($runJson, runjson::render($run, $files, $totals, $verdict));
+    if ($sealed->failed()) {
+        files::warn("cannot write {$runJson}: {$sealed->failure()}");
+        $unwritten++;
+    }
+
+    if ($totals != null && !$run->filtered && $run->stopped()->empty()) {
+        $pointed = $store->point($dir);
+        if ($pointed->failed()) {
+            files::warn("{$pointed->failure()}");
+        }
+    }
+    $pruned = $store->prune($tool->keep, $dir);
+
+    if (!$run->green()) {
+        std::io::eprint($tool->services->tails($dir, 12));
+    }
+
+    std::io::print($tool->summary($run, $files, $totals, $verdict, diffSentence($diff, $tool->since), $report));
+
+    if (!$verdict->green || $unwritten > 0) {
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Writes the report `$text` to `$path`, or says why not and counts it in `$unwritten`.
+ */
+private function write(const string& $path, const string& $text, usize& $unwritten) : void
+{
+    guard files::write($path, $text) else ($e) {
+        files::warn("cannot write {$path}: {$e}");
+        $unwritten++;
+        return;
+    };
+}
+
+/**
+ * How much of the code changed since `--since` ran: off without a ref, unmeasured without
+ * coverage (for the reason `$why`) or without an answer from git.
+ */
+private function diffCoverage(const Tool& $tool, const array<FileCoverage>& $files, bool $covered, const string& $why) : DiffMeasure
+{
+    if ($tool->since->empty()) {
+        return .off;
+    }
+    if (!$covered) {
+        return .unmeasured($why);
+    }
+
+    $d = guard GitDiff::since($tool->git, $tool->echoc->project, $tool->since) else ($e) {
+        return .unmeasured("{$e}");
+    };
+
+    return .measured($d->coverage($files));
+}
+
+/**
+ * How much of the changed code ran, or why that is not known, or nothing without a ref.
+ */
+private function diffSentence(const DiffMeasure& $diff, const string& $since) : string
+{
+    return match ($diff) {
+        .off => '',
+        .measured($d) => "{$d} of {$d->total} changed lines with code ran since {$since}",
+        .unmeasured($reason) => "not measured: {$reason}",
+    };
+}

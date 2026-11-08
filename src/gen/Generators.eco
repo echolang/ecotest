@@ -216,7 +216,7 @@ public function pick<T>(array<T> $items) : Gen<T>
 {
     // a release build drops asserts, and an empty pick would index past the end
     if ($items->empty()) {
-        die(Session::report(Failure('gen::pick needs at least one item', std::src::caller())), std::src::caller());
+        die(report('gen::pick needs at least one item', std::src::caller()), std::src::caller());
     }
 
     uint64 $last = ($items->count() - 1) as uint64;
@@ -235,7 +235,7 @@ public function pick<T>(array<T> $items) : Gen<T>
 public function oneOf<T>(array<Gen<T>> $gens) : Gen<T>
 {
     if ($gens->empty()) {
-        die(Session::report(Failure('gen::oneOf needs at least one generator', std::src::caller())), std::src::caller());
+        die(report('gen::oneOf needs at least one generator', std::src::caller()), std::src::caller());
     }
 
     uint64 $last = ($gens->count() - 1) as uint64;

@@ -11,7 +11,7 @@ public class MaybeExpect<T>
     /**
      * The value under test.
      */
-    public T? $value;
+    public const T? $value;
 
     /**
      * The value, or the test stops because it is absent.
@@ -23,7 +23,7 @@ public class MaybeExpect<T>
         $at = std::src::caller();
 
         $got = guard $this->value else {
-            die(Session::report(Failure('expected a value, got null', $at)), $at);
+            die(report('expected a value, got null', $at), $at);
         };
         return $got;
     }

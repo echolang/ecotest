@@ -5,15 +5,16 @@ use ecotest::cli::doc;
 
 /**
  * What a test wrote through ecotest in one pass: how it failed or why it skipped, how many checks
- * it made, and the notes, metrics and benches it recorded. A record keeps its last pass's events,
- * so a fresh pass starts from an empty one.
+ * it made, and the notes, metrics, benches and snapshots it recorded. A record keeps its last
+ * pass's events, so a fresh pass starts from an empty one.
  */
 public struct Events
 {
     /**
-     * How the pass failed, or null when nothing failed.
+     * Each failed check of the pass, in the order they were written. A crash is recorded only
+     * when no check failed first.
      */
-    public Fault? $fault = null;
+    public array<Fault> $failures = [];
 
     /**
      * True once the test ended itself as skipped, whatever reason it gave.
@@ -35,6 +36,19 @@ public struct Events
     public array<string> $notes = [];
     public array<Metric> $metrics = [];
     public array<BenchResult> $benches = [];
+    public array<string> $snapshotsNew = [];
+    public array<string> $snapshotsUpdated = [];
+
+    /**
+     * The first failure of the pass, or null when none failed.
+     */
+    public const function fault() : Fault?
+    {
+        if ($this->failures->empty()) {
+            return null;
+        }
+        return $this->failures[0];
+    }
 
     /**
      * Folds one ecotest event of the pass into these events.
@@ -55,33 +69,20 @@ public struct Events
 
         match ($kind) {
             .fail => {
-                $summary = doc::text($event, 'summary');
-                $file = doc::text($event, 'file');
-                int64 $line = doc::number($event, 'line');
-
-                if ($this->fault != null) {
-                    $this->fault?->detail->append("\nalso {$file}:{$line}: {$summary}");
-                    return;
-                }
-
-                $detail = doc::text($event, 'detail');
-                $expected = doc::text($event, 'expected');
-                $actual = doc::text($event, 'actual');
-                if (!$expected->empty() || !$actual->empty()) {
-                    $values = "expected: {$expected}\n     got: {$actual}";
-                    if (!$detail->empty()) {
-                        $values->append("\n");
-                        $values->append($detail);
-                    }
-                    $detail = mv $values;
-                }
-
                 array<string> $context = [];
                 foreach (doc::list($event, 'context') as const &$scope) {
                     $context[] = $scope->asStr() ?? '';
                 }
 
-                $this->fault = Fault(mv $summary, mv $file, $line, mv $detail, mv $context);
+                $this->failures[] = Fault(
+                    doc::text($event, 'summary'),
+                    doc::text($event, 'file'),
+                    doc::number($event, 'line'),
+                    doc::text($event, 'detail'),
+                    mv $context,
+                    doc::text($event, 'expected'),
+                    doc::text($event, 'actual')
+                );
             },
             .crash => {
                 $this->crashed($event);
@@ -108,12 +109,10 @@ public struct Events
                 );
             },
             .snapshotNew => {
-                $path = doc::text($event, 'path');
-                $this->notes[] = "wrote new snapshot {$path}";
+                $this->snapshotsNew[] = doc::text($event, 'path');
             },
             .snapshotUpdated => {
-                $path = doc::text($event, 'path');
-                $this->notes[] = "updated snapshot {$path}";
+                $this->snapshotsUpdated[] = doc::text($event, 'path');
             },
         };
     }
@@ -124,12 +123,12 @@ public struct Events
      */
     public function crashed(const json::Value& $crash) : void
     {
-        if ($this->fault != null) {
+        if (!$this->failures->empty()) {
             return;
         }
 
         $headline = doc::text($crash, 'headline');
         $message = doc::text($crash, 'message');
-        $this->fault = Fault("{$headline}: {$message}", doc::text($crash, 'file'), doc::number($crash, 'line'));
+        $this->failures[] = Fault("{$headline}: {$message}", doc::text($crash, 'file'), doc::number($crash, 'line'));
     }
 }

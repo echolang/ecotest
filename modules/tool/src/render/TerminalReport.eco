@@ -131,22 +131,26 @@ private function failures(string& $out, const Run& $run) : void
 
         $out->append("{$test->outcome:<9} {$test->id}\n");
 
-        $fault = guard $test->fault() else {
-            continue;
-        };
-        if (!$fault->file->empty()) {
-            $out->append("          at {$fault->file}:{$fault->line}\n");
-        }
-        if (!$fault->summary->empty()) {
-            $out->append(text::indent($fault->summary, 12));
-            $out->append('\n');
-        }
-        if (!$fault->detail->empty()) {
-            $out->append(text::indent($fault->detail, 12));
-            $out->append('\n');
-        }
-        foreach ($fault->context as const &$scope) {
-            $out->append("            in {$scope}\n");
+        foreach ($test->failures() as const &$fault) {
+            if (!$fault->file->empty()) {
+                $out->append("          at {$fault->file}:{$fault->line}\n");
+            }
+            if (!$fault->summary->empty()) {
+                $out->append(text::indent($fault->summary, 12));
+                $out->append('\n');
+            }
+            $values = text::values($fault);
+            if (!$values->empty()) {
+                $out->append(text::indent($values, 12));
+                $out->append('\n');
+            }
+            if (!$fault->detail->empty()) {
+                $out->append(text::indent($fault->detail, 12));
+                $out->append('\n');
+            }
+            foreach ($fault->context as const &$scope) {
+                $out->append("            in {$scope}\n");
+            }
         }
     }
 }
@@ -157,6 +161,12 @@ private function failures(string& $out, const Run& $run) : void
 private function extras(string& $out, const Run& $run) : void
 {
     foreach ($run->tests as const &$test) {
+        foreach ($test->events->snapshotsNew as const &$path) {
+            $out->append("snapshot  {$test->id}: wrote {$path}\n");
+        }
+        foreach ($test->events->snapshotsUpdated as const &$path) {
+            $out->append("snapshot  {$test->id}: updated {$path}\n");
+        }
         foreach ($test->events->notes as const &$note) {
             $out->append("note      {$test->id}: {$note}\n");
         }

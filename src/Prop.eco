@@ -65,8 +65,7 @@ internal function search<T>(
     const std::src::location& $at
 ) : void {
     Session::checked();
-    $tally = Session::$tally;
-    int64 $checks = $tally->checks;
+    int64 $checks = Session::checkCount();
 
     uint64 $seed = seed();
     $random = Random($seed);
@@ -105,12 +104,12 @@ internal function search<T>(
         $detail->append("shrunk {$steps} times; replay with ECOTEST_SEED={$seed}");
         $detail->append($caughtText);
 
-        $tally->checks = $checks;
+        Session::setChecks($checks);
         fail("property failed on run {$run} of {$runs}", $at, $actual: $shown, $detail: $detail);
         return;
     }
 
-    $tally->checks = $checks;
+    Session::setChecks($checks);
 }
 
 /**
@@ -175,7 +174,7 @@ internal class Shrinker
         while ($better && $this->spent < BUDGET) {
             $better = false;
 
-            foreach ($sizes as $size) {
+            foreach ($sizes as const &$size) {
                 usize $i = 0;
                 while ($i + $size <= $best->count() && $this->spent < BUDGET) {
                     array<uint64> $cut = [];
@@ -192,7 +191,7 @@ internal class Shrinker
                 }
             }
 
-            foreach ($sizes as $size) {
+            foreach ($sizes as const &$size) {
                 for (usize $i = 0; $i + $size <= $best->count(); $i++) {
                     bool $zero = true;
                     for (usize $k = $i; $k < $i + $size; $k++) {

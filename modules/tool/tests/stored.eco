@@ -36,17 +36,24 @@ test a_pass_folds_every_kind_of_row_and_event
     expect($run->version)->is('9.9.9');
     expect($run->wallMs)->is(9);
     expect($run->tests->count())->is(3);
-    $plain = expect($run->tests[2]->events->fault)->some();
-    expect($plain->detail)->is('expected: x\n     got: y');
+    $plain = expect($run->tests[2]->events->fault())->some();
+    expect($plain->expected)->is('x');
+    expect($plain->actual)->is('y');
+    expect($plain->detail)->empty();
     expect($plain->context)->is(['']);
-    $crash = expect($run->tests[0]->events->fault)->some();
+    $crash = expect($run->tests[0]->events->fault())->some();
     expect($crash->summary)->is('fatal error: boom');
     expect($crash->line)->is(7);
-    $differs = expect($run->tests[1]->events->fault)->some();
+    expect($run->tests[1]->events->failures->count())->is(2);
+    $differs = expect($run->tests[1]->events->fault())->some();
     expect($differs->summary)->is('values differ');
-    expect($differs->detail)->is('expected: 1\n     got: 2\nmore\nalso t.eco:6: second');
+    expect($differs->expected)->is('1');
+    expect($differs->actual)->is('2');
+    expect($differs->detail)->is('more');
     expect($differs->context)->is(['row 1']);
-    expect($run->tests[1]->events->notes)->is(['wrote new snapshot a.snap', 'updated snapshot b.snap']);
+    expect($run->tests[1]->events->failures[1]->summary)->is('second');
+    expect($run->tests[1]->events->snapshotsNew)->is(['a.snap']);
+    expect($run->tests[1]->events->snapshotsUpdated)->is(['b.snap']);
     expect($run->stopped())->empty();
 }
 

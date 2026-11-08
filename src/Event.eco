@@ -67,7 +67,7 @@ private function finish(string& $line) : void
  */
 internal function emitFail(const Failure& $f) : void
 {
-    $line = start(protocol::FAIL);
+    $line = start(protocol::Kind::fail->value());
     text($line, 'summary', $f->summary);
     text($line, 'expected', $f->expected);
     text($line, 'actual', $f->actual);
@@ -86,7 +86,7 @@ internal function emitCrash(
     const string& $file,
     int64 $line
 ) : void {
-    $out = start(protocol::CRASH);
+    $out = start(protocol::Kind::crash->value());
     text($out, 'headline', $headline);
     text($out, 'message', $message);
     text($out, 'file', $file);
@@ -99,7 +99,7 @@ internal function emitCrash(
  */
 internal function emitSkip(const string& $reason, const std::src::location& $at) : void
 {
-    $line = start(protocol::SKIP);
+    $line = start(protocol::Kind::skip->value());
     text($line, 'reason', $reason);
     at($line, $at);
     finish($line);
@@ -110,7 +110,7 @@ internal function emitSkip(const string& $reason, const std::src::location& $at)
  */
 internal function emitNote(const string& $text) : void
 {
-    $line = start(protocol::NOTE);
+    $line = start(protocol::Kind::note->value());
     text($line, 'text', $text);
     finish($line);
 }
@@ -120,7 +120,7 @@ internal function emitNote(const string& $text) : void
  */
 internal function emitMetric(const string& $name, int64 $value) : void
 {
-    $line = start(protocol::METRIC);
+    $line = start(protocol::Kind::metric->value());
     text($line, 'name', $name);
     number($line, 'value', $value);
     finish($line);
@@ -131,7 +131,7 @@ internal function emitMetric(const string& $name, int64 $value) : void
  */
 internal function emitBench(const string& $label, int64 $median, int64 $slow, int64 $calls) : void
 {
-    $line = start(protocol::BENCH);
+    $line = start(protocol::Kind::bench->value());
     text($line, 'label', $label);
     number($line, 'p50_ns', $median);
     number($line, 'p95_ns', $slow);
@@ -144,7 +144,7 @@ internal function emitBench(const string& $label, int64 $median, int64 $slow, in
  */
 internal function emitChecks(const string& $path, int64 $count) : void
 {
-    $line = start(protocol::CHECKS);
+    $line = start(protocol::Kind::checks->value());
     number($line, 'count', $count);
     $line->append('}');
     Session::append($path, $line);
@@ -155,7 +155,7 @@ internal function emitChecks(const string& $path, int64 $count) : void
  */
 internal function emitSnapshotNew(const string& $path, const std::src::location& $at) : void
 {
-    $line = start(protocol::SNAPSHOT_NEW);
+    $line = start(protocol::Kind::snapshotNew->value());
     text($line, 'path', $path);
     at($line, $at);
     finish($line);
@@ -166,7 +166,7 @@ internal function emitSnapshotNew(const string& $path, const std::src::location&
  */
 internal function emitSnapshotUpdated(const string& $path, const std::src::location& $at) : void
 {
-    $line = start(protocol::SNAPSHOT_UPDATED);
+    $line = start(protocol::Kind::snapshotUpdated->value());
     text($line, 'path', $path);
     at($line, $at);
     finish($line);

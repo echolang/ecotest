@@ -10,7 +10,7 @@ public class CallsExpect<T>
     /**
      * The recorder under test.
      */
-    public Calls<T> $calls;
+    public const Calls<T> $calls;
 
     /**
      * Exactly `$count` calls were recorded.
@@ -19,12 +19,12 @@ public class CallsExpect<T>
     public const function times(usize $count) : CallsExpect<T>
     {
         Session::checked();
-
         usize $got = $this->calls->count();
-        if ($got != $count) {
-            fail("expected {$count} calls, got {$got}", std::src::caller());
+        if ($got == $count) {
+            return $this;
         }
 
+        fail("expected {$count} calls, got {$got}", std::src::caller());
         return $this;
     }
 
@@ -35,12 +35,12 @@ public class CallsExpect<T>
     public const function never() : CallsExpect<T>
     {
         Session::checked();
-
         usize $got = $this->calls->count();
-        if ($got != 0) {
-            fail("expected no calls, got {$got}", std::src::caller());
+        if ($got == 0) {
+            return $this;
         }
 
+        fail("expected no calls, got {$got}", std::src::caller());
         return $this;
     }
 

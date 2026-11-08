@@ -6,7 +6,7 @@
 
 namespace ecotest::cli::pretty;
 
-use ecotest::cli::{terminal, text};
+use ecotest::cli::{Fault, terminal, text};
 
 /**
  * How many cells a coverage meter is wide.
@@ -124,21 +124,28 @@ private function failures(string& $out, const Look& $look, const Run& $run, cons
         $headline = $look->headline($test->outcome, $look->title($test));
         $out->append("  {$headline}\n");
 
-        $fault = guard $test->fault() else {
+        array<Fault> $failures = $test->failures();
+        if ($failures->empty()) {
             $out->append('\n');
             continue;
-        };
-        if (!$fault->file->empty()) {
-            railed($out, $look, "{$fault->file}:{$fault->line}", true);
         }
-        if (!$fault->summary->empty()) {
-            railed($out, $look, $fault->summary, false);
-        }
-        if (!$fault->detail->empty()) {
-            railed($out, $look, $fault->detail, true);
-        }
-        foreach ($fault->context as const &$scope) {
-            railed($out, $look, "in {$scope}", true);
+        foreach ($failures as const &$fault) {
+            if (!$fault->file->empty()) {
+                railed($out, $look, "{$fault->file}:{$fault->line}", true);
+            }
+            if (!$fault->summary->empty()) {
+                railed($out, $look, $fault->summary, false);
+            }
+            $values = text::values($fault);
+            if (!$values->empty()) {
+                railed($out, $look, $values, true);
+            }
+            if (!$fault->detail->empty()) {
+                railed($out, $look, $fault->detail, true);
+            }
+            foreach ($fault->context as const &$scope) {
+                railed($out, $look, "in {$scope}", true);
+            }
         }
         $out->append('\n');
     }
@@ -225,11 +232,20 @@ private function extras(string& $out, const Look& $look, const Run& $run) : void
 {
     foreach ($run->tests as const &$test) {
         const Events& $events = $test->events;
-        if ($events->notes->empty() && $events->metrics->empty() && $events->benches->empty()) {
+        if ($events->notes->empty() && $events->metrics->empty() && $events->benches->empty()
+            && $events->snapshotsNew->empty() && $events->snapshotsUpdated->empty()) {
             continue;
         }
         $title = $look->mute($look->title($test));
 
+        foreach ($events->snapshotsNew as const &$path) {
+            $out->append(label($look, 'snapshot'));
+            $out->append("wrote {$path}  {$title}\n");
+        }
+        foreach ($events->snapshotsUpdated as const &$path) {
+            $out->append(label($look, 'snapshot'));
+            $out->append("updated {$path}  {$title}\n");
+        }
         foreach ($events->notes as const &$note) {
             $out->append(label($look, 'note'));
             $out->append("{$note}  {$title}\n");

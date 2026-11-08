@@ -35,7 +35,7 @@ public class StatusExpect<E>
         Session::checked();
 
         if ($this->value->has_value()) {
-            Session::stop(Failure('expected an error, got success', std::src::caller()));
+            stop('expected an error, got success', std::src::caller());
         }
 
         return $this->value->failure();

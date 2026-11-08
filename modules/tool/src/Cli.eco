@@ -71,11 +71,11 @@ public function main(const array<string>& $argv) : int32
     $app->fallback($format, 'terminal');
     $app->fallback($buildDir, 'ecobuild');
 
-    foreach ([$coverage, $html] as $f) {
+    foreach ([$coverage, $html] as const &$f) {
         $app->accept($f, $run);
         $app->accept($f, $affected);
     }
-    foreach ([$repeat, $filter, $target, $define, $timeout, $echoc, $buildDir, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep] as $a) {
+    foreach ([$repeat, $filter, $target, $define, $timeout, $echoc, $buildDir, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep] as const &$a) {
         $app->accept($a, $run);
         $app->accept($a, $affected);
     }
@@ -85,11 +85,11 @@ public function main(const array<string>& $argv) : int32
     $app->accept($since, $affected);
     $app->require($since, $affected);
     $app->accept($format, $report);
-    foreach ([$run, $report, $affected] as $sub) {
+    foreach ([$run, $report, $affected] as const &$sub) {
         $app->accept($style, $sub);
     }
     $app->accept($echoc, $api);
-    foreach ([$run, $report, $history, $api, $who, $affected] as $sub) {
+    foreach ([$run, $report, $history, $api, $who, $affected] as const &$sub) {
         $app->accept($project, $sub);
     }
 

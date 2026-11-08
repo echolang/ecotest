@@ -70,11 +70,11 @@ internal function handMade() : Run
     $run->tests[] = record('tests/a.eco', 'passes', .pass);
 
     $failed = record('tests/a.eco', 'fails', .fail);
-    $failed->events->fault = Fault('expected 2, got 1', 'tests/a.eco', 9, 'a <detail> & more', ['row 3']);
+    $failed->events->failures = [Fault('expected 2, got 1', 'tests/a.eco', 9, 'a <detail> & more', ['row 3'])];
     $run->tests[] = $failed;
 
     $slow = record('tests/b.eco', 'hangs', .timeout);
-    $slow->events->fault = Fault('timed out');
+    $slow->events->failures = [Fault('timed out')];
     $run->tests[] = $slow;
 
     $killed = record('tests/b.eco', 'dies', .signal);
@@ -234,10 +234,10 @@ test a_failure_without_a_summary_shows_where_it_stopped_and_any_detail
 {
     $run = Run('/p/.ecotest/run-9');
     $bare = record('tests/d.eco', 'bare', .fail);
-    $bare->events->fault = Fault('', 'tests/d.eco', 4);
+    $bare->events->failures = [Fault('', 'tests/d.eco', 4)];
     $run->tests[] = $bare;
     $detailed = record('tests/d.eco', 'detailed', .fail);
-    $detailed->events->fault = Fault('', 'tests/d.eco', 5, 'only detail');
+    $detailed->events->failures = [Fault('', 'tests/d.eco', 5, 'only detail')];
     $run->tests[] = $detailed;
 
     expect(terminal::render($run, [], null, judged($run, []), '', ''))
@@ -246,7 +246,7 @@ test a_failure_without_a_summary_shows_where_it_stopped_and_any_detail
         ->has('  x tests/d.eco > bare\n    | tests/d.eco:4\n\n  x tests/d.eco > detailed\n    | tests/d.eco:5\n    | only detail\n');
     expect(markdown::render($run, [], null, judged($run, [])))
         ->has('- **fail** `m/tests/d.eco::bare` at `tests/d.eco:4`\n- **fail**')
-        ->has('`m/tests/d.eco::detailed` at `tests/d.eco:5`\n  ```\n  \n  only detail\n  ```\n');
+        ->has('`m/tests/d.eco::detailed` at `tests/d.eco:5`\n  ```\n  only detail\n  ```\n');
 }
 
 test junit_groups_by_file_and_types_each_outcome
@@ -273,7 +273,7 @@ test junit_fails_exactly_when_the_run_does
     $run = Run('/p/.ecotest/run-8');
     passes($run, 2, 2);
     $flips = record('tests/c.eco', 'flips', .flaky);
-    $flips->attempts = [Attempt(.fail, 3, Fault('expected 2, got 1', 'tests/c.eco', 4)), Attempt(.pass, 3)];
+    $flips->attempts = [Attempt(.fail, 3, [Fault('expected 2, got 1', 'tests/c.eco', 4)]), Attempt(.pass, 3)];
     $run->tests[] = $flips;
 
     // flaky alone is a passing case that remembers the pass that broke
@@ -298,7 +298,7 @@ test markdown_lists_flaky_tests_apart_from_failures
     $run = Run('/p/.ecotest/run-8');
     passes($run, 2, 2);
     $flips = record('tests/c.eco', 'flips', .flaky);
-    $flips->attempts = [Attempt(.fail, 3, Fault('expected 2, got 1', 'tests/c.eco', 4)), Attempt(.pass, 3)];
+    $flips->attempts = [Attempt(.fail, 3, [Fault('expected 2, got 1', 'tests/c.eco', 4)]), Attempt(.pass, 3)];
     $run->tests[] = $flips;
 
     $out = markdown::render($run, [], null, judged($run, []));
