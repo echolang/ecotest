@@ -40,9 +40,7 @@ public class CurlTransport : Transport
 
         $res = Response($got->status);
         $res->ms = $started->elapsed()->as_millis();
-        if ($request->verb != Verb::head) {
-            $res->body = $got->body;
-        }
+        $res->body = $got->body;
 
         foreach ($got->headers->items as const &$h) {
             $res->headers[] = Header($h->name, $h->value);

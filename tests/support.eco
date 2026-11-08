@@ -64,15 +64,15 @@ internal function eventsOf(function<void()> $body) : array<string>
     $path = std::env::join(std::env::tmp(), "ecotest-events-{$pid}-{$stamp}.jsonl");
 
     string $kept = ecotest::Session::$events;
-    int32 $soft = ecotest::Session::$soft;
+    $frames = ecotest::Session::$frames;
     ecotest::Session::$events = $path;
 
     $body();
 
     ecotest::Session::$events = $kept;
-    ecotest::Session::$soft = $soft;
+    ecotest::Session::$frames = $frames;
     ecotest::Session::$reported = false;
-    ecotest::Session::$held->clear();
+    ecotest::Session::$drain->clear();
 
     $text = std::io::readfile($path)->or('');
     $gone = std::io::remove($path);

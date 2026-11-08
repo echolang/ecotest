@@ -1,6 +1,6 @@
 namespace ecotest;
 
-use ecotest::{diff, paths, protocol};
+use ecotest::{diff, paths};
 
 /**
  * Snapshot files. The n-th snapshot a test takes lives at
@@ -47,7 +47,7 @@ internal class Snapshot
                 fail("cannot write snapshot {$path}: {$e}", $at);
                 return;
             };
-            Event(protocol::SNAPSHOT_NEW)->text('path', $path)->at($at)->emit();
+            emitSnapshotNew($path, $at);
             return;
         };
 
@@ -60,7 +60,7 @@ internal class Snapshot
                 fail("cannot write snapshot {$path}: {$e}", $at);
                 return;
             };
-            Event(protocol::SNAPSHOT_UPDATED)->text('path', $path)->at($at)->emit();
+            emitSnapshotUpdated($path, $at);
             return;
         }
 

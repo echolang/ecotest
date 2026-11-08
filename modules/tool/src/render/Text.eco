@@ -4,30 +4,19 @@
 
 namespace ecotest::cli::text;
 
+use ecotest::show;
+
 /**
  * How many bytes of a line a report shows before cutting.
  */
-internal const usize WIDTH = 120;
+internal const usize WIDTH = show::WIDTH;
 
 /**
  * `$text` with every line indented by `$by` spaces.
  */
 public function indent(const string& $text, usize $by) : string
 {
-    $pad = str::repeat(' ', $by);
-    $out = '';
-    $first = true;
-
-    foreach (str::split($text, '\n') as const &$line) {
-        if (!$first) {
-            $out->append('\n');
-        }
-        $first = false;
-        $out->append($pad);
-        $out->append(string($line));
-    }
-
-    return $out;
+    return show::indent($text, $by);
 }
 
 /**
@@ -35,13 +24,7 @@ public function indent(const string& $text, usize $by) : string
  */
 public function cut(const string& $text) : string
 {
-    if ($text->size() <= WIDTH) {
-        return $text;
-    }
-
-    $out = $text->sub(0, WIDTH);
-    $out->append('...');
-    return $out;
+    return show::cut($text);
 }
 
 /**

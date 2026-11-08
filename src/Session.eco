@@ -3,6 +3,16 @@ namespace ecotest;
 use ecotest::{show, protocol};
 
 /**
+ * One `soft()` or `caught()` scope: the failures it holds, and whether leaving it reports them
+ * (`soft`) or hands them back (`caught`).
+ */
+internal struct Frame
+{
+    public array<Failure> $held = [];
+    public bool $capture = false;
+}
+
+/**
  * What one test process knows about itself: which test it is, where its events go, the open
  * `soft()` and `context()` scopes, the failures held until a soft scope ends, and the cleanups to
  * run when the test stops early. Started by the first ecotest call in the process; without
@@ -16,8 +26,8 @@ public class Session
     internal static bool $started = false;
     internal static string $id = '';
     internal static string $events = '';
-    internal static int32 $soft = 0;
-    internal static array<Failure> $held = [];
+    internal static array<Frame> $frames = [];
+    internal static array<Failure> $drain = [];
     internal static array<string> $context = [];
     internal static bool $reported = false;
     internal static Tally $tally = Tally();
@@ -137,15 +147,17 @@ public class Session
     }
 
     /**
-     * Takes a failure: held while a `soft()` scope is open, otherwise the test stops here.
+     * Takes a failure: held while a `soft()` or `caught()` scope is open, otherwise the test
+     * stops here.
      */
     public static function fail(Failure $failure) : void
     {
         Session::start();
         $failure->context = Session::$context;
 
-        if (Session::$soft > 0) {
-            Session::$held[] = mv $failure;
+        if (!Session::$frames->empty()) {
+            Frame& $top = Session::$frames[Session::$frames->count() - 1];
+            $top->held[] = mv $failure;
             return;
         }
 
@@ -173,35 +185,50 @@ public class Session
             $failure->context = Session::$context;
         }
 
-        Session::$held[] = mv $failure;
+        Session::flatten();
+        Session::$drain[] = mv $failure;
         return Session::flush();
     }
 
     /**
-     * Writes a `fail` event for every held failure, then the check count, and answers the report
-     * that stops the test: the one failure as it reads, or each one under its line.
+     * Moves every held failure into `$drain`, outermost first.
+     */
+    private static function flatten() : void
+    {
+        foreach (Session::$frames as &$frame) {
+            foreach ($frame->held as const &$held) {
+                Session::$drain[] = $held;
+            }
+            $frame->held->clear();
+        }
+        Session::$frames->clear();
+    }
+
+    /**
+     * Writes a `fail` event for every drained failure, then the check count, and answers the
+     * report that stops the test: the one failure as it reads, or each one under its line.
      */
     internal static function flush() : string
     {
         Session::$reported = true;
-        usize $count = Session::$held->count();
+        usize $count = Session::$drain->count();
         string $text = '';
 
         if ($count == 1) {
-            const Failure& $only = Session::$held[0];
-            $only->event()->emit();
+            const Failure& $only = Session::$drain[0];
+            emitFail($only);
             $text = "{$only}";
         } else {
             $text = "{$count} checks failed";
-            foreach (Session::$held as const &$failure) {
-                $failure->event()->emit();
+            foreach (Session::$drain as const &$failure) {
+                emitFail($failure);
                 $at = $failure->at;
                 $text->append("\n\n{$at->file}:{$at->line}\n");
                 $text->append(show::indent("{$failure}", 2));
             }
         }
 
-        Session::$held->clear();
+        Session::$drain->clear();
         Session::$tally->flush();
         return $text;
     }
@@ -212,23 +239,58 @@ public class Session
     internal static function enterSoft() : void
     {
         Session::start();
-        Session::$soft = Session::$soft + 1;
+        Session::$frames[] = Frame();
+    }
+
+    /**
+     * Opens a `caught()` scope: failures are held and handed back instead of stopping the test.
+     */
+    internal static function enterCaught() : void
+    {
+        Session::start();
+        Session::$frames[] = Frame([], true);
     }
 
     /**
      * Closes a `soft()` scope. The outermost one reports every held failure together and stops
-     * the test at the first one's line.
+     * the test at the first one's line. An inner one merges its failures into the parent.
      */
     internal static function leaveSoft() : void
     {
-        Session::$soft = Session::$soft - 1;
-
-        if (Session::$soft > 0 || Session::$held->empty()) {
+        if (Session::$frames->empty()) {
             return;
         }
 
-        $at = Session::$held[0]->at;
+        Frame $frame = Session::$frames->pop();
+        if ($frame->capture || $frame->held->empty()) {
+            return;
+        }
+
+        if (!Session::$frames->empty()) {
+            Frame& $parent = Session::$frames[Session::$frames->count() - 1];
+            foreach ($frame->held as const &$held) {
+                $parent->held[] = $held;
+            }
+            return;
+        }
+
+        $at = $frame->held[0]->at;
+        Session::$drain = mv $frame->held;
         die(Session::flush(), $at);
+    }
+
+    /**
+     * Closes a `caught()` scope and answers the failures it held.
+     */
+    internal static function leaveCaught() : array<Failure>
+    {
+        if (Session::$frames->empty()) {
+            array<Failure> $none = [];
+            return $none;
+        }
+
+        Frame $frame = Session::$frames->pop();
+        return mv $frame->held;
     }
 
     /**
@@ -239,12 +301,19 @@ public class Session
     {
         Session::start();
 
-        if (!Session::$held->empty()) {
+        bool $held = false;
+        foreach (Session::$frames as const &$frame) {
+            if (!$frame->held->empty()) {
+                $held = true;
+            }
+        }
+        if ($held || !Session::$drain->empty()) {
+            Session::flatten();
             return Session::flush();
         }
 
         Session::$reported = true;
-        Event(protocol::SKIP)->text('reason', $reason)->at($at)->emit();
+        emitSkip($reason, $at);
         Session::$tally->flush();
         Session::cleanup();
         return null;
@@ -262,16 +331,12 @@ public class Session
     ) : void {
         if (!Session::$reported) {
             // the default report names only the crash; the held failures print first
-            if (!Session::$held->empty()) {
+            Session::flatten();
+            if (!Session::$drain->empty()) {
                 std::io::eprintln(Session::flush());
             }
 
-            Event(protocol::CRASH)
-                ->text('headline', $headline)
-                ->text('message', $message)
-                ->text('file', $file)
-                ->number('line', $line)
-                ->emit();
+            emitCrash($headline, $message, $file, $line);
             Session::$tally->flush();
             Session::$reported = true;
         }

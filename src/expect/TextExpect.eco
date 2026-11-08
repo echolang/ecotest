@@ -37,13 +37,13 @@ public class TextExpect
             usize $from = show::lead($want, $k);
             $w = show::from($want, $from);
             $g = show::from($this->value, $from);
-            fail("texts part at byte {$k}: expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+            fail("texts part at byte {$k}: expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g);
             return $this;
         }
 
         $w = show::text($want);
         $g = show::text($this->value);
-        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g);
         return $this;
     }
 

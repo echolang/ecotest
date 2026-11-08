@@ -311,8 +311,9 @@ public class Tool
             return 2;
         };
 
-        $selection = guard queries::select($this) else ($code) {
-            return $code;
+        $selection = guard queries::select($this) else ($e) {
+            files::warn("{$e}");
+            return 1;
         };
 
         if ($selection->everything) {

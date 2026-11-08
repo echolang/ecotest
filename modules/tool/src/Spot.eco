@@ -13,11 +13,39 @@ internal struct Spot
 }
 
 /**
+ * A file and a line, for coverage keyed by place.
+ */
+internal struct LineSpot
+{
+    public string $path;
+    public int64 $line;
+}
+
+/**
+ * A file and a function name, for coverage keyed by the function.
+ */
+internal struct FnSpot
+{
+    public string $path;
+    public string $name;
+}
+
+/**
  * True when two spots name the same place.
  */
 operator (const Spot& $a) == (const Spot& $b) : bool
 {
     return $a->line == $b->line && $a->column == $b->column && $a->edge == $b->edge && $a->file == $b->file;
+}
+
+operator (const LineSpot& $a) == (const LineSpot& $b) : bool
+{
+    return $a->line == $b->line && $a->path == $b->path;
+}
+
+operator (const FnSpot& $a) == (const FnSpot& $b) : bool
+{
+    return $a->name == $b->name && $a->path == $b->path;
 }
 
 namespace hash;
@@ -28,4 +56,14 @@ namespace hash;
 internal function of(const ecotest::cli::Spot& $spot) : uint64
 {
     return combine(combine(of($spot->file), of($spot->line)), combine(of($spot->column), of($spot->edge)));
+}
+
+internal function of(const ecotest::cli::LineSpot& $spot) : uint64
+{
+    return combine(of($spot->path), of($spot->line));
+}
+
+internal function of(const ecotest::cli::FnSpot& $spot) : uint64
+{
+    return combine(of($spot->path), of($spot->name));
 }

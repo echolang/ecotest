@@ -1,6 +1,6 @@
 namespace ecotest::gen;
 
-use ecotest::{Draws, Gen, Pair};
+use ecotest::{Draws, Failure, Gen, Pair, Session};
 use ecotest::{show, utf8};
 
 /**
@@ -211,11 +211,12 @@ public function lists<T>(Gen<T> $item, max: usize $max = 16) : Gen<array<T>>
  * One of `$items`. A failing one shrinks towards the items listed before it. Needs `str::from` on
  * `T`.
  */
+#[caller]
 public function pick<T>(array<T> $items) : Gen<T>
 {
     // a release build drops asserts, and an empty pick would index past the end
     if ($items->empty()) {
-        die('gen::pick needs at least one item');
+        die(Session::report(Failure('gen::pick needs at least one item', std::src::caller())), std::src::caller());
     }
 
     uint64 $last = ($items->count() - 1) as uint64;
@@ -230,10 +231,11 @@ public function pick<T>(array<T> $items) : Gen<T>
  * A value from one of `$gens`, chosen at random. A failing one shrinks towards the generators
  * listed first. Printed by the first generator.
  */
+#[caller]
 public function oneOf<T>(array<Gen<T>> $gens) : Gen<T>
 {
     if ($gens->empty()) {
-        die('gen::oneOf needs at least one generator');
+        die(Session::report(Failure('gen::oneOf needs at least one generator', std::src::caller())), std::src::caller());
     }
 
     uint64 $last = ($gens->count() - 1) as uint64;

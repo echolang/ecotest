@@ -62,7 +62,7 @@ public class CallsExpect<T>
         if (!($made == $want)) {
             $w = show::item($want);
             $m = show::item($made);
-            fail("call {$index}: expected {$w}, got {$m}", std::src::caller(), $expected: $w, $actual: $m, $inline: true);
+            fail("call {$index}: expected {$w}, got {$m}", std::src::caller(), $expected: $w, $actual: $m);
         }
 
         return $this;

@@ -25,7 +25,7 @@ public class ResultExpect<T, E>
         $at = std::src::caller();
 
         $got = guard $this->value else ($e) {
-            die(Session::report(Failure("expected ok, got error {$e}", $at, $actual: "{$e}", $inline: true)), $at);
+            die(Session::report(Failure("expected ok, got error {$e}", $at, $actual: "{$e}")), $at);
         };
         return $got;
     }
@@ -40,14 +40,14 @@ public class ResultExpect<T, E>
 
         $got = guard $this->value else ($e) {
             $w = show::item($want);
-            fail("expected ok {$w}, got error {$e}", std::src::caller(), $expected: $w, $actual: "{$e}", $inline: true);
+            fail("expected ok {$w}, got error {$e}", std::src::caller(), $expected: $w, $actual: "{$e}");
             return $this;
         };
 
         if (!($got == $want)) {
             $w = show::item($want);
             $g = show::item($got);
-            fail("expected ok {$w}, got ok {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+            fail("expected ok {$w}, got ok {$g}", std::src::caller(), $expected: $w, $actual: $g);
         }
 
         return $this;
@@ -63,7 +63,7 @@ public class ResultExpect<T, E>
 
         // the ok value is not printed: a check that only wants the error asks nothing of `T`
         if ($this->value->has_value()) {
-            Failure('expected an error, got ok', std::src::caller())->stop();
+            Session::stop(Failure('expected an error, got ok', std::src::caller()));
         }
 
         return $this->value->failure();
@@ -85,7 +85,7 @@ public class ResultExpect<T, E>
 
         $e = $this->value->failure();
         if (!($e == $want)) {
-            fail("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}", $inline: true);
+            fail("expected error {$want}, got error {$e}", std::src::caller(), $expected: "{$want}", $actual: "{$e}");
         }
 
         return $this;

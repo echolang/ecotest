@@ -338,7 +338,7 @@ test who_names_the_tests_on_a_line_and_refuses_a_changed_file
 
     $source = expect($sample->dir->read('src/math.eco'))->ok();
     $sample->dir->write('src/math.eco', str::concat('// a line on top moves every other one\n', $source));
-    expect(expect(queries::ran($tool, 'src/math.eco:3'))->fails())->is(1);
+    expect(queries::ran($tool, 'src/math.eco:3'))->fails();
 }
 
 test affected_names_a_test_once_however_many_of_its_lines_changed
@@ -400,7 +400,7 @@ test affected_refuses_coverage_of_another_version
     $tool->git = fakeGit($sample, $fake);
     $tool->since = 'main';
 
-    expect(expect(queries::select($tool))->fails())->is(1);
+    expect(queries::select($tool))->fails();
 }
 
 test affected_runs_everything_for_a_new_source_file

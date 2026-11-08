@@ -26,14 +26,16 @@ public function forAll<T>(const Gen<T>& $gen, function<bool(const T&)> $holds, u
 public function forAll<T>(const Gen<T>& $gen, checks: function<void(const T&)> $body, usize $runs = 200) : void
 {
     $at = std::src::caller();
+    $box = Held();
     search(
         $gen,
         function(const T& $v) : bool {
-            return !caught(function() : void { $body($v); })->empty();
+            $box->failures = caught(function() : void { $body($v); });
+            return !$box->failures->empty();
         },
         function(const T& $v) : string {
             string $out = '';
-            foreach (caught(function() : void { $body($v); }) as const &$failure) {
+            foreach ($box->failures as const &$failure) {
                 $out->append("\n\n{$failure}");
             }
             return $out;
@@ -41,6 +43,14 @@ public function forAll<T>(const Gen<T>& $gen, checks: function<void(const T&)> $
         $runs,
         $at
     );
+}
+
+/**
+ * Failures of the last probe, so shrinking does not re-run the body to print them.
+ */
+internal class Held
+{
+    internal array<Failure> $failures = [];
 }
 
 /**
@@ -66,23 +76,24 @@ internal function search<T>(
         $value = $gen->draw($d);
         $random = $d->source();
 
-        if ($d->rejected() || !$fails($value)) {
+        if ($d->rejected || !$fails($value)) {
             continue;
         }
 
         $shrinker = Shrinker(function(const array<uint64>& $choices) : array<uint64>? {
             $replay = Draws(replay: $choices);
             $candidate = $gen->draw($replay);
-            if ($replay->rejected() || !$fails($candidate)) {
+            if ($replay->rejected || !$fails($candidate)) {
                 return null;
             }
-            return $replay->used();
+            return $replay->used;
         });
 
-        $first = $d->used();
+        $first = $d->used;
         $smallest = $shrinker->shrink($first);
         $replay = Draws(replay: $smallest);
         $last = $gen->draw($replay);
+        $fails($last);
 
         $original = $gen->show($value);
         $shown = $gen->show($last);
@@ -95,7 +106,7 @@ internal function search<T>(
         $detail->append($caughtText);
 
         $tally->checks = $checks;
-        fail("property failed on run {$run} of {$runs}", $at, $actual: $shown, $detail: $detail, $inline: true);
+        fail("property failed on run {$run} of {$runs}", $at, $actual: $shown, $detail: $detail);
         return;
     }
 

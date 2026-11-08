@@ -292,9 +292,21 @@ public function same(const json::Value& $a, const json::Value& $b) : bool
 {
     if ($a->isNumber() && $b->isNumber()) {
         if ($a->isInt() && $b->isInt()) {
-            return ($a->asInt() ?? 0) == ($b->asInt() ?? 0);
+            int64 $ia = guard $a->asInt() else {
+                return false;
+            };
+            int64 $ib = guard $b->asInt() else {
+                return false;
+            };
+            return $ia == $ib;
         }
-        return ($a->asFloat() ?? 0.0) == ($b->asFloat() ?? 0.0);
+        float64 $fa = guard $a->asFloat() else {
+            return false;
+        };
+        float64 $fb = guard $b->asFloat() else {
+            return false;
+        };
+        return $fa == $fb;
     }
 
     if ($a->isNull() || $b->isNull()) {
@@ -302,11 +314,23 @@ public function same(const json::Value& $a, const json::Value& $b) : bool
     }
 
     if ($a->isBool() && $b->isBool()) {
-        return ($a->asBool() ?? false) == ($b->asBool() ?? false);
+        bool $ba = guard $a->asBool() else {
+            return false;
+        };
+        bool $bb = guard $b->asBool() else {
+            return false;
+        };
+        return $ba == $bb;
     }
 
     if ($a->isStr() && $b->isStr()) {
-        return ($a->asStr() ?? '') == ($b->asStr() ?? '');
+        string $sa = guard $a->asStr() else {
+            return false;
+        };
+        string $sb = guard $b->asStr() else {
+            return false;
+        };
+        return $sa == $sb;
     }
 
     if ($a->isArray() && $b->isArray()) {
@@ -332,8 +356,10 @@ public function same(const json::Value& $a, const json::Value& $b) : bool
         if ($a->count() != $b->count()) {
             return false;
         }
-        ordered_map<string, json::Value> $none = [];
-        foreach ($a->asObject() ?? $none as $key => const &$x) {
+        $object = guard $a->asObject() else {
+            return false;
+        };
+        foreach ($object as $key => const &$x) {
             $y = guard $b->get($key) else {
                 return false;
             };

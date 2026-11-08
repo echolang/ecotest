@@ -2,7 +2,7 @@
  * Snapshot files against a temp directory: written, matched, changed, updated, refused.
  */
 
-use ecotest::{expect, Snapshot, TempDir, Batch};
+use ecotest::{expect, Snapshot, TempDir};
 
 test a_snapshot_needs_the_test_identity
 {
@@ -120,8 +120,6 @@ test an_update_that_cannot_be_written_fails
 
 test a_bench_stops_growing_its_batch_at_the_ceiling
 {
-    Batch::$ceiling = 4;
     ecotest::bench('nothing', function() : void {
-    }, budget: .millis(1));
-    expect(Batch::$ceiling)->is(4);
+    }, budget: .millis(1), maxBatch: 4);
 }

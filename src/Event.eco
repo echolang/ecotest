@@ -3,103 +3,171 @@ namespace ecotest;
 use ecotest::{jsonl, protocol};
 
 /**
- * One line of the test's event file, built field by field. `emit()` hands it to the session, which
- * drops it when the run has no event file.
+ * Starts an event line of `$type`.
  */
-public class Event
+private function start(const string& $type) : string
 {
-    /**
-     * The line so far, without its closing brace.
-     */
-    internal string $line = '';
+    string $line = '{"v":';
+    $line->append(str::from(protocol::VERSION));
+    $line->append(',"type":');
+    $line->append(jsonl::quote($type));
+    return $line;
+}
 
-    public constructor(const string& $type)
-    {
-        $this->line = '{"v":';
-        $this->line->append(str::from(protocol::VERSION));
-        $this->line->append(',"type":');
-        $this->line->append(jsonl::quote($type));
-    }
+/**
+ * Writes the separator and the quoted key of the next field.
+ */
+private function key(string& $line, const string& $name) : void
+{
+    $line->append(',');
+    $line->append(jsonl::quote($name));
+    $line->append(':');
+}
 
-    /**
-     * Adds a string field.
-     */
-    public function text(const string& $key, const string& $value) : Event
-    {
-        $this->key($key);
-        $this->line->append(jsonl::quote($value));
-        return $this;
-    }
+private function text(string& $line, const string& $name, const string& $value) : void
+{
+    key($line, $name);
+    $line->append(jsonl::quote($value));
+}
 
-    /**
-     * Adds an integer field.
-     */
-    public function number(const string& $key, int64 $value) : Event
-    {
-        $this->key($key);
-        $this->line->append("{$value}");
-        return $this;
-    }
+private function number(string& $line, const string& $name, int64 $value) : void
+{
+    key($line, $name);
+    $line->append("{$value}");
+}
 
-    /**
-     * Adds a `true` or `false` field.
-     */
-    public function flag(const string& $key, bool $value) : Event
-    {
-        $this->key($key);
-        if ($value) {
-            $this->line->append('true');
-        } else {
-            $this->line->append('false');
+private function texts(string& $line, const string& $name, const array<string>& $values) : void
+{
+    key($line, $name);
+    $line->append('[');
+    for (usize $i = 0; $i < $values->count(); $i++) {
+        if ($i > 0) {
+            $line->append(',');
         }
-        return $this;
+        $line->append(jsonl::quote($values[$i]));
     }
+    $line->append(']');
+}
 
-    /**
-     * Adds a list of strings.
-     */
-    public function texts(const string& $key, const array<string>& $values) : Event
-    {
-        $this->key($key);
-        $this->line->append('[');
+private function at(string& $line, const std::src::location& $at) : void
+{
+    text($line, 'file', string($at->file));
+    number($line, 'line', $at->line as int64);
+    number($line, 'column', $at->column as int64);
+}
 
-        for (usize $i = 0; $i < $values->count(); $i++) {
-            if ($i > 0) {
-                $this->line->append(',');
-            }
-            $this->line->append(jsonl::quote($values[$i]));
-        }
+private function finish(string& $line) : void
+{
+    $line->append('}');
+    Session::write($line);
+}
 
-        $this->line->append(']');
-        return $this;
-    }
+/**
+ * A failed check.
+ */
+internal function emitFail(const Failure& $f) : void
+{
+    $line = start(protocol::FAIL);
+    text($line, 'summary', $f->summary);
+    text($line, 'expected', $f->expected);
+    text($line, 'actual', $f->actual);
+    text($line, 'detail', $f->detail);
+    texts($line, 'context', $f->context);
+    at($line, $f->at);
+    finish($line);
+}
 
-    /**
-     * Adds `file`, `line` and `column` from a source site.
-     */
-    public function at(const std::src::location& $at) : Event
-    {
-        $this->text('file', string($at->file));
-        $this->number('line', $at->line as int64);
-        $this->number('column', $at->column as int64);
-        return $this;
-    }
+/**
+ * A stop no check reported.
+ */
+internal function emitCrash(
+    const string& $headline,
+    const string& $message,
+    const string& $file,
+    int64 $line
+) : void {
+    $out = start(protocol::CRASH);
+    text($out, 'headline', $headline);
+    text($out, 'message', $message);
+    text($out, 'file', $file);
+    number($out, 'line', $line);
+    finish($out);
+}
 
-    /**
-     * Writes the separator and the quoted key of the next field.
-     */
-    private function key(const string& $key) : void
-    {
-        $this->line->append(',');
-        $this->line->append(jsonl::quote($key));
-        $this->line->append(':');
-    }
+/**
+ * The test ended itself as skipped.
+ */
+internal function emitSkip(const string& $reason, const std::src::location& $at) : void
+{
+    $line = start(protocol::SKIP);
+    text($line, 'reason', $reason);
+    at($line, $at);
+    finish($line);
+}
 
-    /**
-     * Appends the line to the test's event file, if the run has one.
-     */
-    public const function emit() : void
-    {
-        Session::write("{$this}");
-    }
+/**
+ * A note the test recorded.
+ */
+internal function emitNote(const string& $text) : void
+{
+    $line = start(protocol::NOTE);
+    text($line, 'text', $text);
+    finish($line);
+}
+
+/**
+ * A named number the test recorded.
+ */
+internal function emitMetric(const string& $name, int64 $value) : void
+{
+    $line = start(protocol::METRIC);
+    text($line, 'name', $name);
+    number($line, 'value', $value);
+    finish($line);
+}
+
+/**
+ * A timing from `bench`.
+ */
+internal function emitBench(const string& $label, int64 $median, int64 $slow, int64 $calls) : void
+{
+    $line = start(protocol::BENCH);
+    text($line, 'label', $label);
+    number($line, 'p50_ns', $median);
+    number($line, 'p95_ns', $slow);
+    number($line, 'calls', $calls);
+    finish($line);
+}
+
+/**
+ * How many checks the test made.
+ */
+internal function emitChecks(const string& $path, int64 $count) : void
+{
+    $line = start(protocol::CHECKS);
+    number($line, 'count', $count);
+    $line->append('}');
+    Session::append($path, $line);
+}
+
+/**
+ * A snapshot file the test wrote for the first time.
+ */
+internal function emitSnapshotNew(const string& $path, const std::src::location& $at) : void
+{
+    $line = start(protocol::SNAPSHOT_NEW);
+    text($line, 'path', $path);
+    at($line, $at);
+    finish($line);
+}
+
+/**
+ * A snapshot file the test rewrote under `ECOTEST_UPDATE`.
+ */
+internal function emitSnapshotUpdated(const string& $path, const std::src::location& $at) : void
+{
+    $line = start(protocol::SNAPSHOT_UPDATED);
+    text($line, 'path', $path);
+    at($line, $at);
+    finish($line);
 }

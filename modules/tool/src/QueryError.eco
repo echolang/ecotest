@@ -1,0 +1,30 @@
+namespace ecotest::cli;
+
+/**
+ * Why a query over stored coverage cannot be answered.
+ */
+public enum QueryError
+{
+    /**
+     * Usage was refused: a spec that does not parse.
+     */
+    case usage(string $why);
+
+    /**
+     * There is no coverage to read, or it cannot be used.
+     */
+    case none(string $why);
+}
+
+namespace str;
+
+/**
+ * The reason in words.
+ */
+public function from(const ecotest::cli::QueryError& $e) : string
+{
+    return match ($e) {
+        .usage($why) => $why,
+        .none($why) => $why,
+    };
+}

@@ -346,12 +346,12 @@ test an_event_line_is_valid_utf8_whatever_the_test_printed
     expect(ecotest::jsonl::quote('ä€😀'))->is('"ä€😀"');
 }
 
-test a_summary_that_names_both_values_says_them_once
+test a_failure_prints_expected_and_got_when_it_has_them
 {
-    $f = ecotest::Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2', $inline: true);
+    $f = ecotest::Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2');
     $g = ecotest::Failure('lists differ: 1 vs 2', std::src::here(), $expected: '1', $actual: '2');
 
-    expect("{$f}")->is('expected 1, got 2');
+    expect("{$f}")->is("expected 1, got 2\n  expected: 1\n       got: 2");
     expect("{$g}")->is("lists differ: 1 vs 2\n  expected: 1\n       got: 2");
 }
 

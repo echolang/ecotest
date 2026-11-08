@@ -48,7 +48,7 @@ public class MapExpect<K, V>
             $k = show::item($key);
             $w = show::item($want);
             $g = show::item($got);
-            fail("at {$k}: expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+            fail("at {$k}: expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g);
         }
 
         return $this;

@@ -114,8 +114,8 @@ public function main(const array<string>& $argv) : int32
     }
 
     $tool = Tool();
-    guard settle($tool, $parsed, Flags($project, $echoc, $buildDir, $coverage, $html, $repeat, $module, $since, $format, $style, $filter, $define, $target, $timeout, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep)) else ($why) {
-        files::warn($why);
+    guard settle($tool, $parsed, Flags($project, $echoc, $buildDir, $coverage, $html, $repeat, $module, $since, $format, $style, $filter, $define, $target, $timeout, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep)) else ($e) {
+        files::warn("{$e}");
         return 2;
     };
     $tool->live = .from($parsed, $app, .stderr);
@@ -150,7 +150,12 @@ public function main(const array<string>& $argv) : int32
         return $tool->who($parsed->positionals[0]);
     }
 
-    return $tool->affected();
+    if ($subject == 'affected') {
+        return $tool->affected();
+    }
+
+    files::warn("unknown command {$subject}");
+    return 2;
 }
 
 /**
@@ -185,7 +190,7 @@ internal struct Flags
  * is not one, a percentage outside 0 to 100, a repeat count of 0, a ref git would read as an
  * option. A flag that is wrong never quietly turns into a default or switches a gate off.
  */
-internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flags& $f) : status<string>
+internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flags& $f) : status<ConfigError>
 {
     Invocation& $invocation = $tool->echoc;
     $invocation->project = paths::resolve(std::env::cwd(), $parsed->value($f->project));
@@ -202,22 +207,22 @@ internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flag
     $tool->style = .of($parsed->value($f->style));
 
     if ($parsed->stated($f->repeat)) {
-        $n = guard count('--repeat', $parsed->value($f->repeat), 1) else ($why) {
-            return .error($why);
+        $n = guard count('--repeat', $parsed->value($f->repeat), 1) else ($e) {
+            return .error($e);
         };
         $invocation->repeat = $n;
     }
 
     if ($parsed->stated($f->keep)) {
-        $n = guard count('--keep', $parsed->value($f->keep), 1) else ($why) {
-            return .error($why);
+        $n = guard count('--keep', $parsed->value($f->keep), 1) else ($e) {
+            return .error($e);
         };
         $tool->keep = $n;
     }
 
     if ($parsed->stated($f->seed)) {
         $n = guard str::uint($parsed->value($f->seed)) else {
-            return .error("--seed takes a whole number, not '{$parsed->value($f->seed)}'");
+            return .error(.badFlag('--seed', "--seed takes a whole number, not '{$parsed->value($f->seed)}'"));
         };
         $tool->seed = $n;
     }
@@ -225,7 +230,7 @@ internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flag
     if ($parsed->stated($f->since)) {
         $ref = $parsed->value($f->since);
         if ($ref->empty() || $ref->starts('-')) {
-            return .error("--since takes a git ref, not '{$ref}'");
+            return .error(.badFlag('--since', "--since takes a git ref, not '{$ref}'"));
         }
     }
 
@@ -242,8 +247,8 @@ internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flag
         $invocation->forwarded[] = $parsed->value($f->target);
     }
     if ($parsed->stated($f->timeout)) {
-        $ms = guard count('--timeout', $parsed->value($f->timeout), 1) else ($why) {
-            return .error($why);
+        $ms = guard count('--timeout', $parsed->value($f->timeout), 1) else ($e) {
+            return .error($e);
         };
         $invocation->forwarded[] = '--timeout';
         $invocation->forwarded[] = "{$ms}";
@@ -251,30 +256,30 @@ internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flag
 
     // a gate not given is off; ecotest.json may still set the line gate
     if ($parsed->stated($f->minCoverage)) {
-        $p = guard percent('--min-coverage', $parsed->value($f->minCoverage)) else ($why) {
-            return .error($why);
+        $p = guard percent('--min-coverage', $parsed->value($f->minCoverage)) else ($e) {
+            return .error($e);
         };
         $tool->gates->minLines = $p;
     }
     if ($parsed->stated($f->minBranches)) {
-        $p = guard percent('--min-branch-coverage', $parsed->value($f->minBranches)) else ($why) {
-            return .error($why);
+        $p = guard percent('--min-branch-coverage', $parsed->value($f->minBranches)) else ($e) {
+            return .error($e);
         };
         $tool->gates->minBranches = $p;
     }
     if ($parsed->stated($f->minDiff)) {
-        $p = guard percent('--min-diff-coverage', $parsed->value($f->minDiff)) else ($why) {
-            return .error($why);
+        $p = guard percent('--min-diff-coverage', $parsed->value($f->minDiff)) else ($e) {
+            return .error($e);
         };
         $tool->gates->minDiff = $p;
     }
 
     if ($parsed->stated($f->maxFlaky)) {
-        $n = guard count('--max-flaky', $parsed->value($f->maxFlaky), 0) else ($why) {
-            return .error($why);
+        $n = guard count('--max-flaky', $parsed->value($f->maxFlaky), 0) else ($e) {
+            return .error($e);
         };
         if ($invocation->repeat < 2) {
-            return .error('--max-flaky needs --repeat 2 or more: a single pass finds no flaky test');
+            return .error(.badFlag('--max-flaky', '--max-flaky needs --repeat 2 or more: a single pass finds no flaky test'));
         }
         $tool->gates->maxFlaky = $n as int64;
     }
@@ -285,13 +290,13 @@ internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flag
 /**
  * The whole number `$raw` given to `$flag`, at least `$min`, or why it is refused.
  */
-internal function count(const string& $flag, const string& $raw, usize $min) : result<usize, string>
+internal function count(const string& $flag, const string& $raw, usize $min) : result<usize, ConfigError>
 {
     $n = guard str::uint($raw) else {
-        return .error("{$flag} takes a whole number, not '{$raw}'");
+        return .error(.badFlag($flag, "{$flag} takes a whole number, not '{$raw}'"));
     };
     if ($n < ($min as uint64)) {
-        return .error("{$flag} takes at least {$min}, not {$n}");
+        return .error(.badFlag($flag, "{$flag} takes at least {$min}, not {$n}"));
     }
     return .ok($n as usize);
 }
@@ -299,13 +304,13 @@ internal function count(const string& $flag, const string& $raw, usize $min) : r
 /**
  * The percentage `$raw` given to `$flag`, or why it is refused.
  */
-internal function percent(const string& $flag, const string& $raw) : result<float64, string>
+internal function percent(const string& $flag, const string& $raw) : result<float64, ConfigError>
 {
     $p = guard str::float($raw) else {
-        return .error("{$flag} takes a percentage, not '{$raw}'");
+        return .error(.badFlag($flag, "{$flag} takes a percentage, not '{$raw}'"));
     };
     if ($p < 0.0 || $p > 100.0) {
-        return .error("{$flag} takes a percentage from 0 to 100, not {$raw}");
+        return .error(.badFlag($flag, "{$flag} takes a percentage from 0 to 100, not {$raw}"));
     }
     return .ok($p);
 }

@@ -1,4 +1,4 @@
-use ecotest::http::{Api, jsonpath};
+use ecotest::http::{Api, jsonpath, live};
 
 test checks_pass_on_a_live_server
 {
@@ -59,7 +59,7 @@ test an_unreachable_service_fails_the_first_check
 
 test a_missing_service_skips
 {
-    $api = Api(service: 'not-started-anywhere');
+    $api = live(service: 'not-started-anywhere');
     $api->get('/')->ok();
 }
 

@@ -28,12 +28,12 @@ public class Draws
     /**
      * Every answer handed out, in order, as it was actually used.
      */
-    private array<uint64> $used = [];
+    public array<uint64> $used = [];
 
     /**
      * True once a generator gave up on this case, as a filter does when nothing it drew passed.
      */
-    private bool $rejected = false;
+    public bool $rejected = false;
 
     /**
      * Records fresh answers from `$random`.
@@ -55,20 +55,11 @@ public class Draws
     }
 
     /**
-     * A number in `[0, $max]`.
-     */
-    public function draw(uint64 $max) : uint64
-    {
-        array<uint64> $none = [];
-        return $this->draw($max, $none);
-    }
-
-    /**
      * A number in `[0, $max]`. While recording, about one answer in eight is one of `$edges`, the
      * answers a generator knows to be interesting (a range's ends, an empty list), so they come up
      * far more often than chance would have them.
      */
-    public function draw(uint64 $max, const array<uint64>& $edges) : uint64
+    public function draw(uint64 $max, const array<uint64>& $edges = []) : uint64
     {
         uint64 $v = 0;
 
@@ -129,22 +120,6 @@ public class Draws
     public function reject() : void
     {
         $this->rejected = true;
-    }
-
-    /**
-     * True when a generator gave up on this case.
-     */
-    public const function rejected() : bool
-    {
-        return $this->rejected;
-    }
-
-    /**
-     * Every answer handed out so far, in order.
-     */
-    public const function used() : array<uint64>
-    {
-        return $this->used;
     }
 
     /**

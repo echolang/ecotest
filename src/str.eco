@@ -14,7 +14,7 @@ public function from(const ecotest::Failure& $failure) : string
 {
     string $out = $failure->summary;
 
-    if ((!$failure->expected->empty() || !$failure->actual->empty()) && !$failure->inline) {
+    if (!$failure->expected->empty() || !$failure->actual->empty()) {
         $out->append("\n  expected: {$failure->expected}");
         $out->append("\n       got: {$failure->actual}");
     }
@@ -31,12 +31,3 @@ public function from(const ecotest::Failure& $failure) : string
     return $out;
 }
 
-/**
- * The finished event line, without a trailing newline.
- */
-public function from(const ecotest::Event& $event) : string
-{
-    string $out = $event->line;
-    $out->append('}');
-    return $out;
-}

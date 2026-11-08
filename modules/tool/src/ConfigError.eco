@@ -15,6 +15,11 @@ public enum ConfigError
      * The field `$field` of the file at `$path` is not `$expected`.
      */
     case badValue(string $path, string $field, string $expected);
+
+    /**
+     * Flag `$flag` on the command line is not `$expected`.
+     */
+    case badFlag(string $flag, string $expected);
 }
 
 namespace str;
@@ -27,5 +32,6 @@ public function from(const ecotest::cli::ConfigError& $e) : string
     return match ($e) {
         .malformed($path, $cause) => "{$path} does not parse: {$cause->message()}",
         .badValue($path, $field, $expected) => "{$path}: {$field} must be {$expected}",
+        .badFlag($flag, $expected) => $expected,
     };
 }

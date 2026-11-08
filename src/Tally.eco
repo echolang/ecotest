@@ -1,7 +1,5 @@
 namespace ecotest;
 
-use ecotest::protocol;
-
 /**
  * The count of checks a test made, written as one `checks` event when the process tears down. It
  * keeps its own copy of the event path because static teardown has no order to rely on.
@@ -23,8 +21,7 @@ internal class Tally
         }
 
         $this->flushed = true;
-        $event = Event(protocol::CHECKS)->number('count', $this->checks);
-        Session::append($this->path, "{$event}");
+        emitChecks($this->path, $this->checks);
     }
 
     destructor()

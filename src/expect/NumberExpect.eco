@@ -1,28 +1,23 @@
 namespace ecotest;
 
 /**
- * Checks on a signed integer. Every signed width widens to `int64` on the way in.
+ * Checks on a number. Signed widths widen to `int64` on the way in, unsigned widths including
+ * `usize` to `uint64`.
  */
-public class NumberExpect
+public class NumericExpect<T>
 {
     /**
      * The value under test.
      */
-    public int64 $value;
+    public T $value;
 
     /**
      * The number equals `$want`.
      */
     #[caller]
-    public const function is(int64 $want) : NumberExpect
+    public const function is(T $want) : NumericExpect<T>
     {
-        Session::checked();
-
-        if ($this->value == $want) {
-            return $this;
-        }
-
-        fail("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}", $inline: true);
+        check($this->value == $want, Failure("expected {$want}, got {$this->value}", std::src::caller(), $expected: "{$want}", $actual: "{$this->value}"));
         return $this;
     }
 
@@ -30,15 +25,9 @@ public class NumberExpect
      * The number differs from `$other`.
      */
     #[caller]
-    public const function isNot(int64 $other) : NumberExpect
+    public const function isNot(T $other) : NumericExpect<T>
     {
-        Session::checked();
-
-        if ($this->value != $other) {
-            return $this;
-        }
-
-        fail("expected anything but {$other}", std::src::caller());
+        check(!($this->value == $other), Failure("expected anything but {$other}", std::src::caller()));
         return $this;
     }
 
@@ -46,15 +35,9 @@ public class NumberExpect
      * The number is greater than `$bound`.
      */
     #[caller]
-    public const function above(int64 $bound) : NumberExpect
+    public const function above(T $bound) : NumericExpect<T>
     {
-        Session::checked();
-
-        if ($this->value > $bound) {
-            return $this;
-        }
-
-        fail("expected more than {$bound}, got {$this->value}", std::src::caller());
+        check($this->value > $bound, Failure("expected more than {$bound}, got {$this->value}", std::src::caller(), $expected: "{$bound}", $actual: "{$this->value}"));
         return $this;
     }
 
@@ -62,15 +45,9 @@ public class NumberExpect
      * The number is less than `$bound`.
      */
     #[caller]
-    public const function below(int64 $bound) : NumberExpect
+    public const function below(T $bound) : NumericExpect<T>
     {
-        Session::checked();
-
-        if ($this->value < $bound) {
-            return $this;
-        }
-
-        fail("expected less than {$bound}, got {$this->value}", std::src::caller());
+        check($this->value < $bound, Failure("expected less than {$bound}, got {$this->value}", std::src::caller(), $expected: "{$bound}", $actual: "{$this->value}"));
         return $this;
     }
 
@@ -78,15 +55,9 @@ public class NumberExpect
      * The number lies in `[$low, $high]`, both ends included.
      */
     #[caller]
-    public const function between(int64 $low, int64 $high) : NumberExpect
+    public const function between(T $low, T $high) : NumericExpect<T>
     {
-        Session::checked();
-
-        if ($this->value >= $low && $this->value <= $high) {
-            return $this;
-        }
-
-        fail("expected {$low} to {$high}, got {$this->value}", std::src::caller());
+        check($this->value >= $low && $this->value <= $high, Failure("expected {$low} to {$high}, got {$this->value}", std::src::caller(), $expected: "{$low}..{$high}", $actual: "{$this->value}"));
         return $this;
     }
 }

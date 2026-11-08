@@ -4,7 +4,7 @@ namespace ecotest::http;
  * A service a single test starts and stops itself: the program runs until the value goes, and
  * also when the test stops early on a failed check, a crash or a skip. Its stdout and stderr go to
  * a log file, which a failure to get ready shows. For services shared by many tests, list them in
- * `ecotest.json` and use `Api(service:)` instead.
+ * `ecotest.json` and use `live(service:)` instead.
  *
  * Only the direct child is killed. A wrapper script that starts the real server has to `exec` it,
  * or the server outlives the test.
@@ -61,7 +61,7 @@ public class Service
 
         // a leftover server would pass the ready check for a program that never started
         if (probe($ready) != null) {
-            ecotest::Failure("something already answers at {$ready}", $at)->stop();
+            ecotest::Session::stop(ecotest::Failure("something already answers at {$ready}", $at));
         }
 
         $file = guard std::io::open($this->log, .write) else ($e) {
@@ -88,8 +88,9 @@ public class Service
             Service::reap($held, $log);
         });
 
+        int64 $ms = $limit->as_millis();
         $started = std::time::instant::now();
-        while ($started->elapsed()->as_millis() < $limit->as_millis()) {
+        while ($started->elapsed()->as_millis() < $ms) {
             $exited = guard $this->child->try_wait() else {
                 break;
             };
@@ -97,20 +98,18 @@ public class Service
                 $status = guard $exited;
                 $tail = Service::tail($this->output());
                 $this->halt();
-                ecotest::Failure("{$program} exited ({$status}) before it was ready at {$ready}", $at, $detail: $tail)->stop();
+                ecotest::Session::stop(ecotest::Failure("{$program} exited ({$status}) before it was ready at {$ready}", $at, $detail: $tail));
             }
 
-            int64 $code = probe($ready) ?? 0;
-            if ($code >= 200 && $code < 400) {
+            if (waitReady($ready, 0)) {
                 return;
             }
             std::time::sleep(.millis(50));
         }
 
-        int64 $ms = $limit->as_millis();
         $tail = Service::tail($this->output());
         $this->halt();
-        ecotest::Failure("{$program} was not ready at {$ready} within {$ms} ms", $at, $detail: $tail)->stop();
+        ecotest::Session::stop(ecotest::Failure("{$program} was not ready at {$ready} within {$ms} ms", $at, $detail: $tail));
     }
 
     /**
@@ -189,6 +188,24 @@ public class Service
             return $text;
         }
         return $text->sub($text->size() - 2000, 2000);
+    }
+}
+
+/**
+ * True when `$url` answers a GET with 2xx or 3xx inside `$limitMs`. `$limitMs` of 0 is one probe.
+ */
+internal function waitReady(const string& $url, int64 $limitMs) : bool
+{
+    $started = std::time::instant::now();
+    while (true) {
+        int64 $status = probe($url) ?? 0;
+        if ($status >= 200 && $status < 400) {
+            return true;
+        }
+        if ($started->elapsed()->as_millis() >= $limitMs) {
+            return false;
+        }
+        std::time::sleep(.millis(50));
     }
 }
 

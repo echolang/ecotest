@@ -137,14 +137,14 @@ test a_replay_past_its_answers_draws_zero
     $d = Draws(replay: [5]);
     expect($d->draw(9))->is(5);
     expect($d->draw(9))->is(0);
-    expect($d->used())->is([5, 0]);
+    expect($d->used)->is([5, 0]);
 }
 
 test recording_keeps_every_answer
 {
     $d = Draws(record: Random(11));
     $v = gen::lists(gen::ints(0, 9))->draw($d);
-    $again = made(gen::lists(gen::ints(0, 9)), $d->used());
+    $again = made(gen::lists(gen::ints(0, 9)), $d->used);
 
     expect($again)->is($v);
 }

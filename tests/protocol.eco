@@ -1,4 +1,4 @@
-use ecotest::{expect, protocol, Event};
+use ecotest::{expect, protocol};
 
 test the_key_is_echocs_coverage_file_rule
 {
@@ -8,8 +8,10 @@ test the_key_is_echocs_coverage_file_rule
 
 test every_event_carries_the_version
 {
-    $event = Event(protocol::NOTE)->text('text', 'hi');
-    expect("{$event}")->starts('{"v":1,"type":"note"');
+    $lines = eventsOf(function() : void {
+        ecotest::note('hi');
+    });
+    expect($lines[0])->starts('{"v":1,"type":"note"');
 }
 
 test a_service_variable_is_upper_case

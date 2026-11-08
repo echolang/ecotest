@@ -28,7 +28,7 @@ public class Expect<T>
 
         $w = show::item($want);
         $g = show::item($this->value);
-        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g);
         return $this;
     }
 
@@ -67,7 +67,7 @@ public class Expect<T>
             $summary = "expected {$what}, got {$got}";
         }
 
-        fail($summary, std::src::caller(), $actual: $got, $inline: true);
+        fail($summary, std::src::caller(), $actual: $got);
         return $this;
     }
 }

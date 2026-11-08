@@ -1,5 +1,5 @@
 use ecotest::expect;
-use ecotest::{Session, Event, Failure, Random};
+use ecotest::{Session, Failure, Random};
 use ecotest::{diff, jsonl, show};
 
 test json_quotes_controls_and_quotes
@@ -24,8 +24,10 @@ test session_key_matches_the_coverage_file_rule
 
 test an_event_renders_one_json_line
 {
-    $event = Event('metric')->text('name', 'rows')->number('value', 12)->texts('tags', ['a', 'b']);
-    expect("{$event}")->is('{"v":1,"type":"metric","name":"rows","value":12,"tags":["a","b"]}');
+    $lines = eventsOf(function() : void {
+        ecotest::metric('rows', 12);
+    });
+    expect($lines[0])->is('{"v":1,"type":"metric","name":"rows","value":12}');
 }
 
 test equal_texts_have_no_diff
@@ -52,10 +54,10 @@ test a_failure_renders_values_context_and_detail
     expect("{$f}")->is("values differ\n  expected: 1\n       got: 2\n  more\n  in row 3");
 }
 
-test a_failure_quoting_its_values_says_them_once
+test a_failure_prints_its_values_under_the_summary
 {
-    $f = Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2', $inline: true);
-    expect("{$f}")->is('expected 1, got 2');
+    $f = Failure('expected 1, got 2', std::src::here(), $expected: '1', $actual: '2');
+    expect("{$f}")->is("expected 1, got 2\n  expected: 1\n       got: 2");
 }
 
 test json_spells_other_control_bytes_as_unicode_escapes

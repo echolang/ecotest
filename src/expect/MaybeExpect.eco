@@ -38,14 +38,14 @@ public class MaybeExpect<T>
 
         $got = guard $this->value else {
             $w = show::item($want);
-            fail("expected {$w}, got null", std::src::caller(), $expected: $w, $actual: 'null', $inline: true);
+            fail("expected {$w}, got null", std::src::caller(), $expected: $w, $actual: 'null');
             return $this;
         };
 
         if (!($got == $want)) {
             $w = show::item($want);
             $g = show::item($got);
-            fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+            fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g);
         }
 
         return $this;

@@ -297,17 +297,17 @@ The tool starts each service, waits until it is ready, exports `ECOTEST_<NAME>_U
 #[requires: "echolang/ecotest/modules/http" { version: "^0.2", source: git "https://github.com/echolang/ecotest" }]
 ```
 
-One `Api`, three constructors:
+One `Api`, plus `live` for a service the tool started:
 
 ```echo
-use ecotest::http::Api;
+use ecotest::http::{Api, live};
 
 $api = Api('http://127.0.0.1:8080');
-$api = Api(service: 'api');
+$api = live(service: 'api');
 $api = Api(transport: $transport);
 ```
 
-`Api(service:)` reads `ECOTEST_API_URL`. Outside `ecotest` that variable is unset and the test skips.
+`live(service:)` reads `ECOTEST_API_URL`. Outside `ecotest` that variable is unset and the test skips.
 
 ```echo
 $api->get('/users/1')
@@ -336,7 +336,7 @@ A failed check shows the exchange: the request line, the status, the headers, th
 
 A JSON snapshot is stored pretty-printed. Paths in `$redact` are replaced first, so ids and timestamps do not break it.
 
-`Service` starts a program for one test and stops it when the value goes. Shared services belong in `ecotest.json` with `Api(service:)`.
+`Service` starts a program for one test and stops it when the value goes. Shared services belong in `ecotest.json` with `live(service:)`.
 
 ## This repo
 

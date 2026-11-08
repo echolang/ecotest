@@ -13,6 +13,57 @@ namespace ecotest::protocol;
 public const int64 VERSION = 1;
 
 /**
+ * The `"type"` of an event line.
+ */
+public enum Kind : string
+{
+    case fail = 'fail';
+    case crash = 'crash';
+    case skip = 'skip';
+    case note = 'note';
+    case metric = 'metric';
+    case bench = 'bench';
+    case checks = 'checks';
+    case snapshotNew = 'snapshot-new';
+    case snapshotUpdated = 'snapshot-updated';
+
+    /**
+     * The kind `$word` names, or null.
+     */
+    public static function of(const string& $word) : Kind?
+    {
+        if ($word == 'fail') {
+            return .fail;
+        }
+        if ($word == 'crash') {
+            return .crash;
+        }
+        if ($word == 'skip') {
+            return .skip;
+        }
+        if ($word == 'note') {
+            return .note;
+        }
+        if ($word == 'metric') {
+            return .metric;
+        }
+        if ($word == 'bench') {
+            return .bench;
+        }
+        if ($word == 'checks') {
+            return .checks;
+        }
+        if ($word == 'snapshot-new') {
+            return .snapshotNew;
+        }
+        if ($word == 'snapshot-updated') {
+            return .snapshotUpdated;
+        }
+        return null;
+    }
+}
+
+/**
  * A failed check.
  */
 public const string FAIL = 'fail';

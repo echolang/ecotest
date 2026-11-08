@@ -103,7 +103,7 @@ public class Services
                 $this->env->set($spec->variable(), $spec->url);
             }
 
-            // ready after its fixed delay. an http check is ecotest-http's, made by `Api(service:)`
+            // ready after its fixed delay. an http check is ecotest-http's, made by `live(service:)`
             match ($spec->ready) {
                 .delay($ms) => {
                     if ($ms > 0) {

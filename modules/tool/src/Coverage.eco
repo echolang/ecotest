@@ -19,19 +19,19 @@ public class Coverage
     /**
      * The tests that ran any counter on a line, by `Coverage::spot`.
      */
-    private map<string, array<string>> $byLine = [];
+    private map<LineSpot, array<string>> $byLine = [];
 
     /**
      * Whether the function counter on a line ran in any test, by `Coverage::spot`.
      */
-    private map<string, bool> $fnAt = [];
+    private map<LineSpot, bool> $fnAt = [];
 
     /**
      * The lines of the function counters named `name` in a file, by `Coverage::spot` of the path
      * and the name. A type's constructors are found this way: echoc's declarations place them on
      * the type's line, their counters sit on their bodies.
      */
-    private map<string, array<int64>> $fnNamed = [];
+    private map<FnSpot, array<int64>> $fnNamed = [];
 
     /**
      * Each module's directory with its links resolved, by name, so its files compare equal to the
@@ -57,10 +57,9 @@ public class Coverage
                     continue;
                 }
                 $path = $this->where($module, $site);
-                $this->fnAt->set(Coverage::spot($path, $site->line), false);
+                $this->fnAt->set(LineSpot($path, $site->line), false);
 
-                $named = Coverage::spot($path, 0);
-                $named->append($site->function);
+                $named = FnSpot($path, $site->function);
                 if (!$this->fnNamed->has($named)) {
                     array<int64> $none = [];
                     $this->fnNamed->set($named, $none);
@@ -72,14 +71,6 @@ public class Coverage
             }
         }
         $this->map = mv $map;
-    }
-
-    /**
-     * The key of `$line` of the file at `$path`.
-     */
-    private static function spot(const string& $path, int64 $line) : string
-    {
-        return "{$path}\n{$line}";
     }
 
     /**
@@ -215,7 +206,7 @@ public class Coverage
                 }
 
                 $sum[$site->local] = $sum[$site->local] + ($n as uint64);
-                $key = Coverage::spot($this->where($module, $site), $site->line);
+                $key = LineSpot($this->where($module, $site), $site->line);
 
                 if ($site->kind == 'fn') {
                     $this->fnAt->set($key, true);
@@ -342,7 +333,7 @@ public class Coverage
      */
     public const function testsAt(const string& $path, int64 $line) : array<string>
     {
-        $key = Coverage::spot($path, $line);
+        $key = LineSpot($path, $line);
         if (!$this->byLine->has($key)) {
             array<string> $none = [];
             return $none;
@@ -365,8 +356,7 @@ public class Coverage
      */
     public const function functionsNamed(const string& $path, const string& $name) : array<int64>
     {
-        $key = Coverage::spot($path, 0);
-        $key->append($name);
+        $key = FnSpot($path, $name);
         if (!$this->fnNamed->has($key)) {
             array<int64> $none = [];
             return $none;
@@ -380,7 +370,7 @@ public class Coverage
      */
     public const function called(const string& $path, int64 $line) : bool?
     {
-        $key = Coverage::spot($path, $line);
+        $key = LineSpot($path, $line);
         if (!$this->fnAt->has($key)) {
             return null;
         }

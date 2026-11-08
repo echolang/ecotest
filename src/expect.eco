@@ -11,17 +11,17 @@ public function expect(const string& $value) : TextExpect
 /**
  * Checks on a signed integer of any width.
  */
-public function expect(int64 $value) : NumberExpect
+public function expect(int64 $value) : NumericExpect<int64>
 {
-    return NumberExpect($value);
+    return NumericExpect<int64>($value);
 }
 
 /**
  * Checks on an unsigned integer of any width, `usize` included.
  */
-public function expect(uint64 $value) : UnsignedExpect
+public function expect(uint64 $value) : NumericExpect<uint64>
 {
-    return UnsignedExpect($value);
+    return NumericExpect<uint64>($value);
 }
 
 /**

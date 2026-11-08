@@ -7,7 +7,7 @@ public enum Readiness
 {
     /**
      * Ready once `$url` answers with a 2xx or 3xx, given at most `$timeoutMs` milliseconds. The
-     * tool does not ask: it hands the check to the tests, and ecotest-http's `Api(service:)` makes
+     * tool does not ask: it hands the check to the tests, and ecotest-http's `live(service:)` makes
      * it, so the tool needs no HTTP client.
      */
     case http(string $url, int64 $timeoutMs);

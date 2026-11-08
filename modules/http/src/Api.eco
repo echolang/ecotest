@@ -40,23 +40,6 @@ public struct Api
     }
 
     /**
-     * The service ecotest started under `$name` (the `services` list of `ecotest.json`). Outside
-     * `ecotest` its `ECOTEST_<NAME>_URL` is unset and the test is skipped, not failed. When the
-     * tool also exports `ECOTEST_<NAME>_READY`, that URL has to answer with a 2xx or 3xx within
-     * `ECOTEST_<NAME>_READY_MS` first, once per process; otherwise the test stops here.
-     */
-    #[caller]
-    public constructor(service: const string& $name)
-    {
-        $at = std::src::caller();
-        string $variable = protocol::serviceVar($name);
-        $url = ecotest::needs(env: $variable, at: $at);
-        $this->base = Api::trimmed($url);
-        $this->transport = CurlTransport();
-        Api::await($name, $at);
-    }
-
-    /**
      * A service reached through `$transport`, such as an app dispatched in process.
      */
     public constructor(transport: Transport $transport, base: const string& $base = 'http://app')
@@ -185,6 +168,13 @@ public struct Api
 
         Transport $carrier = $this->transport;
         $response = $carrier->send($request);
+        if ($verb == Verb::head) {
+            $res = guard $response else {
+                return Reply(mv $request, mv $response);
+            };
+            $res->body = '';
+            return Reply(mv $request, .ok($res));
+        }
         return Reply(mv $request, mv $response);
     }
 
@@ -192,7 +182,7 @@ public struct Api
      * Waits for the ready URL the tool exported for service `$name`, once per process. Stops the
      * test at `$at` when it does not answer in time.
      */
-    private static function await(const string& $name, std::src::location $at) : void
+    internal static function await(const string& $name, std::src::location $at) : void
     {
         foreach (Api::$ready as const &$done) {
             if ($done == $name) {
@@ -211,20 +201,12 @@ public struct Api
         string $limitText = string(std::env::var($limitVar, ''));
         int64 $limit = str::int($limitText) ?? 10000;
 
-        $started = std::time::instant::now();
-        while (true) {
-            int64 $status = probe($ready) ?? 0;
-            if ($status >= 200 && $status < 400) {
-                Api::$ready[] = $name;
-                return;
-            }
-            if ($started->elapsed()->as_millis() >= $limit) {
-                break;
-            }
-            std::time::sleep(.millis(50));
+        if (waitReady($ready, $limit)) {
+            Api::$ready[] = $name;
+            return;
         }
 
-        ecotest::Failure("service {$name} was not ready at {$ready} within {$limit} ms", $at)->stop();
+        ecotest::Session::stop(ecotest::Failure("service {$name} was not ready at {$ready} within {$limit} ms", $at));
     }
 
     /**
@@ -273,4 +255,19 @@ public struct Api
         $out->append($fragment);
         return $out;
     }
+}
+
+/**
+ * The service ecotest started under `$name` (the `services` list of `ecotest.json`). Outside
+ * `ecotest` its `ECOTEST_<NAME>_URL` is unset and the test is skipped, not failed. When the
+ * tool also exports `ECOTEST_<NAME>_READY`, that URL has to answer with a 2xx or 3xx within
+ * `ECOTEST_<NAME>_READY_MS` first, once per process; otherwise the test stops here.
+ */
+#[caller]
+public function live(service: const string& $name) : Api
+{
+    $at = std::src::caller();
+    $url = ecotest::needs(env: protocol::serviceVar($name), at: $at);
+    Api::await($name, $at);
+    return Api($url);
 }

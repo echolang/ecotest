@@ -11,7 +11,7 @@ use ecotest::utf8;
 /**
  * How many bytes of a value a one-line summary shows before cutting.
  */
-internal const usize WIDTH = 120;
+public const usize WIDTH = 120;
 
 /**
  * How many bytes before the first difference `around` keeps.
@@ -72,7 +72,7 @@ internal function text(const string& $text) : string
 /**
  * `$text` cut to `WIDTH` bytes on a character boundary, with `...` where it was cut.
  */
-internal function cut(const string& $text) : string
+public function cut(const string& $text) : string
 {
     if ($text->size() <= WIDTH) {
         return $text;
@@ -105,7 +105,7 @@ internal function tail(const string& $text, usize $lines = 20) : string
 /**
  * `$text` with every line indented by `$by` spaces.
  */
-internal function indent(const string& $text, usize $by) : string
+public function indent(const string& $text, usize $by) : string
 {
     $pad = str::repeat(' ', $by);
     string $out = '';

@@ -9,14 +9,9 @@ use ecotest::cli::{doc, files};
  * query. `coverage-run` names the last finished run that measured the whole suite's coverage, the
  * one `who`, `api` and `affected` read, so a filtered run never narrows what they see.
  */
-public class Store
+public struct Store
 {
     public const string $root;
-
-    public constructor(const string& $root)
-    {
-        $this->root = $root;
-    }
 
     /**
      * A fresh run directory, named for now and never one that exists.

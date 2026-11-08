@@ -1,7 +1,5 @@
 namespace ecotest;
 
-use ecotest::protocol;
-
 /**
  * Holds failed checks until the returned value goes out of scope, then reports them all at once.
  * Bind it to a local: `$all = ecotest::soft();`.
@@ -28,18 +26,9 @@ public function context(const string& $text) : Context
  */
 public function caught(function<void()> $body) : array<Failure>
 {
-    Session::enterSoft();
-    usize $before = Session::$held->count();
+    Session::enterCaught();
     $body();
-
-    $out = arr::room<Failure>(Session::$held->count() - $before);
-    for (usize $i = $before; $i < Session::$held->count(); $i++) {
-        $out[] = Session::$held[$i];
-    }
-
-    Session::$held->truncate($before);
-    Session::leaveSoft();
-    return $out;
+    return Session::leaveCaught();
 }
 
 /**
@@ -47,7 +36,7 @@ public function caught(function<void()> $body) : array<Failure>
  */
 public function note(const string& $text) : void
 {
-    Event(protocol::NOTE)->text('text', $text)->emit();
+    emitNote($text);
 }
 
 /**
@@ -55,7 +44,7 @@ public function note(const string& $text) : void
  */
 public function metric(const string& $name, int64 $value) : void
 {
-    Event(protocol::METRIC)->text('name', $name)->number('value', $value)->emit();
+    emitMetric($name, $value);
 }
 
 /**

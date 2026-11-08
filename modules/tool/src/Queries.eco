@@ -45,25 +45,21 @@ internal struct Measured
 /**
  * The last run with coverage of every test, or the exit code after saying why there is none.
  */
-internal function measured(const Tool& $tool) : result<Measured, int32>
+internal function measured(const Tool& $tool) : result<Measured, QueryError>
 {
     $dir = guard $tool->store()->covered() else ($e) {
-        files::warn("{$e}");
-        return .error(1);
+        return .error(.none("{$e}"));
     };
 
     $run = Run(readFrom: $dir);
     $loaded = guard Coverage::load($dir, $run) else ($e) {
-        files::warn("cannot read the coverage of {$dir}: {$e}");
-        return .error(1);
+        return .error(.none("cannot read the coverage of {$dir}: {$e}"));
     };
     Coverage $c = guard $loaded else {
-        files::warn("{$dir} has no coverage; run `ecotest --coverage` first");
-        return .error(1);
+        return .error(.none("{$dir} has no coverage; run `ecotest --coverage` first"));
     };
     CoverageReport $report = guard CoverageReport::load($dir) else {
-        files::warn("{$dir} has no coverage.json; run `ecotest --coverage` again");
-        return .error(1);
+        return .error(.none("{$dir} has no coverage.json; run `ecotest --coverage` again"));
     };
 
     return .ok(Measured($dir, $c, $report));
@@ -98,32 +94,28 @@ internal function locate(const Tool& $tool, const string& $path) : string
  * The tests that ran the line `<file:line>` names, or the exit code after saying why that cannot
  * be told.
  */
-public function ran(const Tool& $tool, const string& $spec) : result<array<string>, int32>
+public function ran(const Tool& $tool, const string& $spec) : result<array<string>, QueryError>
 {
     usize $colon = text::last($spec, 58);
     if ($colon == $spec->size()) {
-        files::warn('expected <file:line>, for example src/date.eco:42');
-        return .error(2);
+        return .error(.usage('expected <file:line>, for example src/date.eco:42'));
     }
 
     $file = $spec->sub(0, $colon);
     int64 $line = guard str::int($spec->sub($colon + 1, $spec->size() - $colon - 1)) else {
-        files::warn('expected <file:line>, for example src/date.eco:42');
-        return .error(2);
+        return .error(.usage('expected <file:line>, for example src/date.eco:42'));
     };
 
-    Measured $m = guard measured($tool) else ($code) {
-        return .error($code);
+    Measured $m = guard measured($tool) else ($e) {
+        return .error($e);
     };
 
     $path = locate($tool, $file);
     $kept = guard $m->report->file($path) else {
-        files::warn("{$file} is not a file of the modules {$m->dir} reports");
-        return .error(1);
+        return .error(.none("{$file} is not a file of the modules {$m->dir} reports"));
     };
     if ($kept->hash != now($path)) {
-        files::warn("{$file} changed since {$m->dir}; its line numbers no longer match. Run `ecotest --coverage` again");
-        return .error(1);
+        return .error(.none("{$file} changed since {$m->dir}; its line numbers no longer match. Run `ecotest --coverage` again"));
     }
 
     return .ok($m->coverage->testsAt($path, $line));
@@ -134,8 +126,12 @@ public function ran(const Tool& $tool, const string& $spec) : result<array<strin
  */
 public function who(const Tool& $tool, const string& $spec) : int32
 {
-    $ids = guard ran($tool, $spec) else ($code) {
-        return $code;
+    $ids = guard ran($tool, $spec) else ($e) {
+        files::warn("{$e}");
+        return match ($e) {
+            .usage($why) => 2,
+            .none($why) => 1,
+        };
     };
 
     if ($ids->empty()) {
@@ -155,8 +151,9 @@ public function who(const Tool& $tool, const string& $spec) : int32
  */
 public function api(const Tool& $tool) : int32
 {
-    $f = guard judged($tool) else ($code) {
-        return $code;
+    $f = guard judged($tool) else ($e) {
+        files::warn("{$e}");
+        return 1;
     };
 
     usize $called = $f->decided - $f->never->count();
@@ -177,10 +174,10 @@ public function api(const Tool& $tool) : int32
  * Every public function and method of the reported modules judged against the stored coverage,
  * or the exit code after saying why it cannot be.
  */
-public function judged(const Tool& $tool) : result<ApiFindings, int32>
+public function judged(const Tool& $tool) : result<ApiFindings, QueryError>
 {
-    Measured $m = guard measured($tool) else ($code) {
-        return .error($code);
+    Measured $m = guard measured($tool) else ($e) {
+        return .error($e);
     };
 
     // `build` writes a binary before it prints; a scratch directory takes it, never the run
@@ -188,20 +185,17 @@ public function judged(const Tool& $tool) : result<ApiFindings, int32>
     int64 $stamp = std::time::timestamp::now()->unix_millis();
     $scratch = std::env::join(std::env::tmp(), "ecotest-decls-{$pid}-{$stamp}");
     guard paths::mkdirs($scratch) else ($e) {
-        files::warn("cannot write {$scratch}: {$e}");
-        return .error(1);
+        return .error(.none("cannot write {$scratch}: {$e}"));
     };
 
     $decls = $tool->echoc->command(['build', '-p', 'decls', '-o', std::env::join($scratch, 'decls')]);
     $o = $decls->output();
     $removed = paths::removeTree($scratch);
     $out = guard $o else {
-        files::warn("cannot run {$tool->echoc->program}");
-        return .error(1);
+        return .error(.none("cannot run {$tool->echoc->program}"));
     };
     $doc = guard json::parse($out->stdout) else {
-        files::warn('echoc -p decls did not answer with JSON');
-        return .error(1);
+        return .error(.none('echoc -p decls did not answer with JSON'));
     };
 
     $f = ApiFindings();
@@ -318,15 +312,14 @@ internal function judge(const Measured& $m, const string& $module, const json::V
  * the old side when the run saw the file as it was at the ref, the new side when it saw it as it
  * is now. Coverage of neither is stale and refused.
  */
-public function select(const Tool& $tool) : result<Selection, int32>
+public function select(const Tool& $tool) : result<Selection, QueryError>
 {
-    Measured $m = guard measured($tool) else ($code) {
-        return .error($code);
+    Measured $m = guard measured($tool) else ($e) {
+        return .error($e);
     };
 
     $diff = guard GitDiff::since($tool->git, $tool->echoc->project, $tool->since) else ($e) {
-        files::warn("{$e}");
-        return .error(1);
+        return .error(.none("{$e}"));
     };
 
     $sel = Selection();
@@ -350,8 +343,7 @@ public function select(const Tool& $tool) : result<Selection, int32>
         } else {
             $old = GitDiff::old($tool->git, $tool->echoc->project, $tool->since, $changed->relative)->or('');
             if (digest::fnv($old) != $kept->hash) {
-                files::warn("the coverage of {$changed->relative} in {$m->dir} is from another version of it; run `ecotest --coverage` again");
-                return .error(1);
+                return .error(.none("the coverage of {$changed->relative} in {$m->dir} is from another version of it; run `ecotest --coverage` again"));
             }
             $lines = $changed->oldLines();
         }

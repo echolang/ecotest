@@ -16,7 +16,7 @@ test a_service_ready_by_delay_runs_beside_the_tests
 
 test a_service_ready_over_http_hands_its_check_to_the_tests
 {
-    // nothing answers the ready URL: the tool does not ask it, `Api(service:)` in the tests does
+    // nothing answers the ready URL: the tool does not ask it, `live(service:)` in the tests does
     $sample = Sample();
     $sample->dir->write('ecotest.json', '{"services": [{"name": "web", "run": ["sleep", "30"], "ready": {"http": "http://127.0.0.1:9/health", "timeout_ms": 300}}]}');
 

@@ -4,7 +4,7 @@
  */
 
 use ecotest::expect;
-use ecotest::http::{Api, CurlTransport, Service, TransportError};
+use ecotest::http::{Api, CurlTransport, Service, TransportError, live};
 use ecotest::http::url;
 
 test every_verb_and_body_reaches_the_transport
@@ -164,7 +164,7 @@ test curl_errors_map_to_neutral_reasons
 test a_named_service_is_read_from_its_variable
 {
     setVar('ECOTEST_MY_API2_URL', 'http://127.0.0.1:1/');
-    expect(Api(service: 'my-api2')->base)->is('http://127.0.0.1:1');
+    expect(live(service: 'my-api2')->base)->is('http://127.0.0.1:1');
 }
 
 test a_named_service_waits_for_its_ready_url
@@ -176,9 +176,9 @@ test a_named_service_waits_for_its_ready_url
     setVar('ECOTEST_READY_API_READY', "{$base}/plain");
     setVar('ECOTEST_READY_API_READY_MS', '2000');
 
-    Api(service: 'ready-api')->get('/plain')->body('hello there');
+    live(service: 'ready-api')->get('/plain')->body('hello there');
     // the second one in this process does not probe again
-    Api(service: 'ready-api')->get('/plain')->ok();
+    live(service: 'ready-api')->get('/plain')->ok();
 }
 
 #[tests: expects death]
@@ -189,7 +189,7 @@ test a_named_service_that_never_gets_ready_stops_the_test
     setVar('ECOTEST_DEAF_READY', "http://127.0.0.1:{$port}/");
     setVar('ECOTEST_DEAF_READY_MS', '200');
 
-    $api = Api(service: 'deaf');
+    $api = live(service: 'deaf');
 }
 
 test libcurl_carries_every_verb

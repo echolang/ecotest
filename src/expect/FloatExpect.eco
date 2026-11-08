@@ -27,7 +27,7 @@ public class FloatExpect
 
         $w = show::float($want);
         $g = show::float($this->value);
-        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g, $inline: true);
+        fail("expected {$w}, got {$g}", std::src::caller(), $expected: $w, $actual: $g);
         return $this;
     }
 
