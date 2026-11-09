@@ -246,3 +246,95 @@ test type_compares_the_media_type_only
         "expected Content-Type application/json; charset=utf-8, got 'Application/JSON ; charset=utf-8'",
     ]);
 }
+
+test lacks_is_the_body_without_a_part
+{
+    $r = reply(200, 'public text');
+    $r->lacks('secret')->has('public');
+
+    expect(said(function() : void {
+        $r->lacks('public');
+    }))->is(["expected the body not to contain 'public'"]);
+}
+
+test a_header_can_be_checked_by_its_start
+{
+    $r = reply(200, '', [Header('Server-Timing', 'app;dur=3'), Header('server-timing', 'db;dur=1')]);
+    $r->header('Server-Timing', starts: 'app;dur=')->header('SERVER-TIMING', starts: 'db;');
+
+    expect(said(function() : void {
+        $r->header('Server-Timing', starts: 'cache;')->header('X-Gone', starts: 'a');
+    }))->is([
+        "expected header Server-Timing starting with 'cache;', got app;dur=3, db;dur=1",
+        "expected header X-Gone starting with 'a', it is missing",
+    ]);
+}
+
+test a_problem_is_its_status_and_the_problem_media_type
+{
+    array<Header> $problem = [Header('Content-Type', 'application/problem+json; charset=utf-8')];
+    reply(404, '{}', $problem)->problem(404);
+
+    expect(said(function() : void {
+        reply(404, '{}', $problem)->problem(401);
+        reply(404, '{}', [Header('Content-Type', 'application/json')])->problem(404);
+    }))->is([
+        'expected a 401 problem, got status 404',
+        "expected a 404 problem as application/problem+json, got 'application/json'",
+    ]);
+}
+
+test invalid_names_the_refused_field_and_rule
+{
+    array<Header> $problem = [Header('Content-Type', 'application/problem+json')];
+    string $body = '{"status":422,"errors":[{"field":"title","code":"min","message":"m"},{"field":"body","code":"required"}]}';
+    $r = reply(422, $body, $problem);
+    $r->invalid('title', 'min')->invalid('body', 'required')->invalid('body');
+
+    expect(said(function() : void {
+        $r->invalid('title', 'max')->invalid('tags');
+        reply(422, '{"status":422}', $problem)->invalid('title');
+        reply(400, '{}', $problem)->invalid('title', 'min');
+    }))->is([
+        'expected title refused with max, got title (min), body (required)',
+        'expected tags refused, got title (min), body (required)',
+        'expected title refused, got nothing',
+        'expected a 422 problem, got status 400',
+    ]);
+}
+
+test includes_finds_an_item_by_some_of_its_members
+{
+    $r = reply(200, '{"l":[{"id":1,"name":"Ada"},{"id":2,"name":"Bob","admin":true}],"o":{"k":1}}');
+    ordered_map<string, json::Value> $bob = ['name' => 'Bob', 'admin' => true];
+    $r->includes('$.l', ['id' => 1])->includes('$.l', $bob);
+
+    expect(said(function() : void {
+        $r->includes('$.l', ['id' => 3])->includes('$.o', ['k' => 1])->includes('$.gone', ['k' => 1]);
+    }))->is([
+        'expected an item {"id":3} at $.l, got [{"id":1,"name":"Ada"},{"id":2,"name":"Bob","admin":true}]',
+        'expected an item {"k":1} at $.o, got {"k":1}, not an array',
+        'expected an item {"k":1} at $.gone, found nothing there',
+    ]);
+}
+
+test a_header_and_the_document_are_captured
+{
+    $r = reply(302, '{"next":"/b","n":[1,2]}', [Header('Location', '/a?x=1')]);
+    expect($r->capture(header: 'location'))->is('/a?x=1');
+
+    $doc = $r->document();
+    expect($doc->get('n')?->count() ?? 0)->is(2);
+}
+
+#[tests: expects death]
+test capturing_a_missing_header_stops
+{
+    $to = reply(200, '')->capture(header: 'Location');
+}
+
+#[tests: expects death]
+test the_document_of_a_body_that_is_not_json_stops
+{
+    $doc = reply(200, 'plain')->document();
+}

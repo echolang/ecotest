@@ -20,6 +20,15 @@ internal class JsonBox
 public class Reply
 {
     /**
+     * Where `invalid` looks for the refused fields: an array of objects, each naming the field and
+     * the rule it broke, as `{"field": "title", "code": "min"}`. An API with another shape checks
+     * its errors with `includes`.
+     */
+    public const string ERRORS = '$.errors';
+    public const string ERROR_FIELD = 'field';
+    public const string ERROR_RULE = 'code';
+
+    /**
      * The request as it was sent.
      */
     public const Request $request;
@@ -99,6 +108,34 @@ public class Reply
     }
 
     /**
+     * A header called `$name`, compared without case, starts with `$prefix`. With several of that
+     * name, one matching is enough.
+     */
+    #[caller]
+    public const function header(const string& $name, starts: const string& $prefix) : Reply
+    {
+        $res = guard $this->answered(std::src::caller()) else {
+            return $this;
+        };
+
+        $values = $res->headers($name);
+        if ($values->empty()) {
+            $this->fail("expected header {$name} starting with '{$prefix}', it is missing", std::src::caller());
+            return $this;
+        }
+
+        foreach ($values as const &$v) {
+            if ($v->starts($prefix)) {
+                return $this;
+            }
+        }
+
+        $got = str::join($values, ', ');
+        $this->fail("expected header {$name} starting with '{$prefix}', got {$got}", std::src::caller());
+        return $this;
+    }
+
+    /**
      * The media type of the Content-Type is `$type`, compared without case: `application/json`
      * matches `application/json; charset=utf-8`.
      */
@@ -114,6 +151,39 @@ public class Reply
         if (!str::iequals($media->view(), $type->view())) {
             $this->fail("expected Content-Type {$type}, got '{$got}'", std::src::caller());
         }
+        return $this;
+    }
+
+    /**
+     * The status is `$code` and the body is problem details: its media type is
+     * `application/problem+json` (RFC 9457).
+     */
+    #[caller]
+    public const function problem(int64 $code) : Reply
+    {
+        $this->isProblem($code, std::src::caller());
+        return $this;
+    }
+
+    /**
+     * The answer is a 422 problem that refuses `$field` for breaking `$rule`: some item of the
+     * array at `ERRORS` has `ERROR_FIELD` = `$field` and `ERROR_RULE` = `$rule`. A failure lists
+     * what was refused instead.
+     */
+    #[caller]
+    public function invalid(const string& $field, const string& $rule) : Reply
+    {
+        $this->refuses($field, $rule, std::src::caller());
+        return $this;
+    }
+
+    /**
+     * The answer is a 422 problem that refuses `$field`, whatever the rule.
+     */
+    #[caller]
+    public function invalid(const string& $field) : Reply
+    {
+        $this->refuses($field, '', std::src::caller());
         return $this;
     }
 
@@ -145,6 +215,22 @@ public class Reply
 
         if (!$res->body->contains($part)) {
             $this->fail("expected the body to contain '{$part}'", std::src::caller());
+        }
+        return $this;
+    }
+
+    /**
+     * The body does not contain `$part`.
+     */
+    #[caller]
+    public const function lacks(const string& $part) : Reply
+    {
+        $res = guard $this->answered(std::src::caller()) else {
+            return $this;
+        };
+
+        if ($res->body->contains($part)) {
+            $this->fail("expected the body not to contain '{$part}'", std::src::caller());
         }
         return $this;
     }
@@ -257,6 +343,40 @@ public class Reply
     }
 
     /**
+     * Every array at `$path` holds an object with all of `$members`, each the same JSON as given.
+     * Other members of that object do not matter: `includes('$.errors', ['field' => 'title'])`.
+     */
+    #[caller]
+    public function includes(const string& $path, const ordered_map<string, json::Value>& $members) : Reply
+    {
+        $at = std::src::caller();
+        $found = guard $this->hits($path, $at) else {
+            return $this;
+        };
+
+        $wantedDoc = objectOf($members);
+        string $wanted = "{$wantedDoc}";
+        if ($found->empty()) {
+            $this->fail("expected an item {$wanted} at {$path}, found nothing there", $at);
+            return $this;
+        }
+
+        foreach ($found as const &$hit) {
+            if (!$hit->value->isArray()) {
+                $shown = "{$hit->value}";
+                $this->fail("expected an item {$wanted} at {$hit->path}, got {$shown}, not an array", $at);
+                return $this;
+            }
+            if (Reply::itemWith($hit->value, $members) == null) {
+                $shown = "{$hit->value}";
+                $this->fail("expected an item {$wanted} at {$hit->path}, got {$shown}", $at);
+                return $this;
+            }
+        }
+        return $this;
+    }
+
+    /**
      * Every value at `$path` passes `$test`. `says:` names what they should be.
      */
     #[caller]
@@ -321,6 +441,51 @@ public class Reply
 
         const json::Value& $v = $found[0]->value;
         return $v->asStr() ?? "{$v}";
+    }
+
+    /**
+     * The value of the first header called `$name`, compared without case, for the next request:
+     * `capture(header: 'Location')`. Stops the test when there is no response or no such header.
+     */
+    #[caller]
+    public const function capture(header: const string& $name) : string
+    {
+        $at = std::src::caller();
+        ecotest::checked();
+
+        $res = guard $this->received() else {
+            $line = $this->request->line();
+            $why = $this->reason();
+            die($this->stopped("cannot capture header {$name}: no response to {$line}: {$why}", $at), $at);
+        };
+
+        $value = guard $res->header($name) else {
+            die($this->stopped("cannot capture header {$name}: it is missing", $at), $at);
+        };
+        return $value;
+    }
+
+    /**
+     * The JSON body as a document, for reading more than one value out of it. Stops the test when
+     * there is no response or the body is not JSON.
+     */
+    #[caller]
+    public function document() : json::Value
+    {
+        $at = std::src::caller();
+        ecotest::checked();
+
+        $res = guard $this->received() else {
+            $line = $this->request->line();
+            $why = $this->reason();
+            die($this->stopped("no JSON document: no response to {$line}: {$why}", $at), $at);
+        };
+
+        $this->loadJson();
+        $doc = guard $this->json->doc else {
+            die($this->stopped("no JSON document: the body is not JSON ({$this->json->error})", $at), $at);
+        };
+        return $doc->clone();
     }
 
     /**
@@ -457,7 +622,7 @@ public class Reply
      * The JSON body, parsed once. Null after failing the check when there is no response or the
      * body is not JSON.
      */
-    private function document(std::src::location $at) : json::Value?
+    private function parsed(std::src::location $at) : json::Value?
     {
         $res = guard $this->answered($at) else {
             return null;
@@ -472,7 +637,7 @@ public class Reply
 
     private function hits(const string& $path, std::src::location $at) : array<jsonpath::Hit>?
     {
-        $doc = guard $this->document($at) else {
+        $doc = guard $this->parsed($at) else {
             return null;
         };
 
@@ -481,6 +646,97 @@ public class Reply
             return null;
         };
         return $found;
+    }
+
+    /**
+     * Checks the status is `$code` and the media type is problem details. False after failing.
+     */
+    private const function isProblem(int64 $code, std::src::location $at) : bool
+    {
+        $res = guard $this->answered($at) else {
+            return false;
+        };
+
+        if ($res->status != $code) {
+            $this->fail("expected a {$code} problem, got status {$res->status}", $at);
+            return false;
+        }
+
+        $got = $res->header('Content-Type') ?? '';
+        string $media = Reply::media($got);
+        if (!str::iequals($media->view(), 'application/problem+json')) {
+            $this->fail("expected a {$code} problem as application/problem+json, got '{$got}'", $at);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Checks for a 422 problem whose errors refuse `$field` for `$rule`, any rule when it is empty.
+     */
+    private function refuses(const string& $field, const string& $rule, std::src::location $at) : void
+    {
+        if (!$this->isProblem(422, $at)) {
+            return;
+        }
+
+        string $wanted = "{$field} refused";
+        ordered_map<string, json::Value> $members = [self::ERROR_FIELD => json::str($field)];
+        if (!$rule->empty()) {
+            $wanted = "{$field} refused with {$rule}";
+            $members[self::ERROR_RULE] = json::str($rule);
+        }
+
+        $found = guard $this->hits(self::ERRORS, $at) else {
+            return;
+        };
+        if ($found->count() == 1 && $found[0]->value->isArray()) {
+            if (Reply::itemWith($found[0]->value, $members) != null) {
+                return;
+            }
+        }
+
+        // what was refused instead, as `title (min), body (required)`
+        array<string> $refused = [];
+        foreach ($found as const &$hit) {
+            foreach ($hit->value->asArray() ?? array<json::Value>() as const &$e) {
+                string $f = $e->get(self::ERROR_FIELD)?->asStr() ?? '?';
+                string $r = $e->get(self::ERROR_RULE)?->asStr() ?? '?';
+                $refused[] = "{$f} ({$r})";
+            }
+        }
+        string $got = 'nothing';
+        if (!$refused->empty()) {
+            $got = str::join($refused, ', ');
+        }
+        $this->fail("expected {$wanted}, got {$got}", $at);
+    }
+
+    /**
+     * The first object in array `$list` that has every one of `$members` as the same JSON, or null.
+     */
+    private static function itemWith(const json::Value& $list, const ordered_map<string, json::Value>& $members) : json::Value?
+    {
+        foreach ($list->asArray() ?? array<json::Value>() as const &$item) {
+            if (!$item->isObject()) {
+                continue;
+            }
+            bool $all = true;
+            foreach ($members as $k => const &$want) {
+                $got = guard $item->get($k) else {
+                    $all = false;
+                    break;
+                };
+                if (!jsonpath::same($got, $want)) {
+                    $all = false;
+                    break;
+                }
+            }
+            if ($all) {
+                return $item->clone();
+            }
+        }
+        return null;
     }
 
     /**
@@ -557,4 +813,16 @@ public class Reply
 
         return $out;
     }
+}
+
+/**
+ * A JSON object holding `$fields` in their order.
+ */
+internal function objectOf(const ordered_map<string, json::Value>& $fields) : json::Value
+{
+    $o = json::object();
+    foreach ($fields as $k => const &$v) {
+        $o[$k] = $v->clone();
+    }
+    return $o;
 }
