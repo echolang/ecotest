@@ -346,6 +346,20 @@ $api->get('/users/1')->snapshot(['$.items[*].at']);
 
 JSON paths are `$.items[0].name`, `$.items[*].id`, `$['odd key']`. The leading `$` is optional. `[*]` fans out over an array, so a path can name several values.
 
+Errors have their own checks. `problem` is a status sent as problem details (`application/problem+json`, RFC 9457). `invalid` is a 422 problem that refuses a field, read from `$.errors` as `{"field": ..., "code": ...}`, and a failure lists what was refused instead. An API with another error shape checks it with `includes`, which finds an item of an array by some of its members.
+
+```echo
+$api->get('/users/9')->problem(404)->has('the user');
+$api->post('/users', json: '{"name":"x"}')
+    ->invalid('name', 'min')
+    ->invalid('email');
+$api->get('/users')->includes('$.items', ['name' => 'Ada', 'admin' => false]);
+
+$api->get('/health')->lacks('password')->header('Server-Timing', starts: 'app;dur=');
+```
+
+When a value feeds the next request, read it off the reply: `capture('$.id')` for a JSON value, `capture(header: 'Location')` for a header, `document()` for the whole JSON body. Each stops the test at its line when there is nothing to read.
+
 A failed check shows the exchange: the request line, the status, the headers, the start of the body. A request that got no response at all fails the first check made on it, at the test's line.
 
 A JSON snapshot is stored pretty-printed. Paths in `$redact` are replaced first, so ids and timestamps do not break it.
