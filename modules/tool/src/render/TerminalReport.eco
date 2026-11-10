@@ -170,6 +170,16 @@ private function extras(string& $out, const Run& $run) : void
         foreach ($test->events->notes as const &$note) {
             $out->append("note      {$test->id}: {$note}\n");
         }
+        // a flow that passed is one line in the list; its steps matter when it stopped in one
+        bool $steps = $test->outcome != Outcome::pass && $test->outcome != Outcome::skip;
+        for (usize $i = 0; $steps && $i < $test->events->steps->count(); $i++) {
+            string $mark = 'ok';
+            if ($test->events->stepFailed($i, $test->outcome)) {
+                $mark = 'FAIL';
+            }
+            string $name = $test->events->steps[$i];
+            $out->append("step      {$test->id}: {$mark} {$name}\n");
+        }
         foreach ($test->events->metrics as const &$metric) {
             $out->append("metric    {$test->id}: {$metric->name} = {$metric->value}\n");
         }

@@ -40,6 +40,26 @@ public function note(const string& $text) : void
 }
 
 /**
+ * Begins the named case `$name` of a test that walks through a flow, ending the case before it.
+ * Every later failure says which case it failed in, and the ecotest tool lists the cases under
+ * the test: the ones before the failure passed, and the cases after it never ran.
+ *
+ * ```echo
+ * ecotest::step('an admin publishes a post');
+ * $admin->post('/v1/posts', json: $post)->status(201);
+ *
+ * ecotest::step('the list shows it first');
+ * $api->get('/v1/posts')->json('$.data[0].title', 'Hello');
+ * ```
+ */
+#[caller]
+public function step(const string& $name) : void
+{
+    Session::enterStep($name);
+    emitStep($name, std::src::caller());
+}
+
+/**
  * Records a named number for this test, such as rows read or bytes written.
  */
 public function metric(const string& $name, int64 $value) : void

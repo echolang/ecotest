@@ -21,6 +21,7 @@ public enum Kind : string
     case crash = 'crash';
     case skip = 'skip';
     case note = 'note';
+    case step = 'step';
     case metric = 'metric';
     case bench = 'bench';
     case checks = 'checks';
@@ -43,6 +44,9 @@ public enum Kind : string
         }
         if ($word == Kind::note->value()) {
             return .note;
+        }
+        if ($word == Kind::step->value()) {
+            return .step;
         }
         if ($word == Kind::metric->value()) {
             return .metric;

@@ -149,6 +149,20 @@ for (usize $i = 0; $i < $rows->count(); $i++) {
 }
 ```
 
+### Steps
+
+A test that walks through a flow names its cases with `step`. Each one ends the case before it. A failure says which case it failed in. For a test that failed, the tool lists the cases it reached and marks the one it stopped in; the ones after it never ran. The JSON and HTML reports list every test's cases.
+
+```echo
+ecotest::step('an admin publishes a post');
+$admin->post('/v1/posts', json: $post)->status(201);
+
+ecotest::step('the list shows it first');
+$api->get('/v1/posts')->json('$.data[0].title', 'Hello');
+```
+
+There is no setup or teardown hook, because every test is its own process. Seed in a function the test calls, and clean up in a destructor plus `ecotest::defer`, which runs even when a check stops the test.
+
 ### Skip
 
 `skip` exits 0, so a plain `echoc test` counts the test as passed. The tool reads the `skip` event and reports it as skipped.
@@ -287,7 +301,7 @@ Optional, beside the manifest. Flags on the command line win.
 }
 ```
 
-The tool starts each service, waits until it is ready, exports `ECOTEST_<NAME>_URL` (upper case, non-alphanumerics as `_`), and stops them after the tests. Output goes to `<run>/services/<name>.log`. A failing run prints the end of each log. `ready` can also be `{ "ms": 200 }` when there is nothing to probe.
+The tool starts each service, waits until it is ready, exports `ECOTEST_<NAME>_URL` (upper case, non-alphanumerics as `_`), and stops them after the tests. The URL is the origin of `ready.http`, or `url` when a service sets one, such as `"url": "mysql://root:test@127.0.0.1:33071/"` for a database. `env` is an object of variables for the service's own process. Output goes to `<run>/services/<name>.log`. A failing run prints the end of each log. `ready` can also be `{ "ms": 200 }` when there is nothing to probe.
 
 ## HTTP
 

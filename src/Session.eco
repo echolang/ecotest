@@ -29,6 +29,7 @@ internal class Session
     internal static array<Frame> $frames = [];
     internal static array<Failure> $drain = [];
     internal static array<string> $context = [];
+    internal static string $step = '';
     internal static bool $reported = false;
     internal static Tally $tally = Tally();
     internal static map<usize, function<void()>> $cleanups = [];
@@ -153,7 +154,7 @@ internal class Session
     internal static function fail(Failure $failure) : void
     {
         Session::start();
-        $failure->context = Session::$context;
+        $failure->context = Session::scopes();
 
         if (!Session::$frames->empty()) {
             Frame& $top = Session::$frames[Session::$frames->count() - 1];
@@ -182,7 +183,7 @@ internal class Session
         Session::start();
 
         if ($failure->context->empty()) {
-            $failure->context = Session::$context;
+            $failure->context = Session::scopes();
         }
 
         Session::flatten();
@@ -231,6 +232,31 @@ internal class Session
         Session::$drain->clear();
         Session::$tally->flush();
         return $text;
+    }
+
+    /**
+     * Makes `$name` the current step, the outermost line of context on every later failure.
+     */
+    internal static function enterStep(const string& $name) : void
+    {
+        Session::start();
+        Session::$step = $name;
+    }
+
+    /**
+     * The context a failure carries now: the current step, then the open `context()` lines.
+     */
+    internal static function scopes() : array<string>
+    {
+        array<string> $out = [];
+        string $step = Session::$step;
+        if (!$step->empty()) {
+            $out[] = "step '{$step}'";
+        }
+        foreach (Session::$context as const &$line) {
+            $out[] = $line;
+        }
+        return $out;
     }
 
     /**

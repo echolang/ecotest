@@ -77,6 +77,16 @@ public function render(const Run& $run, const array<FileCoverage>& $files, Total
             $snaps['updated'] = mv $updated;
             $t['snapshots'] = mv $snaps;
         }
+        if (!$events->steps->empty()) {
+            $steps = json::arr();
+            for (usize $i = 0; $i < $events->steps->count(); $i++) {
+                $step = json::object();
+                $step['name'] = json::str($events->steps[$i]);
+                $step['failed'] = json::bool($events->stepFailed($i, $test->outcome));
+                $steps[] = mv $step;
+            }
+            $t['steps'] = mv $steps;
+        }
         if (!$events->notes->empty()) {
             $notes = json::arr();
             foreach ($events->notes as const &$note) {

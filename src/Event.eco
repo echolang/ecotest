@@ -116,6 +116,17 @@ internal function emitNote(const string& $text) : void
 }
 
 /**
+ * A named case of the test began at `$at`; the one before it, if any, passed.
+ */
+internal function emitStep(const string& $name, const std::src::location& $at) : void
+{
+    $line = start(protocol::Kind::step->value());
+    text($line, 'name', $name);
+    at($line, $at);
+    finish($line);
+}
+
+/**
  * A named number the test recorded.
  */
 internal function emitMetric(const string& $name, int64 $value) : void

@@ -362,6 +362,14 @@ private function row(string& $out, const TestRecord& $test) : void
     foreach ($test->events->notes as const &$note) {
         $out->append(why($note));
     }
+    for (usize $i = 0; $i < $test->events->steps->count(); $i++) {
+        string $mark = 'step';
+        if ($test->events->stepFailed($i, $test->outcome)) {
+            $mark = 'failed in step';
+        }
+        string $name = $test->events->steps[$i];
+        $out->append(why("{$mark} {$name}"));
+    }
 
     $out->append("</td><td class=\"num\">{$ms}</td><td class=\"num\">{$checks}</td></tr>");
 }

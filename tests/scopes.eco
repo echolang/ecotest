@@ -69,3 +69,22 @@ test caught_leaves_an_enclosing_scopes_failures_alone
     expect($outer->count())->is(1);
     expect($outer[0]->summary)->is('expected 2, got 1');
 }
+
+test a_failure_names_the_step_it_failed_in
+{
+    $before = ecotest::caught(function() : void {
+        expect(1)->is(2);
+    });
+    expect($before[0]->context)->empty();
+
+    ecotest::step('an admin publishes a post');
+    $at = ecotest::context('row 2');
+    $failed = ecotest::caught(function() : void {
+        expect(1)->is(2);
+    });
+    expect($failed[0]->context)->is(["step 'an admin publishes a post'", 'row 2']);
+    expect("{$failed[0]}")->has("\n  in step 'an admin publishes a post'\n  in row 2");
+
+    ecotest::step('the list shows it first');
+    expect(Session::scopes()[0])->is("step 'the list shows it first'");
+}

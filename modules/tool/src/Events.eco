@@ -34,10 +34,27 @@ public struct Events
 
     public int64 $checks = 0;
     public array<string> $notes = [];
+
+    /**
+     * The named cases the test began with `ecotest::step`, in order.
+     */
+    public array<string> $steps = [];
     public array<Metric> $metrics = [];
     public array<BenchResult> $benches = [];
     public array<string> $snapshotsNew = [];
     public array<string> $snapshotsUpdated = [];
+
+    /**
+     * Whether step `$i` is where a test that ended as `$outcome` stopped: the last step it began,
+     * when the test did not pass. Every step before it passed.
+     */
+    public const function stepFailed(usize $i, Outcome $outcome) : bool
+    {
+        if ($outcome == Outcome::pass || $outcome == Outcome::skip) {
+            return false;
+        }
+        return $i + 1 == $this->steps->count();
+    }
 
     /**
      * The first failure of the pass, or null when none failed.
@@ -96,6 +113,9 @@ public struct Events
             },
             .note => {
                 $this->notes[] = doc::text($event, 'text');
+            },
+            .step => {
+                $this->steps[] = doc::text($event, 'name');
             },
             .metric => {
                 $this->metrics[] = Metric(doc::text($event, 'name'), doc::number($event, 'value'));

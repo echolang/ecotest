@@ -345,3 +345,18 @@ test a_run_knows_its_slowest_tests_and_percentiles
     expect($top->count())->is(2);
     expect($top[0]->id)->is('m/a.eco::t9');
 }
+
+test steps_are_listed_and_the_last_one_failed_when_the_test_did
+{
+    $t = TestRecord('m/a.eco::flow');
+    $one = guard json::parse('{"v":1,"type":"step","name":"publish","file":"a.eco","line":3}');
+    $two = guard json::parse('{"v":1,"type":"step","name":"list","file":"a.eco","line":6}');
+    $t->events->apply($one);
+    $t->events->apply($two);
+
+    expect($t->events->steps)->is(['publish', 'list']);
+    expect($t->events->stepFailed(0, .fail))->no();
+    expect($t->events->stepFailed(1, .fail))->yes();
+    expect($t->events->stepFailed(1, .pass))->no();
+    expect($t->events->stepFailed(1, .skip))->no();
+}

@@ -232,8 +232,10 @@ private function extras(string& $out, const Look& $look, const Run& $run) : void
 {
     foreach ($run->tests as const &$test) {
         const Events& $events = $test->events;
+        // a flow that passed is one line in the list; its steps matter when it stopped in one
+        bool $steps = !$events->steps->empty() && $test->outcome != Outcome::pass && $test->outcome != Outcome::skip;
         if ($events->notes->empty() && $events->metrics->empty() && $events->benches->empty()
-            && $events->snapshotsNew->empty() && $events->snapshotsUpdated->empty()) {
+            && $events->snapshotsNew->empty() && $events->snapshotsUpdated->empty() && !$steps) {
             continue;
         }
         $title = $look->mute($look->title($test));
@@ -249,6 +251,16 @@ private function extras(string& $out, const Look& $look, const Run& $run) : void
         foreach ($events->notes as const &$note) {
             $out->append(label($look, 'note'));
             $out->append("{$note}  {$title}\n");
+        }
+        for (usize $i = 0; $steps && $i < $events->steps->count(); $i++) {
+            $out->append(label($look, 'step'));
+            string $name = $events->steps[$i];
+            if ($events->stepFailed($i, $test->outcome)) {
+                $out->append($look->paint("{$name}  failed here", $look->tone(Outcome::fail)));
+                $out->append("  {$title}\n");
+            } else {
+                $out->append("{$name}  {$title}\n");
+            }
         }
         foreach ($events->metrics as const &$metric) {
             $out->append(label($look, 'metric'));
