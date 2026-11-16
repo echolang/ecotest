@@ -12,7 +12,7 @@
 
 #[depends: "../.."]
 #[requires: "echolang/libcurl" { version: "^1.0", source: git "https://github.com/echolang/libcurl" }]
-#[requires: "echolang/libjson" { version: "^0.1", source: git "https://github.com/echolang/libjson" }]
+#[requires: "echolang/libjson" { version: "^0.3", source: git "https://github.com/echolang/libjson" }]
 
 #[sources: "src/*.eco"]
 

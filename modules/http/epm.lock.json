@@ -3,35 +3,35 @@
   "packages": [
     {
       "name": "echolang/libjson",
-      "version": "0.1.3",
+      "version": "0.3.0",
       "source": {
         "kind": "git",
         "url": "https://github.com/echolang/libjson"
       },
-      "rev": "b51ff583dac2efb54fcf651652af97f76ba5c9bd",
-      "sha256": "0319758a7bc1dae16929b97070475ae1aee0a1ba262dc6279b5e3f0ec637ff6b",
+      "rev": "5d646d796c5ba5c60670231d80ec0f151a7598c6",
+      "sha256": "91bdc6d0a553efc11e46ff1dee29916367679ebb5f3d425b7e317ccf7407ff31",
       "requires": []
     },
     {
       "name": "echolang/libcommand",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "source": {
         "kind": "git",
         "url": "https://github.com/echolang/libcommand"
       },
-      "rev": "f008284c5f6b8d9e95b2f7709a86947562ba53d3",
-      "sha256": "99e9c8a26546dcb280f02d6e8accbd41dcb4ee0593126ca118d2a3af3cde9dbe",
+      "rev": "4020d4f35546c78372c06aa01248776bed596758",
+      "sha256": "4bfae8b9b27946520a9baa3cfa4cb4afa1d3cc91067e9593165442b54eb3bee5",
       "requires": []
     },
     {
       "name": "echolang/libhttp",
-      "version": "0.2.7",
+      "version": "0.2.11",
       "source": {
         "kind": "git",
         "url": "https://github.com/echolang/libhttp"
       },
-      "rev": "308637fe6eaca63d207db63d3f193577644893ec",
-      "sha256": "9897aa5f899861f327485174c0353842326edee433855b4dd4a0a3183b2c1cfa",
+      "rev": "382feefc608d44a51b6fbee5c9560f86b64c9385",
+      "sha256": "55ae981ca262ea2cf8eeebe437907af386e35bdaba82e15c4f6518f7556fb932",
       "requires": []
     },
     {

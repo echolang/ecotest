@@ -22,7 +22,7 @@
     #[sources: "cli/*.eco"]
     #[sources: "modules/tool/src/**/*.eco"]
     #[requires: "echolang/libcommand" { version: "^0.1", source: git "https://github.com/echolang/libcommand" }]
-    #[requires: "echolang/libjson" { version: "^0.1", source: git "https://github.com/echolang/libjson" }]
+    #[requires: "echolang/libjson" { version: "^0.3", source: git "https://github.com/echolang/libjson" }]
 }
 
 #[target: test] {

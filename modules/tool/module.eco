@@ -12,7 +12,7 @@
 #[epm::description: "Runs echoc tests and reports on them: outcomes, flakiness, coverage, history"]
 
 #[requires: "echolang/libcommand" { version: "^0.1", source: git "https://github.com/echolang/libcommand" }]
-#[requires: "echolang/libjson" { version: "^0.1", source: git "https://github.com/echolang/libjson" }]
+#[requires: "echolang/libjson" { version: "^0.3", source: git "https://github.com/echolang/libjson" }]
 
 #[depends: "../.."]
 
