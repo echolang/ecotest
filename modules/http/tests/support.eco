@@ -1,6 +1,6 @@
 /**
  * Replies built in memory, the summaries of what checks on them failed, an environment variable
- * set for the rest of one test process, and a free loopback port.
+ * set for the rest of one test process, a free loopback port, and the arguments of a file server.
  */
 
 use ecotest::http::{Header, Reply, Request, Response};
@@ -83,4 +83,21 @@ internal function freePort() : int32
     string $text = str::trim($out->stdout);
     int64 $port = guard str::int($text);
     return $port as int32;
+}
+
+/**
+ * The arguments that make `python3` serve the working directory on loopback `$port`: its
+ * `http.server`, without the host name lookup that module does between binding the port and
+ * listening on it. On a hosted macOS runner that lookup can stall for half a minute, and nothing
+ * answers on the port until it is over.
+ */
+internal function serving(int32 $port) : array<string>
+{
+    return [
+        '-c',
+        "import socket, runpy; socket.getfqdn = lambda name='': name; runpy.run_module('http.server', run_name='__main__')",
+        "{$port}",
+        '--bind',
+        '127.0.0.1',
+    ];
 }

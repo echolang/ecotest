@@ -239,7 +239,7 @@ test a_test_server_started_twice_answers_on_one_port
 test a_service_a_test_starts_is_stopped_with_it
 {
     int32 $port = freePort();
-    $web = Service('python3', ['-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "http://127.0.0.1:{$port}/", url: "http://127.0.0.1:{$port}");
+    $web = Service('python3', serving($port), ready: "http://127.0.0.1:{$port}/", url: "http://127.0.0.1:{$port}");
     $web->api()->get('/')->ok();
 }
 
@@ -250,7 +250,7 @@ internal function servedOnce() : string
 {
     int32 $port = freePort();
     string $url = "http://127.0.0.1:{$port}";
-    $web = Service('python3', ['-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "{$url}/", url: $url);
+    $web = Service('python3', serving($port), ready: "{$url}/", url: $url);
     $web->api()->get('/')->ok();
     expect($web->output())->has('GET / HTTP');
     return $url;
@@ -278,7 +278,7 @@ test a_service_that_never_answers_stops_the_test
 test a_service_answering_with_an_error_is_never_ready
 {
     int32 $port = freePort();
-    $lost = Service('python3', ['-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "http://127.0.0.1:{$port}/missing", url: '', within: .millis(1500));
+    $lost = Service('python3', serving($port), ready: "http://127.0.0.1:{$port}/missing", url: '', within: .millis(1500));
 }
 
 #[tests: expects death]
