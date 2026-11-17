@@ -276,13 +276,13 @@ ecotest --coverage --html --min-coverage 80
 - `who <file:line>` names the tests that ran that source line.
 - `affected --since <ref>` runs only the tests whose coverage touches lines changed since a git ref.
 
-`--repeat N` runs every test N times and flags the ones whose passes disagree. `--filter` and `--define` and `--target` and `--timeout` go through to `echoc test`. `--style auto` draws live progress on a terminal and a styled summary when stdout takes colour; `pretty` and `simple` pin it.
+`--repeat N` runs every test N times and flags the ones whose passes disagree. `--filter` and `--define` and `--target` and `--timeout` go through to `echoc test`. So does `--workspace`, which tests the module and every member its `#[workspace:]` lists in one build; the services of the `ecotest.json` beside that manifest serve all of them. `--style auto` draws live progress on a terminal and a styled summary when stdout takes colour; `pretty` and `simple` pin it.
 
 `--min-coverage`, `--min-branch-coverage`, `--min-diff-coverage` and `--max-flaky` fail the run when a threshold does not hold. `--since` is the git ref for diff coverage. `--html` writes `report.html` into the run directory. `ecotest --help` is the rest of the flags.
 
 ### `ecotest.json`
 
-Optional, beside the manifest. Flags on the command line win.
+Optional, beside the manifest. Flags on the command line win. `--no-services` starts none of the services, for a machine that cannot: a test that reads `ECOTEST_<NAME>_URL` finds nothing and can skip.
 
 ```json
 {

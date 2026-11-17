@@ -1,7 +1,7 @@
 /**
  * The ecotest command line: the commands, their flags, and the hand-off to `Tool`.
  *
- *   ecotest [run] [--coverage] [--html] [--repeat N] [--filter ...] [--style auto|pretty|simple] [gates]
+ *   ecotest [run] [--coverage] [--html] [--workspace] [--repeat N] [--filter ...] [--style auto|pretty|simple] [gates]
  *   ecotest report [run] --format terminal|md|junit|lcov|html|json [--style ...]
  *   ecotest [run] ... [--seed N] [--keep N]
  *   ecotest history
@@ -34,6 +34,8 @@ public function main(const array<string>& $argv) : int32
 
     $coverage = $app->flag('coverage', '', 'measure line, branch and function coverage');
     $html = $app->flag('html', '', 'write report.html into the run directory');
+    $workspace = $app->flag('workspace', '', 'also test every module the manifest lists as a workspace member');
+    $noServices = $app->flag('no-services', '', 'start none of the services ecotest.json lists');
     $repeat = $app->arg('repeat', '', '<n>', 'run every test n times and flag the flaky ones');
     $filter = $app->repeat('filter', '', '<spec>', 'which tests to run, as echoc test --filter');
     $target = $app->arg('target', '', '<name>', 'a test target from the manifest');
@@ -71,7 +73,7 @@ public function main(const array<string>& $argv) : int32
     $app->fallback($format, 'terminal');
     $app->fallback($buildDir, 'ecobuild');
 
-    foreach ([$coverage, $html] as const &$f) {
+    foreach ([$coverage, $html, $workspace, $noServices] as const &$f) {
         $app->accept($f, $run);
         $app->accept($f, $affected);
     }
@@ -113,7 +115,7 @@ public function main(const array<string>& $argv) : int32
     }
 
     $tool = Tool();
-    guard settle($tool, $parsed, Flags($project, $echoc, $buildDir, $coverage, $html, $repeat, $module, $since, $format, $style, $filter, $define, $target, $timeout, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep)) else ($e) {
+    guard settle($tool, $parsed, Flags($project, $echoc, $buildDir, $coverage, $html, $workspace, $noServices, $repeat, $module, $since, $format, $style, $filter, $define, $target, $timeout, $minCoverage, $minBranches, $minDiff, $maxFlaky, $seed, $keep)) else ($e) {
         files::warn("{$e}");
         return 2;
     };
@@ -167,6 +169,8 @@ internal struct Flags
     public command::Arg $buildDir;
     public command::Flag $coverage;
     public command::Flag $html;
+    public command::Flag $workspace;
+    public command::Flag $noServices;
     public command::Arg $repeat;
     public command::Arg $module;
     public command::Arg $since;
@@ -201,6 +205,7 @@ internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flag
     $invocation->buildDir = $parsed->value($f->buildDir);
     $invocation->coverage = $parsed->stated($f->coverage);
     $tool->html = $parsed->stated($f->html);
+    $tool->startServices = !$parsed->stated($f->noServices);
     $tool->modules = $parsed->values($f->module);
     $tool->since = $parsed->value($f->since);
     $tool->format = Format::of($parsed->value($f->format)) ?? Format::terminal;
@@ -234,6 +239,9 @@ internal function settle(Tool& $tool, const command::Parsed& $parsed, const Flag
         }
     }
 
+    if ($parsed->stated($f->workspace)) {
+        $invocation->forwarded[] = '--workspace';
+    }
     foreach ($parsed->values($f->filter) as const &$spec) {
         $invocation->forwarded[] = '--filter';
         $invocation->forwarded[] = $spec;

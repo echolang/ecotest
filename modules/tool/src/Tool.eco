@@ -31,6 +31,12 @@ public class Tool
     public Services $services = Services();
 
     /**
+     * Whether the services of `ecotest.json` are started. Off for a run on a machine that cannot
+     * start them: the tests that want one see no `ECOTEST_<NAME>_URL` and skip.
+     */
+    public bool $startServices = true;
+
+    /**
      * The seed handed to the tests, or null to take `ECOTEST_SEED`, or else the clock.
      */
     public uint64? $seed = null;
@@ -124,7 +130,9 @@ public class Tool
             }
         }
 
-        $this->services->configure(doc::list($doc, 'services'));
+        if ($this->startServices) {
+            $this->services->configure(doc::list($doc, 'services'));
+        }
         return .ok;
     }
 

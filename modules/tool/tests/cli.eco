@@ -52,6 +52,7 @@ test run_takes_every_flag
         '--build-dir', $sample->dir->file('build'),
         '--coverage',
         '--html',
+        '--no-services',
         '--repeat', '2',
         '--filter', 'adds',
         '--define', 'UNUSED',

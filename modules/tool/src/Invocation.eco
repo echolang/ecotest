@@ -25,7 +25,8 @@ public struct Invocation
     public usize $repeat = 1;
 
     /**
-     * The words handed on to `echoc test`: filters, defines, the target and the timeout.
+     * The words handed on to `echoc test`: filters, defines, the target, the timeout and
+     * `--workspace`.
      */
     public array<string> $forwarded = [];
 
