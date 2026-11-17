@@ -250,7 +250,7 @@ internal function servedOnce() : string
 {
     int32 $port = freePort();
     string $url = "http://127.0.0.1:{$port}";
-    $web = Service('python3', ['-u', '-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "{$url}/", url: $url);
+    $web = Service('python3', ['-m', 'http.server', "{$port}", '--bind', '127.0.0.1'], ready: "{$url}/", url: $url);
     $web->api()->get('/')->ok();
     expect($web->output())->has('GET / HTTP');
     return $url;
